@@ -47,8 +47,15 @@ DONT_KNOW = re.compile(r"\b(don'?t know|dont know|not sure|no idea|unknown|dunno
 #   SDI internal pack: Andy's template questions, then "anything else to add?", then the 8-page PDF.
 #   Both: the client pack first, then the internal one.
 PACK_Q = ("Which pack do you need for this one - the client pack (a 3D render, its GA and a one-page sheet for the client), "
-          "the SDI internal brief pack, or both?")
+          "the SDI internal brief pack, or both? (Or just carry on - I'll do both, and you can change it any time.)")
 PACK_IDS = {"client": "Client pack", "internal": "SDI internal pack", "both": "Both"}
+
+
+def pack_label(b):
+    """What the voice and the chat are told the pack is - 'Both (assumed - the AM never said)' when it was taken as both."""
+    p = pack_of(b)
+    return (PACK_IDS[p] + (" (assumed - the AM didn't say; they can change it any time)" if b.get("_pack_assumed") else "")
+            if p in PACK_IDS else "not chosen yet")
 # 2 Nov 2026 (Andy: "like ChatGPT - not a fixed list of questions before every render"): only what the picture can't be
 # drawn without. Everything else the AM says is still recorded; what they don't say is assumed sensibly and marked (assumed).
 RENDER_KEYS = {"client", "unit_type", "size", "products_held", "colours_graphics"}   # + 2 that change the picture most (Muhammad: "a few, not many")
@@ -63,8 +70,10 @@ def real(v):
 
 def pack_from(text, asked=False):
     """The pack the AM asked for in so many words - 'client', 'internal', 'both' - or None. Loose answers ('the client
-    one', 'render please') only count as the answer to the pack question itself."""
+    one', 'render please') only count as the answer to the pack question itself - and only when that is all they said:
+    4 Nov 2026, 'the client wants a gondola end for Tesco' is the brief, not 'the client pack'."""
     t = (text or "").lower()
+    asked = asked and len(re.findall(r"[a-z0-9']+", t)) <= 7
     if re.search(r"\bclient\b.{0,25}(and|plus|\+|&).{0,15}\b(internal|sdi)\b|\b(internal|sdi)\b.{0,25}(and|plus|\+|&).{0,15}\bclient\b", t) \
             or (re.search(r"\bboth\b|\b(all of (it|them)|everything|the lot)\b", t) and (asked or "pack" in t)):
         return "both"
@@ -77,6 +86,24 @@ def pack_from(text, asked=False):
     if re.search(r"\bclient (pack|sheet)\b", t) or (asked and re.search(r"\bclient\b|\b(render|visual|concept|3d)s?\b", t)):
         return "client"
     return None
+
+
+def pack_change(text):
+    """A change of pack said in so many words at any point - 'actually just the internal brief', 'I don't need the client
+    pack' - or None (4 Nov 2026: a pack could only be chosen when it was asked). What they DON'T want is taken out first,
+    so 'I don't need the internal brief, just the client pack' is the client pack."""
+    t = (text or "").lower()
+    neg = r"\b(?:don'?t|do not|no need for|not)\b(?:\s+\w+){0,3}?\s+(?:the\s+)?(client|internal|sdi)\s+(?:pack|brief|sheet)s?\b"
+    said_not = re.search(neg, t)
+    # a choice, not a mention: 'just add that to the client sheet' changes nothing
+    chose = re.search(r"\b(just|only)\s+(?:(?:want|need|do)\s+)?(?:the\s+)?(client|internal|sdi|studio|full|8|eight|both|brief)\b|"
+                      r"\b(actually|instead|rather|switch(?:ing)? to|change (?:it )?to|go for)\b.{0,30}\b(pack|brief)s?\b", t)
+    if not (chose or said_not):
+        return None
+    p = pack_from(re.sub(neg, " ", t))
+    if not p and said_not:
+        p = "internal" if said_not.group(1) == "client" else "client"
+    return p
 
 
 def pack_of(b):
@@ -103,12 +130,20 @@ def render_plan(b):
 
 
 def stage(s):
-    """Where this brief is: pack, render_q, route, render, ga, review, internal_q, extra or done."""
+    """Where this brief is: pack, render_q, route, render, ga, review, internal_q, extra or done.
+
+    4 Nov 2026 (James: "it's not allowing the flexibility to ask questions in a different order"): nothing here is a
+    gate any more. The pack is asked once - never answered, it is taken as both, so the whole brief is still gathered.
+    _focus 'internal' (the AM: "let's do the brief questions first") puts the internal questions before the render;
+    when they run out, or the AM asks for the render, the client pack carries on where it was."""
     b = s["brief"]
-    pack = pack_of(b)
+    pack = pack_of(b) or ("both" if b.get("_pack_asked") else None)
     if not pack:
         return "pack"
-    if pack in ("client", "both") and not (b.get("_client_done") or b.get("_sheet_pdf")):
+    client_open = pack in ("client", "both") and not (b.get("_client_done") or b.get("_sheet_pdf"))
+    if client_open and pack == "both" and b.get("_focus") == "internal" and plan(b):
+        return "internal_q"
+    if client_open:
         if any(v.get("kind") == "render" for v in s["visuals"]):
             return "review"
         if render_plan(b) and (not b.get("_render_q_done") or any(not real(b.get(k)) for k in ("client", "unit_type"))):
@@ -672,6 +707,9 @@ def converse(s, text, fast=False):
         "- BE A SMART COLLEAGUE (3 Nov 2026): if something looks wrong or odd (a size that doesn't fit the unit, a past job "
         "that doesn't match, missing files), say so in reply and suggest what you'd do, then let the AM decide. "
         "The AM can jump around - answer and follow, never force the order. "
+        "ANY ORDER (4 Nov 2026, James): they may give dates, budget and quantities before the unit, change a size after the "
+        "render, or ask for the render before half the questions - record everything said, whenever it's said, and ask only "
+        "for what is still open. A newer answer always replaces an older one. "
         "- BE LIKE CHATGPT (3 Nov 2026, Andy): answer ANY question the AM asks properly and helpfully in reply - materials, "
         "costs in general terms, retail, design ideas, the client's brand, how something is made, even a quick general question - "
         "then carry on with the brief (intent question). Whatever they tell you to put in the brief goes in, in their words. "
@@ -684,7 +722,7 @@ def converse(s, text, fast=False):
             f"OPTIONS ALREADY OFFERED FOR: {b.get('_offered') or []}\n"
             f"EXTRA QUESTIONS ASKED SO FAR: {b.get('_extra_n', 0)} of 3\n"
             f"CONCEPT VISUALS MADE: {len(s['visuals'])}; OUTPUT WANTED: {b.get('output') or 'not asked yet'}\n"
-            f"PACK: {PACK_IDS.get(pack_of(b), 'not chosen yet')}; STAGE: {st}; RENDER: {render_status(s)}\n"
+            f"PACK: {pack_label(b)}; STAGE: {st}; RENDER: {render_status(s)}\n"
             + (f"SDI MADE THIS BEFORE (same client, same kind of unit): {sb}\n" if sb else "")
             + (f"NEW CLIENT: SDI has never worked for {b.get('client')}. Never say SDI made anything for them. Past work listed "
                "below is for OTHER clients - say so if you mention it. Lean on the AM's files and ask for product photos, "
@@ -799,7 +837,7 @@ def _q(ack, q):
 
 
 def ask_pack(s, ch, ack=""):
-    s["brief"]["_asking"] = ["_pack"]
+    s["brief"]["_asking"], s["brief"]["_pack_asked"] = ["_pack"], 1     # asked once: not answered = both (stage)
     save_session(s)
     ch.choose_pack(_q(ack, PACK_Q))
     return ch, s

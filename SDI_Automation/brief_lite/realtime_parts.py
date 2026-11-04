@@ -5,6 +5,8 @@ and stops the moment the AM talks over it. This file gives that model its brief 
 
   record_answers   - writes what the AM said into the brief (no extra AI call), returns the next questions
   show_past_work   - puts SDI's closest past jobs and quotes on screen
+  set_pack         - the pack the AM named (asked once; not answered = both, 4 Nov 2026)
+  focus            - the AM chooses the order: the internal-brief questions now, or back to the render
   make_concepts    - makes the 3D options (and GA later) - runs in the background, the page shows them
   choose_option    - the designer's pick -> GA of that option + client sheet
   change_option    - "B but white header"
@@ -30,6 +32,25 @@ RT_VOICE = os.environ.get("LITE_RT_VOICE", "cedar")
 # USD per million tokens (gpt-realtime-mini): audio in 10, audio out 20, text in 0.6, text out 2.4
 RT_PRICE = {"gpt-realtime-mini": (10.0, 20.0, 0.6, 2.4), "gpt-realtime": (32.0, 64.0, 4.0, 16.0)}
 RT_CACHED = {"gpt-realtime-mini": 0.30, "gpt-realtime": 0.40}   # USD per million cached input tokens (audio or text)
+# 4 Nov 2026: gpt-realtime-2 had no price here, so every call was counted at the mini's price - about a third of the
+# real cost, and the daily cap let three times its spend through. A model with no price now counts at the dearest one
+# known (over-counting stops a call early; under-counting overspends). Its real price, when known, goes in .env as
+# LITE_RT_PRICE="audio in, audio out, text in, text out, cached" (USD per million tokens) - e.g. "32,64,4,16,0.4".
+_DEAREST = max(RT_PRICE, key=lambda m: RT_PRICE[m][0])
+RT_PRICE.setdefault("gpt-realtime-2", RT_PRICE[_DEAREST])
+RT_CACHED.setdefault("gpt-realtime-2", RT_CACHED[_DEAREST])
+try:
+    _p = [float(x) for x in os.environ.get("LITE_RT_PRICE", "").split(",") if x.strip()]
+    if len(_p) == 5:
+        _m = os.environ.get("LITE_RT_BIG_MODEL", "gpt-realtime-2")
+        RT_PRICE[_m], RT_CACHED[_m] = tuple(_p[:4]), _p[4]
+except ValueError:
+    pass
+
+
+def price_of(model):
+    """(audio in, audio out, text in, text out), cached - for any model, never the cheapest by default."""
+    return RT_PRICE.get(model, RT_PRICE[_DEAREST]), RT_CACHED.get(model, RT_CACHED[_DEAREST])
 # 21 Oct 2026: the big voice model only for the people who brief clients (and demos); our own testing on the small one
 RT_BIG = os.environ.get("LITE_RT_BIG_MODEL", "gpt-realtime-2")   # 4 Nov 2026: GPT-5-class reasoning, better at following tool results
 RT_SMALL = os.environ.get("LITE_RT_SMALL_MODEL", "gpt-realtime-mini")
@@ -44,8 +65,10 @@ SLOW = {"make_concepts", "choose_option", "change_option", "more_options", "fini
 
 # 27 Oct 2026: what the voice model must do next, from where the brief is (convo_parts.stage) - sent with every tool result
 NOW_DO = {
-    "pack": "Ask which pack they need: the client pack (a 3D render, its GA and a one-page client sheet), the SDI internal "
-            "brief pack, or both. Then call set_pack.",
+    "pack": "Once you know roughly what the client is after, ask ONCE which pack they need: the client pack (a 3D render, "
+            "its GA and a one-page client sheet), the SDI internal brief pack, or both. Their answer -> set_pack. If they "
+            "carry on about the job instead, follow them - it's taken as both and they can change it any time; never ask "
+            "it twice.",
     "render_q": "A few quick ones, never a long list: what the unit is, its rough size (H x W x D), what it holds and its colours / "
                 "graphics - one short, "
                 "natural question at a time, using what's already known. 'You choose' / 'typical' / 'just assume' for the size "
@@ -73,7 +96,9 @@ NOW_DO = {
               "the one', 'looks good' also mean finalise -> choose_option.",
     "internal_q": "If the client pack has only just been made, first say in one line: 'That's your client pack done - now "
                   "let's start the internal brief.' Then ask next_questions[0] - one at a time, naturally, worded for THIS job (its client, unit, products, dates); "
-                  "skip what doesn't fit this job. If record_answers says 'Not saved', ask the same question again.",
+                  "skip what doesn't fit this job. If record_answers says 'Not saved', ask the same question again. If "
+                  "focus is 'internal', the render is waiting: when these run out, or the AM asks for the render, call "
+                  "focus(render) and carry on with it.",
     "extra": "Ask if there's anything else they'd like to add to the brief. Record it with record_answers (other_notes), "
              "then call finish_brief with now=true.",
     "done": "Everything they asked for is done. Ask if there's anything else; if not, say goodbye warmly.",
@@ -103,6 +128,13 @@ TOOLS = [
                     "brief - Andy's template) or 'both'. Call it as soon as they answer the pack question.",
      "parameters": {"type": "object", "properties": {"pack": {"type": "string", "enum": ["client", "internal", "both"]}},
                     "required": ["pack"]}},
+    {"type": "function", "name": "focus",
+     "description": "The AM chooses the order. 'internal': they want the SDI internal-brief questions now - before the "
+                    "render, or between renders ('let's do the brief questions first', 'the studio bits now'). 'render': "
+                    "back to the render / client pack ('back to the render', 'let's see it'). Whatever is already made "
+                    "or answered stays.",
+     "parameters": {"type": "object", "properties": {"on": {"type": "string", "enum": ["internal", "render"]}},
+                    "required": ["on"]}},
     {"type": "function", "name": "show_past_work",
      "description": "Show on screen what SDI has made before for this client/unit, with quotes. ONLY when they ask for past or previous work. Never for 'show me the client pack / render / GA / PDF' - those are already in the chat.",
      "parameters": {"type": "object", "properties": {}}},
@@ -125,7 +157,7 @@ TOOLS = [
      "description": "Make more concept directions (max 5).",
      "parameters": {"type": "object", "properties": {"n": {"type": "integer"}}, "required": ["n"]}},
     {"type": "function", "name": "finish_brief",
-     "description": "Build the full internal brief PDF. If the AM asks for the full / internal brief, do NOT call this first - go through NEXT QUESTIONS with them one at a time, then call it. Call it with now=true only when they say build it now as it is, skip the questions, or every question is done.",
+     "description": "Build the full internal brief PDF. If the AM asks for the full / internal brief, do NOT call this first - go through NEXT QUESTIONS with them one at a time (call focus(internal) if the render isn't finished), then call it. Call it with now=true only when they say build the brief / PDF now as it is, skip the questions, or every question is done - at any point, even before the client pack.",
      "parameters": {"type": "object", "properties": {"now": {"type": "boolean", "description": "true only if they said build it now / skip the rest, or nothing is left to ask."}}}},
 ]
 
@@ -175,9 +207,10 @@ def instructions(s):
         "it by number and name, and it leads the references.\n"
         "- THE FLOW is the usual order, not a cage. Every tool result tells you the stage and now_do: use now_do to know "
         "what's next once the AM's own point is dealt with.\n"
-        "  1. Once you know roughly what the client is after, ask which pack they need: the client pack (a 3D render, its GA "
-        "and a one-page client sheet), the SDI internal brief pack, or both. Then STOP and wait - never choose for them, never "
-        "carry on before they answer. Call set_pack only with what THEY said.\n"
+        "  1. Once you know roughly what the client is after, ask ONCE which pack they need: the client pack (a 3D render, "
+        "its GA and a one-page client sheet), the SDI internal brief pack, or both. Never choose for them: call set_pack "
+        "only with what THEY said. If they don't answer it and carry on about the job, follow them - it's taken as both "
+        "(PACK says 'assumed'), so nothing is missed - and never ask it again; they can change it any time.\n"
         "  Materials and colours: a 'not ...' answer or 'as last time' isn't an answer - ask what it should be instead, "
         "offering 2-3 choices (for colours, name the brand's own, e.g. Boots navy and white).\n"
         "  Names: if the client name you heard is odd ('boards', 'bush') and close to an SDI client (Boots), confirm once.\n"
@@ -189,6 +222,22 @@ def instructions(s):
         "change_option, then ask the same again once it's on screen. Finalise -> choose_option.\n"
         "  5. Internal pack (or after the client pack when it's both): NEXT QUESTIONS one at a time, then 'is there anything "
         "else you'd like to add to the brief?' - record it, then call finish_brief with now=true.\n"
+        "- ANY ORDER (4 Nov 2026, James: sales and account managers build the solution their own way). At ANY point:\n"
+        "  'make the render now' / 'just draw it' -> make_concepts (gaps are assumed and marked; a past job they named is "
+        "still checked first). 'Change the header to navy' with options on screen -> change_option on the option they're "
+        "talking about (the latest if they don't say). 'Go back to option A' / 'I preferred the first one' -> that is the "
+        "one they now mean: change_option or choose_option with label A. 'Something completely different' -> "
+        "more_options(n=1). 'Let's do the brief questions first' / 'the studio bits now' -> focus(internal), then "
+        "next_questions; 'back to the render' -> focus(render). 'Build the brief PDF now' -> finish_brief(now=true). "
+        "Details given early or late - dates, budget, quantities, a new size after the render - go straight into "
+        "record_answers; a newer answer replaces the older one, and a change that alters the picture is offered as a "
+        "new option ('Want me to redraw it with 1100 high?'). The brief is complete when every question is answered, "
+        "in whatever order - not when they were asked in order.\n"
+        "- NOISE AND OTHER VOICES: you're on a phone or laptop in an office, a car or a store. Only the AM talking to you "
+        "counts. A line that makes no sense here (another conversation, a TV, someone on the phone, one stray word) is "
+        "not an answer: ignore it, or ask once 'Sorry - was that for me?'. Never record a fact you only half-heard: ask "
+        "again, briefly. If it keeps happening, suggest once: 'It's noisy there - hold the orb while you talk and I'll "
+        "only hear you.'\n"
         "- Never say a render is being made unless make_concepts or change_option has just returned started. If they ask where "
         "it is and render_in_progress is false with nothing on screen, call make_concepts.\n"
         "- If an answer is unclear, half-heard, or doesn't fit the question you asked (you asked 'keep it or change it?' "
@@ -253,7 +302,8 @@ def instructions(s):
         "FIELDS (id: meaning):\n" + "\n".join(f"- {k}: {v[0]}" for k, v in FIELDS.items()) + "\n"
         f"BRIEF SO FAR: {json.dumps(known)[:2500]}\n"
         f"NEXT QUESTIONS: {[q for _, q, _ in p[:6]]}\n"
-        f"PACK: {convo.PACK_IDS.get(convo.pack_of(b), 'not chosen yet')}. STAGE NOW: {stage_now(s)} - {NOW_DO[stage_now(s)]}\n"
+        f"PACK: {convo.pack_label(b)}. FOCUS: {b.get('_focus') or 'the usual order'}. "
+        f"STAGE NOW: {stage_now(s)} - {NOW_DO[stage_now(s)]}\n"
         + (f"SDI MADE THIS BEFORE: {sb}\n" if sb else "")
         + (f"THEIR FILES: {convo.files_context(s, 1500)}\n" if convo.all_files(s) else "")
         + (f"CONVERSATION SO FAR in this chat (text and earlier calls) - CONTINUE it, never start again:\n{convo_text}\n"
@@ -265,12 +315,62 @@ def instructions(s):
            "FAR or the conversation. Say in one short line where we got to, then ask the next question."))
 
 
+TRANSCRIBE = os.environ.get("LITE_RT_TRANSCRIBE", "gpt-4o-transcribe")
+SDI_WORDS = ("client pack, internal pack, both, FSDU, gondola end, wall bay, counter unit, plinth, header, shelf-edge strip, "
+             "dump bin, totem, slatwall, powder coat, acrylic, MDF, Dibond, foamex, LED, GA, render, forecourt, coal bunker, AdBlue")
+_CLIENTS = []
+
+
+def _top_clients(n=20):
+    """SDI's most frequent clients, from projects.db (read once; plain SQL, no AI)."""
+    if not _CLIENTS:
+        try:
+            import sqlite3
+            con = sqlite3.connect(os.path.join(os.path.dirname(os.path.abspath(__file__)), "projects.db"))
+            _CLIENTS.extend(b for (b,) in con.execute("SELECT brand FROM projects WHERE brand != '' GROUP BY brand "
+                                                      "ORDER BY count(*) DESC LIMIT 40") if b and len(b) < 30)
+            con.close()
+        except Exception:
+            pass
+        if not _CLIENTS:
+            _CLIENTS.extend(["Tesco", "Boots", "M&S", "Milwaukee", "TTI", "Sainsbury's", "Superdrug", "Halfords"])
+    return _CLIENTS[:n]
+
+
+def heard_hint(s):
+    """What the transcriber is told it will hear (4 Nov 2026: in a noisy room the words it already expects are the ones it
+    still gets right). SDI's words, then THIS brief's own names - the client, the store, the unit, the products, the
+    people and the past jobs being talked about - then SDI's usual clients. It opens with 'UK retail display brief', so
+    a read-back in silence is caught by the page's junkHeard() and the server's hint_echo() (and by matching this
+    exact text - the page is given it)."""
+    b = (s or {}).get("brief") or {}
+    mine = []
+    for k in ("client", "retailer", "unit_type", "products_held", "hero_products", "project_name", "account_manager",
+              "customer_name", "liked_job"):
+        v = str(b.get(k) or "").strip()
+        if v and "(assumed)" not in v and v.lower() not in ("not known", "unknown"):
+            mine.append(v[:60])
+    for x in str(b.get("_same_before") or "").split("; ")[:3]:
+        x = x.split(" (")[0].strip()
+        if x:
+            mine.append(x[:60])
+    mine = list(dict.fromkeys(mine))
+    others = [c for c in _top_clients() if c.lower() not in " ".join(mine).lower()]
+    out = ("UK retail display brief for SDI Displays. Short answers like yes, no, both. Words: " + SDI_WORDS + "."
+           + (" This job: " + ", ".join(mine) + "." if mine else "")
+           + (" Clients: " + ", ".join(others) + "." if others else ""))
+    return out[:900]
+
+
+def transcription(s):
+    return {"model": TRANSCRIBE, "language": "en", "prompt": heard_hint(s)}
+
+
 def session_config(s, far=True, model=None):
     return {"type": "realtime", "model": model or RT_MODEL, "instructions": instructions(s),
-            # 27 Oct 2026: "Boots" was heard as "boards" - the transcriber is told the names it will hear. If it ever reads
-            # this back, the page's junkHeard() drops the line (it matches "retail display brief" / 5+ client names).
-            "audio": {"input": {"transcription": {"model": os.environ.get("LITE_RT_TRANSCRIBE", "gpt-4o-transcribe"), "language": "en",
-                                                  "prompt": "Short answers like yes, no, both, client pack, internal pack. Clients: Tesco, Boots, Milwaukee, M&S. Coal bunker, FSDU, gondola end, GA."},
+            # 27 Oct 2026: "Boots" was heard as "boards" - the transcriber is told the names it will hear (heard_hint).
+            # If it ever reads them back, the page's junkHeard() and the server's hint_echo() drop the line.
+            "audio": {"input": {"transcription": transcription(s),
                                 "turn_detection": {"type": "semantic_vad", "eagerness": "low", "interrupt_response": False,
                                                    "create_response": False},
                                 "noise_reduction": {"type": "far_field" if far else "near_field"}},
@@ -285,6 +385,9 @@ def tool_intent(name, a):
         return "", {"updates": a.get("updates") or {}, "not_known": a.get("not_known") or [], "intent": "answer", "reply": "", "no_auto": True}
     if name == "set_pack":
         return "", {"updates": {}, "intent": "answer", "pack": a.get("pack"), "reply": "", "no_auto": True}
+    if name == "focus":
+        on = "internal" if str(a.get("on") or "").lower().startswith("int") else "render"
+        return "", {"updates": {}, "intent": "answer", "focus": on, "reply": "", "no_auto": True}
     if name == "show_past_work":
         return "", {"updates": {}, "intent": "show_past", "reply": ""}
     if name == "make_concepts":
@@ -306,7 +409,8 @@ def tool_intent(name, a):
     if name == "more_options":
         return "more options", {"updates": {}, "intent": "more_options", "n_options": int(a.get("n") or 3), "reply": ""}
     if name == "finish_brief":
-        return ("build it now" if a.get("now") else "finish the brief"), {"updates": {}, "intent": "finish", "reply": ""}
+        return ("build it now" if a.get("now") else "finish the brief"), {"updates": {}, "intent": "finish", "reply": "",
+                                                                          "pdf": True}   # the brief PDF - never 'finalise the render'
     return "", {"updates": {}, "intent": "answer", "reply": ""}
 
 
@@ -321,7 +425,7 @@ def tool_result(s, replies):
     asked = [r.get("text") for r in replies if r.get("role") in ("ask", "choose_output")]
     return json.dumps({
         "saved": True, "answered": f"{done} of {total}",
-        "pack": convo.PACK_IDS.get(convo.pack_of(b), "not chosen yet"), "stage": st, "now_do": NOW_DO[st],
+        "pack": convo.pack_label(b), "focus": b.get("_focus") or "", "stage": st, "now_do": NOW_DO[st],
         "render_in_progress": st == "rendering",
         "check_with_am": convo.brief_conflicts(b),
         "which_past_job": (
@@ -350,8 +454,7 @@ def tool_result(s, replies):
 def log_usage(sid, u):
     """response.done usage from the browser -> Brief Lite's daily spend (the same $ cap as everything else)."""
     m = SESSION_MODEL.get(sid, RT_MODEL)
-    ai, ao, ti, to = RT_PRICE.get(m, RT_PRICE["gpt-realtime-mini"])
-    cr = RT_CACHED.get(m, RT_CACHED["gpt-realtime-mini"])
+    (ai, ao, ti, to), cr = price_of(m)
     inp, out = u.get("input_token_details") or {}, u.get("output_token_details") or {}
     # every reply re-reads the call so far; that part is served from OpenAI's cache at a fraction of the price -
     # counting it at full price made the cap stop calls early (21 Oct 2026: 5 minutes logged as $0.58)

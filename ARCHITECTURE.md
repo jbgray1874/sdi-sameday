@@ -2,18 +2,20 @@
 
 This guide covers the whole app: how a brief goes from the account manager's voice to a render, a GA drawing and two PDFs, where each file fits, and which AI does which job. It is written for whoever deploys and looks after the app (James). In the code the app lives in `brief_lite\` and is sometimes called Brief Lite.
 
-Updated 3 November 2026.
+Updated 4 November 2026.
 
 ## 1. The idea in one paragraph
 
 An account manager (AM) is on a client call or has just finished one. The AM talks to Same Day, or types, the way they would talk to ChatGPT. The tool works through the brief like this:
 
-1. **Choose a pack.** It asks which pack is needed: a client pack, an internal brief, or both.
+1. **Choose a pack.** It asks once which pack is needed: a client pack, an internal brief, or both. If the AM doesn't answer and carries on about the job, it takes **both** (marked "assumed") so nothing is missed, and never asks again. The AM can change the pack at any point ("actually just the client pack").
 2. **Render questions.** For the render it asks only what the picture can't be drawn without: the unit, its size, the products and the colours.
 3. **Past work or new.** It asks whether to follow a past SDI job or file, or make something new. Any job or file the AM names, by number, name, fixture, file name or time ("the latest bunker"), is looked up on W:. The tool **always checks back** before following it ("Do you mean 12148 - Rollershutter Forecourt Bunker?").
 4. **Render and changes.** It draws a concept render. Changes come back as new options (A, B, C…).
 5. **Client pack.** For the chosen option it makes a GA drawing and a one-page client sheet.
 6. **Internal brief.** It asks the job-specific questions and makes SDI's 8-page internal brief PDF for the studio.
+
+That is the usual order, not a fixed one (section 4b): the AM can do the internal questions first, ask for the render before half the questions, change an option at any point, or build the brief PDF early.
 
 ## 2. The parts
 
@@ -36,7 +38,7 @@ An account manager (AM) is on a client call or has just finished one. The AM tal
 | File | Role |
 |---|---|
 | `lite_app.py` | Web server and the brain. `handle()` takes every typed or voice-note message. `make_visual()` draws a render; `make_ga_ai()` draws the GA; `ref_lookup()` finds and confirms the past job the AM named. `/api/brand` serves the client's logo and colours. `log_cost()` writes every AI call's cost. |
-| `convo_parts.py` | The flow, as a state machine: pack → render questions → past/mix/new → render → changes → finalise → internal questions → PDF. `RENDER_KEYS` is the short list asked before a render. `brief_conflicts()` catches odd sizes (under 150 mm or over 4.5 m, deeper than wide, far from the usual size for that unit). |
+| `convo_parts.py` | The flow, as a state machine: pack → render questions → past/mix/new → render → changes → finalise → internal questions → PDF. None of these is a gate (section 4b). `RENDER_KEYS` is the short list asked before a render. `brief_conflicts()` catches odd sizes (under 150 mm or over 4.5 m, deeper than wide, far from the usual size for that unit). |
 | `realtime_parts.py` | Live call: the voice's instructions ("the AM leads", short questions, confirm past jobs), its tools (`record_answers`, `make_concepts`, `show_past_work`, `set_pack`…), and the transcription vocabulary (client names and SDI words such as FSDU, gondola end, coal bunker, AdBlue). |
 | `lite_search.py` | Past SDI work. It searches `knowledge.db` and `projects.db` by job number, by project name, by words in file names, and by time ("latest", "this month"). `heard_fix()` corrects common mishearings ("four court" → forecourt). `job_drawing_pages()` renders page 1 of a job's GA PDFs from W: to PNG (PyMuPDF, read-only). |
 | `pdf_pack.py` | The client concept sheet and the internal brief PDF |
@@ -51,8 +53,8 @@ An account manager (AM) is on a client call or has just finished one. The AM tal
 
 | Job | Model | Notes |
 |---|---|---|
-| Live call (voice) | OpenAI `gpt-realtime-2` (set by `LITE_RT_BIG_MODEL`; put `gpt-realtime` back there to roll back) | Same model for everyone. Turn-taking is `semantic_vad`; noisy mode uses `server_vad`. |
-| Live transcription | OpenAI `gpt-4o-transcribe` | Has a vocabulary prompt with SDI's clients and words |
+| Live call (voice) | OpenAI `gpt-realtime-2` (set by `LITE_RT_BIG_MODEL`; put `gpt-realtime` back there to roll back) | Same model for everyone. Turn-taking is `semantic_vad`; noisy mode uses `server_vad` (section 4). Its spend is counted at `gpt-realtime`'s price until its own is set in `.env` as `LITE_RT_PRICE` (audio in, audio out, text in, text out, cached, USD per million tokens). A model with no price is never counted at the cheap mini price. |
+| Live transcription | OpenAI `gpt-4o-transcribe` | Its vocabulary prompt (`heard_hint()`) holds SDI's words, this brief's own names (client, store, unit, products, people, past jobs) and SDI's usual clients. It is updated during the call as the brief names more. |
 | Voice notes in | OpenAI `gpt-4o-transcribe` | Falls back to local Whisper if OpenAI fails |
 | Voice notes out | OpenAI `gpt-4o-mini-tts`, voice "fable" (British) | Falls back to the free edge-tts voice |
 | Chat turns, checks, GA size check | Claude Haiku | Cheap and fast |
@@ -72,7 +74,27 @@ Keys: the real keys file is `SDI_Automation\.env` inside the K: deploy folder (M
 4. While a render is being drawn, the mic is paused and a **Stop** button is on the stage. `/api/rt/done` returns `drawn: false` if no new picture was made, so the voice never says "ready" for nothing.
 5. Lines the voice couldn't use are written to `brief_lite\rt_drops.log`. This is useful when someone says "it didn't hear me".
 6. "Show me the GA" (or "the shelf drawing", "all of them", "the second one") runs as its own visible turn, `show_ref`, so the drawings reach the screen. The voice then asks "is that the one?" and waits for a clear yes.
-7. The page waits about 1.2 seconds after the AM stops before the voice answers, so a pause to think isn't cut into. If the AM talks while the voice is speaking, it stops at once. Whispers, "mmm" and read-back noise are dropped and never shown.
+7. The page waits about 1.2 seconds after the AM stops before the voice answers, so a pause to think isn't cut into. If the AM talks while the voice is speaking, it stops at once. Whispers, "mmm" and read-back noise are dropped and never shown. A read-back of the vocabulary prompt is recognised by comparing it with the prompt itself (`echo_of()` on the server, `hintEcho()` on the page).
+8. **Noisy rooms.** After 3 lines of noise in a minute the call switches to "noisy": only a clear, close voice starts a turn, and the bar it must clear follows how loud the room is (`vadBar()`). If noise still gets through, a second, stricter level starts and the voice suggests holding the orb (push-to-talk). Each level steps back down after two quiet minutes. The voice is also told to ignore other voices, a TV or a phone call, and never to note something half-heard.
+
+## 4b. Any order (4 November 2026)
+
+Sales and account managers build a client solution their own way, so the flow is a guide, not a cage.
+
+| The AM says, at any point | What happens |
+|---|---|
+| Nothing about the pack | It takes **both** (assumed) after asking once, and never asks again |
+| "Actually just the client pack" / "I don't need the internal brief" | The pack changes (`convo.pack_change()`). Merely mentioning a pack changes nothing. |
+| "Make the render" before the questions | It draws now. Gaps are assumed and marked; a past job they named is still checked first. |
+| "Let's do the internal questions first" | `_focus = internal`: the internal-brief questions come now. The voice uses the `focus` tool. |
+| "Back to the render", or any render request or change | `_focus` is cleared, and the client pack carries on where it was |
+| "Change the header" / "go back to option A" | That option is changed into the next letter. The earlier options stay. |
+| "Build the brief PDF now" | It is built straight away, even before the client pack (only on the AM's own words) |
+| Dates, budget or sizes, early or late | Recorded when said. A newer answer replaces the older one. |
+
+The brief is complete when every question has an answer, in whatever order. These checks stay: a past job is confirmed before it is followed, a size clash needs a clear answer (or "just draw it"), and the voice can never choose a pack the AM didn't say.
+
+Tests: `tests/test_any_order_and_noise.py`. They run offline on a copy of the app, with no AI calls and no keys.
 
 ## 4a. Past SDI jobs: find, show, follow
 

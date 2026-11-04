@@ -2278,12 +2278,26 @@ def handle(number, name, text, image_path=None, voice=False, ch=None, new=False,
         if hwd_ and all(100 <= v <= 6000 for v in hwd_):
             b["size"] = "{} x {} x {} mm".format(*(int(v) for v in hwd_))
     # which pack (27 Oct 2026): a tapped button, the voice model's set_pack, or said in so many words
-    pk = t.get("pack") or (convo.pack_from(text, asked="_pack" in (b.get("_asking") or [])) if not convo.pack_of(b) else None)
+    # 4 Nov 2026 (James: "allows the user to change the flow"): asked once, never a gate. Not answered - they went on
+    # about the job - is taken as both, so the whole brief is still gathered; a change of mind is heard at any point.
+    asked_pack = "_pack" in (b.get("_asking") or []) or bool(b.get("_pack_asked") and not convo.pack_of(b))
+    short_ = len(re.findall(r"[a-z0-9']+", (text or "").lower())) <= 5      # "client pack please" - not "put it in the brief"
+    pk = t.get("pack") or (convo.pack_from(text, asked=asked_pack) if not convo.pack_of(b) or (b.get("_pack_assumed") and short_)
+                           else None) or convo.pack_change(text)
     if not pk and convo.pack_of(b) == "client" and re.search(r"\b(internal (pack|brief)|brief pack|full brief|both packs?)\b",
                                                              text or "", re.I):
         pk = "both"
-    if pk in convo.PACK_IDS and pk != convo.pack_of(b):
+    if pk in convo.PACK_IDS and (pk != convo.pack_of(b) or b.get("_pack_assumed")):
         set_pack(b, pk)
+    elif not convo.pack_of(b) and b.get("_pack_asked") and (text or "").strip() and not picked_output:
+        set_pack(b, "both", assumed=True)
+    if t.get("focus") == "internal":      # the voice's focus tool: the studio's questions now, the render after
+        if convo.pack_of(b) in (None, "client") or b.get("_pack_assumed"):
+            set_pack(b, "both", assumed=bool(b.get("_pack_assumed") or not convo.pack_of(b)))
+        if convo.pack_of(b) == "both" and not (b.get("_client_done") or b.get("_sheet_pdf")):
+            b["_focus"] = "internal"
+    elif t.get("focus") == "render":
+        b.pop("_focus", None)
     if text and t_override is None:          # a reason said anyway ("...because it looks cheap") belongs to the last decision
         craft.heard("showroom", who_of(s), s["id"], text)
     if b.get("client") and (b.get("hero_products") or b.get("products_held") or b.get("unit_type")) \
@@ -2367,7 +2381,8 @@ def handle(number, name, text, image_path=None, voice=False, ch=None, new=False,
         elif asking == "_change" or intent == "change_visual" or CHANGE_WORDS.search(text or ""):
             intent = "change_visual"
             t["change_request"] = t.get("change_request") or text
-    if b.get("_flow") and intent == "finish" and convo.stage(s) == "review":   # "that's it" on a render: finalise it
+    if b.get("_flow") and intent == "finish" and convo.stage(s) == "review" and not t.get("pdf") \
+            and not re.search(r"\b(internal|brief|pdf|8[- ]page|job sheet)\b", text or "", re.I):   # "that's it" on a render: finalise it
         intent = "approve_visual"
         t["change_request"] = t.get("change_request") or f"option {renders_now[-1].get('label') or 'A'}"
     # the clash said back before drawing (convo_parts.brief_conflicts): a tapped suggestion, or "yes, as I said"
@@ -2383,6 +2398,8 @@ def handle(number, name, text, image_path=None, voice=False, ch=None, new=False,
     if t_override is None and asking == "_confirm" and re.search(r"\b(yes|yeah|yep|correct|exactly|as (i )?said|that'?s right|keep it|right)\b",
                                                                 text or "", re.I) and not (t.get("updates") or {}):
         b["_conflict_ok"] = 1
+    if t_override is None and asking == "_confirm" and GO_NOW.search(text or "") and not (t.get("updates") or {}):
+        b["_conflict_ok"] = 1          # "just draw it" over the clash check: the AM has heard it and wants it as it is
     # the last question of the internal pack: "anything else to add?" - kept in the brief, then the PDF
     if t_override is None and asking == "_extra_info":
         b["_extra_asked"] = b["_finish_warned"] = 1
@@ -2413,13 +2430,21 @@ def handle(number, name, text, image_path=None, voice=False, ch=None, new=False,
             ch.text("Got it - no more questions. Say \"full brief\" any time to carry on, or ask for a render, the GA or the pack.")
             return ch, s
     # "let's do the full brief": Andy's whole template, one question at a time - no pictures until they ask
-    if t_override is None and re.search(r"\b(full|whole|complete|proper) brief\b|\ball (the|of the) questions\b|\bfull template\b", text or "", re.I) \
-            and not re.search(r"\b(pdf|pack|document|send)\b", text or "", re.I):
-        if b.get("_flow"):           # the internal pack - after the client pack if that's under way
-            set_pack(b, "both" if convo.pack_of(b) in ("client", "both") else "internal")
+    if t_override is None and (re.search(r"\b(full|whole|complete|proper) brief\b|\ball (the|of the) questions\b|\bfull template\b", text or "", re.I)
+                               or FOCUS_INTERNAL.search(text or "")) \
+            and not re.search(r"\b(pdf|document|send)\b", text or "", re.I) \
+            and not (re.search(r"\bpack\b", text or "", re.I) and not FOCUS_INTERNAL.search(text or "")):
+        if b.get("_flow"):           # the internal pack - NOW, even with the client pack under way (4 Nov 2026, James)
+            set_pack(b, "both" if convo.pack_of(b) in ("client", "both") or b.get("_pack_assumed") else "internal")
+            if convo.pack_of(b) == "both" and not (b.get("_client_done") or b.get("_sheet_pdf")):
+                b["_focus"] = "internal"
+            b.pop("_no_more_q", None)
             save_session(s)
             if convo.stage(s) != "internal_q":
-                return convo.ask_next(s, ch, ack=prefix + "Noted - the full SDI brief comes straight after the client pack.")
+                return convo.ask_next(s, ch, ack=prefix + "Noted - the full SDI brief is on.")
+            left = len(convo.plan(b))
+            return convo.ask_next(s, ch, ack=(prefix + f"Let's do the SDI brief questions now - {left} to go, one at a time. "
+                                               "\"Don't know\" or \"skip\" is fine, and say \"back to the render\" whenever you like."))
         if not b.get("output"):
             b["output"] = "Brief only"
         b["_out_asked"] = 1
@@ -2473,14 +2498,18 @@ def handle(number, name, text, image_path=None, voice=False, ch=None, new=False,
         if has_render and not t.get("n_options"):
             t["n_options"] = 1               # "make a render" again = one more, not the last request's count
         t["reply"] = ""
+    # anything to do with the picture brings the render back first (the internal questions wait where they were)
+    if intent in ("want_visuals", "more_options", "change_visual", "approve_visual", "want_ga_only") or render_now \
+            or FOCUS_RENDER.search(text or ""):
+        b.pop("_focus", None)
     # They asked for the render (or the voice model called make_concepts): no more render questions - any gaps are
     # filled sensibly and marked (assumed). Past / mix / new is still asked once, unless they said "just make it now".
     if b.get("_flow") and intent == "want_visuals" and (render_now or t.get("go")):
         pk0 = convo.pack_of(b)
         if pk0 == "internal":
             set_pack(b, "both")
-        elif pk0 is None and t.get("go"):
-            set_pack(b, "client")
+        elif pk0 is None:              # 4 Nov 2026: a render asked for before any pack - never "which pack?" first
+            set_pack(b, "both", assumed=True)
         if convo.pack_of(b):
             b["_render_q_done"], b["_assume"] = 1, True
             if t.get("go") or GO_NOW.search(text or ""):
@@ -2881,8 +2910,10 @@ def handle(number, name, text, image_path=None, voice=False, ch=None, new=False,
             if convo.pack_of(b) == "both":
                 left = len(convo.plan(b))
                 return convo.ask_next(s, ch, ack="That's the client pack ✓ - the render, its GA and the one-page sheet." + (
-                    f" Now the SDI internal brief pack - {left} question{'s' if left != 1 else ''}, one at a time; \"don't know\" "
-                    "or \"skip\" is fine." if left else ""))
+                    (f" Now the SDI internal brief - {left} quick one{'s' if left != 1 else ''}; say \"that's all\" if you "
+                     "don't need it." if b.get("_pack_assumed") else
+                     f" Now the SDI internal brief pack - {left} question{'s' if left != 1 else ''}, one at a time; \"don't know\" "
+                     "or \"skip\" is fine.") if left else ""))
             ch.text("That's the client pack ✓ - the render, its GA and the one-page client sheet, ready to send. Say \"internal "
                     "pack\" any time if you want the full SDI brief too.")
             return ch, s
@@ -3104,13 +3135,27 @@ NEW_AGAIN = re.compile(r"\b((completely|totally|brand) new( one| design| concept
                        r"(something|completely|totally) (else|different)|start (again|over)|from scratch|another (one|design|concept|option))\b", re.I)
 NOT_HAPPY = re.compile(r"\b((don'?t|do not|didn'?t) (like|love) (it|this|that)|not (happy|good|right|great|keen)|"
                        r"(hate|dislike) (it|this)|not what i (wanted|asked)|no good|rubbish)\b", re.I)
+# 4 Nov 2026 (James): the AM chooses the order - the studio's questions before the render, then back to it
+FOCUS_INTERNAL = re.compile(r"\b(internal|studio|sdi|brief|template|andy'?s|other|rest of the|job sheet)\s+(brief\s+)?(questions?|bits?|side|stuff)\b"
+                            r".{0,25}\b(first|now|before)\b|\b(do|start|begin|go through|let'?s do)\b.{0,15}\b(the\s+)?"
+                            r"(internal|studio|sdi|job sheet|brief) (brief |pack )?(questions?|bits?|first|now)\b|"
+                            r"\bquestions first\b|\brender (later|after)\b", re.I)
+FOCUS_RENDER = re.compile(r"\b(back to|return to|carry on with|let'?s do|go back to|now) (the )?(render|concept|visual|picture|design|client pack|options?)\b|"
+                          r"\b(render|picture|concept) (now|first)\b", re.I)
 WHERE_RENDER = re.compile(r"\bwhere('?s| is| are)\b.{0,20}\b(render|visual|concept|image|picture)s?\b|"
                           r"\b(render|visual|concept|image|picture)s?\b.{0,20}\b(ready|done|finished|coming)\b.{0,10}\?", re.I)
 
 
-def set_pack(b, pk):
-    """The AM's pack: 'internal' is Andy's whole template; 'client' and 'both' make the render and its GA first."""
+def set_pack(b, pk, assumed=False):
+    """The AM's pack: 'internal' is Andy's whole template; 'client' and 'both' make the render and its GA first.
+    assumed: the AM never said (4 Nov 2026) - both, so nothing is missed; the AM's own choice replaces it any time."""
     b["_pack"], b["_out_asked"] = pk, 1
+    if assumed:
+        b["_pack_assumed"] = 1
+    else:
+        b.pop("_pack_assumed", None)
+    if pk not in ("both", "internal") or b.get("_client_done") or b.get("_sheet_pdf"):
+        b.pop("_focus", None)          # the internal questions can only come first when there's an internal pack
     if pk == "internal":
         b["output"], b["_full"] = "Brief only", 1
     else:
@@ -3317,7 +3362,10 @@ def api_rt_session():
     if not r.ok:
         return jsonify({"error": f"voice service: {r.text[:200]}"}), 502
     rt.SESSION_MODEL[s["id"]] = model
-    return jsonify({"key": r.json()["value"], "model": model, "session": s["id"], "brief": s["brief"]})
+    tr = rt.transcription(s)
+    RT_HINT[s["id"]] = [tr["prompt"]]
+    # the page needs the hint to spot it read back, and the transcriber settings to send an updated hint mid-call
+    return jsonify({"key": r.json()["value"], "model": model, "session": s["id"], "brief": s["brief"], "transcription": tr})
 
 
 @app.route("/api/rt/tool", methods=["POST"])
@@ -3340,8 +3388,8 @@ def api_rt_tool():
     if js.get("name") == "make_concepts" and convo.stage(s) == "confirm":
         # 27 Oct 2026: "change it" was heard as "Client" and the voice drew anyway - a clash needs a clear answer first
         last = _last_am_line(s["id"])
-        if re.search(r"\b(keep (it|as)|as (i )?said|yes|yeah|yep|correct|exactly|that'?s (right|fine)|leave it)\b", last, re.I) \
-                and not re.search(r"\bchange\b", last, re.I):
+        if (re.search(r"\b(keep (it|as)|as (i )?said|yes|yeah|yep|correct|exactly|that'?s (right|fine)|leave it)\b", last, re.I)
+                or GO_NOW.search(last)) and not re.search(r"\bchange\b", last, re.I):
             s["brief"]["_conflict_ok"] = 1
             save_session(s)
         else:
@@ -3352,10 +3400,16 @@ def api_rt_tool():
     if js.get("name") == "finish_brief":
         # 27 Oct 2026: the voice built the internal PDF with 5 questions still to go, and never asked "anything else?"
         st_ = convo.stage(s)
-        said_now = re.search(r"\b(now|as it is|skip|that'?s (all|enough)|no more questions|build it|finish)\b", _last_am_line(s["id"]), re.I)
-        if st_ in ("render_q", "route", "confirm", "render", "review") and convo.pack_of(s["brief"]) in ("client", "both"):
-            return jsonify({"slow": False, "output": json.dumps({"error": "Not yet: finish the client pack first (now_do: "
-                                                                          + rt.NOW_DO.get(st_, "") + ")"})})
+        last_ = _last_am_line(s["id"])
+        said_now = re.search(r"\b(now|as it is|skip|that'?s (all|enough)|no more questions|build it|finish)\b", last_, re.I)
+        # 4 Nov 2026 (James): the AM decides the order - "build the internal brief now" works before the client pack too.
+        # Only the AM's own words open it: the voice once built the PDF with questions still to go.
+        asked_pdf = said_now and re.search(r"\b(brief|pdf|internal|8[- ]?page|job sheet|document)\b", last_, re.I)
+        if st_ in ("pack", "render_q", "route", "confirm", "render", "review") \
+                and (convo.pack_of(s["brief"]) or "both") in ("client", "both") and not asked_pdf:
+            return jsonify({"slow": False, "output": json.dumps({"error": "Not yet: the AM didn't ask for the brief PDF. Carry on "
+                                                                          "with the client pack (now_do: " + rt.NOW_DO.get(st_, "")
+                                                                          + "). If they DO want the PDF now, they just say so."})})
         if st_ == "internal_q" and not said_now:
             left = [q for _, q, _ in convo.plan(s["brief"])]
             return jsonify({"slow": False, "output": json.dumps({"error": f"Not yet: {len(left)} internal-brief questions are "
@@ -3371,15 +3425,23 @@ def api_rt_tool():
         bad = _answer_not_heard(s, args.get("updates") or {})
         if bad:
             return jsonify({"slow": False, "output": json.dumps({"error": bad})})
-    if js.get("name") == "set_pack" and _am_answered_pack(s["id"]) and not convo.pack_from(_last_am_line(s["id"]), asked=True):
-        # 28 Oct 2026: "which pack?" was answered "SDI Displays" (misheard) and the voice carried on with a pack of its own
-        return jsonify({"slow": False, "output": json.dumps({"error": f"Not set: the AM said \"{_last_am_line(s['id'])[:60]}\", "
-                        "which isn't a pack. Say you didn't quite catch it and ask again: the client pack, the SDI internal "
-                        "pack, or both?"})})
-    if js.get("name") == "set_pack" and not _am_answered_pack(s["id"]):
-        # 27 Oct 2026: the voice asked "which pack?" and picked one itself before the AM spoke - only the AM chooses
-        return jsonify({"slow": False, "output": json.dumps({"error": "The AM hasn't answered yet. Wait for their answer "
-                                                                      "to the pack question, then call set_pack with it."})})
+    if js.get("name") == "set_pack":
+        last_ = _last_am_line(s["id"])
+        said_ = convo.pack_from(last_, asked=True) or convo.pack_change(last_)
+        if not _am_answered_pack(s["id"]) and not said_:
+            # 27 Oct 2026: the voice asked "which pack?" and picked one itself before the AM spoke - only the AM chooses
+            return jsonify({"slow": False, "output": json.dumps({"error": "The AM hasn't answered yet. Wait for their answer "
+                                                                          "to the pack question, then call set_pack with it."})})
+        if not said_:
+            # 28 Oct 2026: "which pack?" was answered "SDI Displays" (misheard) and the voice chose a pack of its own.
+            # 4 Nov 2026 (James): and never a loop of "which pack?" either - they went on about the job, so it's both.
+            b_ = s["brief"]
+            if not convo.pack_of(b_):
+                set_pack(b_, "both", assumed=True)
+                save_session(s)
+            return jsonify({"slow": False, "output": json.dumps({"note": (
+                f"Not changed: the AM said \"{last_[:60]}\", which doesn't name a pack. It's {convo.pack_label(b_)}. Don't ask "
+                "the pack question again - follow what they just said. They can change the pack any time by saying so.")})})
     if js.get("name") == "make_concepts":
         b_ = s["brief"]
         if not b_.get("_ref_job") and not (b_.get("_ref_confirm") or b_.get("_ref_ask")) and convo.real(b_.get("liked_job")) \
@@ -3428,7 +3490,12 @@ def api_rt_tool():
             break
         time.sleep(0.1)
     s = _session_by_id(s["id"]) or s
-    return jsonify({"turn": jid, "slow": False, "output": rt.tool_result(s, JOBS[jid]["ch"].out)})
+    out_ = {"turn": jid, "slow": False, "output": rt.tool_result(s, JOBS[jid]["ch"].out)}
+    tr = rt.transcription(s)
+    if tr["prompt"] not in RT_HINT.get(s["id"], []):     # 4 Nov 2026: the transcriber hears this brief's new names too
+        RT_HINT[s["id"]] = (RT_HINT.get(s["id"], []) + [tr["prompt"]])[-3:]
+        out_["transcription"] = tr
+    return jsonify(out_)
 
 
 @app.route("/api/rt/done/<jid>")
@@ -3460,10 +3527,13 @@ def api_rt_log():
     text = re.sub(r"\s+", " ", js.get("text") or "").strip()[:2000]
     if not s or not text:
         return jsonify({"ok": False}), 400
-    if js.get("role") != "assistant" and hint_echo(text):
+    if js.get("role") != "assistant" and hint_echo(text, s["id"]):
         return jsonify({"ok": True, "ignored": "transcriber echo"})
     if js.get("role") == "assistant":
         log_msg(s["id"], "out", text)
+        if convo.stage(s) == "pack" and re.search(r"\bpacks?\b", text, re.I) and re.search(r"\?", text):
+            s["brief"]["_pack_asked"] = 1     # the voice asked it: once is enough - not answered = both (convo.stage)
+            save_session(s)
         return jsonify({"ok": True})
 
     log_msg(s["id"], "in", text)
@@ -4298,10 +4368,27 @@ def openai_transcribe(path, sid=None):
         return None
 
 
-def hint_echo(text):
+RT_HINT = {}   # chat id -> the transcriber hints this live call was given (realtime_parts.heard_hint), newest last
+
+
+def echo_of(text, hint):
+    """4 Nov 2026: the live call's hint now names this brief's own client, unit and past jobs, so a read-back can look like
+    anything. A line of 6+ words with three quarters of its word pairs in the hint, in its order, is the hint - not the AM
+    ('the client pack and the internal pack' shares two pairs in six, and stays)."""
+    w = re.findall(r"[a-z0-9&']+", (text or "").lower())
+    h = re.findall(r"[a-z0-9&']+", (hint or "").lower())
+    if len(w) < 6 or len(h) < 2:
+        return False
+    pairs, known = list(zip(w, w[1:])), set(zip(h, h[1:]))
+    return sum(p in known for p in pairs) >= 0.75 * len(pairs)
+
+
+def hint_echo(text, sid=None):
     """Speech models sometimes 'hear' the hint they were given when the mic only picks up silence or noise. That text
     (the client-name list) must never become a message or touch the brief."""
     t = (text or "").lower()
+    if sid and any(echo_of(t, h) for h in RT_HINT.get(sid, [])):
+        return True
     if "a sales brief for sdi displays" in t or t.startswith("uk retail display brief") \
             or re.match(r"\W*clients? include\b", t) or "sdi displays retail" in t or "gondola end, fsdu" in t:   # the 27 Oct hint read back
         return True
@@ -4454,7 +4541,9 @@ def unlock():
         time.sleep(1.5)   # slows guessing
         return Response(UNLOCK_PAGE.replace("{msg}", "That code isn't right."), mimetype="text/html", status=401)
     r = app.redirect("/")
-    r.set_cookie("lite_access", ACCESS_CODE, max_age=90 * 86400, secure=True, httponly=True, samesite="Lax")
+    # 4 Nov 2026: secure=True on http://10.0.0.5:5020 meant the browser never kept the cookie, so the team code
+    # "didn't work". Secure when the page itself is https; the App Proxy step changes nothing here.
+    r.set_cookie("lite_access", ACCESS_CODE, max_age=90 * 86400, secure=request.is_secure, httponly=True, samesite="Lax")
     return r
 
 

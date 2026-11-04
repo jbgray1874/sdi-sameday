@@ -1148,11 +1148,12 @@ async function rtStart(){if(!project){toast("Pick your name first");newBrief();r
    row(cap?"⚠ Today's AI budget is used up, so live voice, renders and voice notes are paused until tomorrow. Typing still works.":"⚠ Live voice can't start: the OpenAI key has expired or is wrong, so renders and voice won't work either. Ask Muhammad to update it. Typing still works.");return true}
   toast("Using talk mode: I speak, you answer");return false}
  fresh=false;sid=j.session;if(j.brief)showBrief(j.brief);const h=$(".hero");if(h)h.remove();
+ const tr0=j.transcription||null;
  const pc=new RTCPeerConnection(),audio=new Audio();audio.autoplay=true;pc.ontrack=e=>{audio.srcObject=e.streams[0];watchOut(e.streams[0])};
  let mic;try{mic=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:false}})}catch(e){toast("Microphone blocked - allow it from the padlock in the address bar");return false}
  pc.addTrack(mic.getTracks()[0]);
  const dc=pc.createDataChannel("oai-events");
- rt={pc,dc,mic,audio,bubble:null,userRow:null,talking:false};
+ rt={pc,dc,mic,audio,bubble:null,userRow:null,talking:false,tr:tr0,hints:tr0&&tr0.prompt?[tr0.prompt]:[]};
  dc.onopen=()=>{talkUI(true,"Live - just talk. Interrupt me any time.");dc.send(JSON.stringify({type:"response.create"}))};
  dc.onmessage=e=>rtEvent(JSON.parse(e.data));
  meter(mic);
@@ -1175,7 +1176,13 @@ function meter(stream){const ctx=new (window.AudioContext||window.webkitAudioCon
 // and what the AM asked for - past work, a render - is started by Brief Lite itself, then the voice is told it's on screen.
 // silence or room noise makes the transcriber hand back its own hint ("UK retail display brief. Client names include...")
 // or "Thank you." - never treat that as the AM speaking
+// 4 Nov 2026: the hint now names this brief's own client, unit and past jobs, so its read-back can look like anything -
+// 6+ words with three quarters of their word pairs in the hint, in its order, is the hint, not the AM (as hint_echo)
+function hintEcho(tx){if(!rt||!rt.hints||!rt.hints.length)return false;const w=(tx.match(/[a-z0-9&']+/g)||[]);if(w.length<6)return false;
+ return rt.hints.some(h=>{const hw=(h.toLowerCase().match(/[a-z0-9&']+/g)||[]),k=new Set();for(let i=1;i<hw.length;i++)k.add(hw[i-1]+" "+hw[i]);
+  let n=0;for(let i=1;i<w.length;i++)if(k.has(w[i-1]+" "+w[i]))n++;return n>=0.75*(w.length-1)})}
 function junkHeard(tx){tx=(tx||"").trim().toLowerCase();
+ if(hintEcho(tx))return true;
  if(/answers are often short|short answers like|yes, no, both, client pack|internal pack\. clients|retail display brief for|general assembly, render|clients include|sainsbury'?s, dior|forecourt, coal bunker, adblue|coal bunker, fsdu, gondola end|dump bin, ga\b/.test(tx))return true;
  {const nm=["boots","tesco","lindt","fanatics","ryobi","harrods","superdrug","dyson","halfords","morrisons","sainsbury","dior","watson","unilever","mondelez","callaway","kurt geiger","liz earle","galvin"].filter(w=>tx.includes(w)).length;if(nm>=3)return true}
  // 3 Nov 2026: whispers / the room picked up as a few words, and lines in another script (the transcriber guessing
@@ -1271,12 +1278,20 @@ function rtRendering(on,what){if(!rt)return;rt.rendering=on;if(rt.mic)rt.mic.get
 //  - noisy room: noticed automatically (two junk "heard" lines in a minute) -> only a clear, close voice starts a turn;
 //    back to normal after two quiet minutes
 //  - very noisy: hold the orb while speaking - for that sentence only, then hands-free again
-function autoTD(){return rt&&rt.noisy?{type:"server_vad",threshold:0.6,prefix_padding_ms:300,silence_duration_ms:650,create_response:false,interrupt_response:false}
+// 4 Nov 2026 (James: "as strong as possible at handling background noise"): in a noisy room the bar a sound must clear to
+// count as the AM speaking follows how loud the room is (rt.floor, measured between turns), and a second level for a
+// room that keeps breaking through - with a one-off tip to hold the orb
+function vadBar(){const f=(rt&&rt.floor)||0;return Math.min(0.85,Math.max(0.6,0.55+f*5)+(rt&&rt.noisy===2?0.1:0))}
+function autoTD(){return rt&&rt.noisy?{type:"server_vad",threshold:+vadBar().toFixed(2),prefix_padding_ms:300,silence_duration_ms:rt.noisy===2?800:650,create_response:false,interrupt_response:false}
  :{type:"semantic_vad",eagerness:"low",create_response:false,interrupt_response:false}}   // 3 Nov 2026: low - waits until the AM has finished the thought (medium still cut long answers)
 function setTD(td){rtSay({type:"session.update",session:{type:"realtime",audio:{input:{turn_detection:td}}}})}
 function noisyHit(){if(!rt)return;const now=Date.now();rt.junk=(rt.junk||[]).filter(t=>now-t<60000);rt.junk.push(now);
- if(!rt.noisy&&rt.junk.length>=3){rt.noisy=true;rt.quietSince=0;setTD(autoTD());voNote("Noisy room - I'll only listen to your voice")}}
-function quietCheck(){if(!rt||!rt.noisy)return;const now=Date.now();if((rt.junk||[]).every(t=>now-t>120000)){rt.noisy=false;setTD(autoTD())}}
+ if(!rt.noisy&&rt.junk.length>=3){rt.noisy=1;rt.noisyAt=now;rt.quietSince=0;setTD(autoTD());voNote("Noisy room - I'll only listen to your voice")}
+ else if(rt.noisy===1&&rt.junk.filter(t=>t>rt.noisyAt).length>=3){rt.noisy=2;setTD(autoTD());voNote("Very noisy - hold the orb while you talk and I'll only hear you");
+  if(!rt.pttTip){rt.pttTip=1;rtSay({type:"conversation.item.create",item:{type:"message",role:"user",content:[{type:"input_text",text:"[Showroom: it's very noisy where the AM is. In one short line, suggest they hold the orb while they talk so you only hear them - then carry on where you were.]"}]}});
+   if(!rt.inResp&&!rt.speaking)rtSay({type:"response.create"})}}
+ else if(rt.noisy)setTD(autoTD())}   // the room got louder: the bar follows it
+function quietCheck(){if(!rt||!rt.noisy)return;const now=Date.now();if((rt.junk||[]).every(t=>now-t>120000)&&now-(rt.noisyAt||0)>120000){rt.noisy=rt.noisy===2?1:false;rt.noisyAt=now;rt.junk=[];setTD(autoTD())}}   // one level at a time
 (()=>{const b=$("#ptt");if(!b)return;let holding=false;
  const mics=on=>{if(rt&&rt.mic)rt.mic.getAudioTracks().forEach(x=>x.enabled=on)};
  b.addEventListener("pointerdown",e=>{if(!rt)return;e.preventDefault();holding=true;rt.held=true;rt.peak=0;b.classList.add("rec");
@@ -1309,6 +1324,8 @@ async function rtEvent(ev){const ty=ev.type||"";
 async function rtTool(call_id,name,args){
  const LBL={make_concepts:"Making the concepts and checking them…",choose_option:"Drawing the GA and the client sheet…",change_option:"Changing that option…",more_options:"Making more options…",finish_brief:"Building the full brief PDF…",show_past_work:"Looking through SDI's history…"};
  let j;try{j=await fetch("/api/rt/tool",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({session:sid,name,arguments:args})}).then(r=>r.json())}catch(e){j={output:JSON.stringify({error:String(e)})}}
+ if(j.transcription&&j.transcription.prompt&&rt){rt.hints=[...(rt.hints||[]),j.transcription.prompt].slice(-3);rt.tr=j.transcription;   // the brief named more: the transcriber listens for it too
+  rtSay({type:"session.update",session:{type:"realtime",audio:{input:{transcription:j.transcription}}}})}
  rtSay({type:"conversation.item.create",item:{type:"function_call_output",call_id,output:j.output||"{}"}});
  // 27 Oct 2026: the voice asked "which pack?" and called a tool in the same breath, then asked it AGAIN when the tool
  // answered. If that reply already said something, the tool's answer is noted silently - no second reply.
