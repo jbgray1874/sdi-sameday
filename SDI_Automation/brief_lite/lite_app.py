@@ -28,7 +28,7 @@ try:
 except ImportError:
     pass
 
-from flask import Flask, jsonify, request, Response, send_file, abort
+from flask import Flask, jsonify, request, Response, send_file, abort, after_this_request
 
 PORT = int(os.environ.get("BRIEF_LITE_PORT", "5020"))
 DB = os.path.join(HERE, "lite.db")
@@ -3454,6 +3454,10 @@ def api_rt_tool():
     s = _session_by_id(js.get("session") or "")
     if not s:
         return jsonify({"error": "no such brief"}), 404
+
+    @after_this_request
+    def _said(resp):      # 4 Nov 2026: every tool the voice called, and what it was told - a refusal was in no log
+        return log_tool(s["id"], js.get("name"), resp)
     try:
         args = json.loads(js.get("arguments") or "{}") if isinstance(js.get("arguments"), str) else (js.get("arguments") or {})
     except ValueError:
@@ -3590,6 +3594,8 @@ def api_rt_done(jid):
     if s and j.get("tool") in ("make_concepts", "change_option", "more_options") and \
             sum(1 for v in s["visuals"] if v.get("kind") == "render") <= j.get("n_renders", 0):
         # 29 Oct 2026: nothing was drawn (a size was still missing) and the voice said "it's ready - on screen now"
+        said = " | ".join((r.get("text") or "")[:120] for r in j["ch"].out if r.get("type") == "text")[:300]
+        print(f"rt done {j['session']} {j.get('tool')}: NOTHING drawn - {said or j.get('error') or 'no reason given'}", flush=True)
         return jsonify({"done": True, "drawn": False, "output": json.dumps({
             "drawn": False, "error": "NO render was made - nothing new is on screen. Never say it's ready. Tell the AM "
             "honestly in one line, then do what now_do says (ask the missing answer, or if they said assume / your choice, "
@@ -3647,6 +3653,18 @@ def api_rt_log():
         JOBS[jid]["tool"] = kind
         return jsonify({"ok": True, "turn": jid, "kind": kind})
     return jsonify({"ok": True})
+
+
+def log_tool(sid, name, resp):
+    """One line in SameDay's log per tool call on a live call: the tool, and what the voice was told - 'started',
+    'ok, stage review', or the refusal itself (4 Nov 2026: 'the render didn't appear' and nothing said why)."""
+    try:
+        out = json.loads((resp.get_json(silent=True) or {}).get("output") or "{}")
+        what = out.get("error") or out.get("note") or ("started" if out.get("started") else f"ok, stage {out.get('stage')}")
+        print(f"rt tool {sid} {name}: {re.sub(chr(10), ' ', str(what))[:240]}", flush=True)
+    except Exception:
+        pass
+    return resp
 
 
 def _told_direction(s):

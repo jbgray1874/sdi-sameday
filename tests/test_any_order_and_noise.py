@@ -500,6 +500,22 @@ class KeepingTrackTests(unittest.TestCase):
         self.assertIn("never bring back an answer they\n  replaced", text)
 
 
+class EveryToolCallIsLoggedTests(unittest.TestCase):
+    """4 Nov 2026: 'the render didn't appear' - the voice had been refused, and no log said so."""
+
+    def test_a_refusal_is_in_the_log(self):
+        import contextlib
+        import io
+        who = new_chat()
+        _, s = say(who, "Tesco want a gondola end", {"client": "Tesco", "unit_type": "gondola end"})
+        L.log_msg(s["id"], "out", "Which pack do you need - client, internal, or both?")
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            L.app.test_client().post("/api/rt/tool", json={"session": s["id"], "name": "set_pack",
+                                                            "arguments": {"pack": "client"}})
+        self.assertIn(f"rt tool {s['id']} set_pack: The AM hasn't answered yet", buf.getvalue())
+
+
 class TheLiveTranscriberTests(unittest.TestCase):
     def brief(self, **kw):
         return {"id": "t", "visuals": [], "brief": dict({"_flow": 2}, **kw)}
