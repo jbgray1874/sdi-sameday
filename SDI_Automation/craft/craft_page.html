@@ -1,0 +1,110 @@
+<!doctype html><html lang="en-GB"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Craft Memory</title><link rel="icon" href="__MARK__">
+<style>
+:root{--ink:#17181B;--ink2:#3B3D42;--muted:#6E6A64;--paper:#F5F3EF;--card:#fff;--line:#E7E2DA;--soft:#FAF8F5;--yel:#F9DB3D;--red:#C8102E;--green:#1E8E5A;--blue:#2457C5}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--ink:#F2F1EE;--ink2:#CFCCC6;--muted:#9C978F;--paper:#111214;--card:#1A1B1E;--line:#2C2D31;--soft:#202125}}
+*{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font:15px/1.55 system-ui,-apple-system,Segoe UI,sans-serif}
+.wm{position:fixed;inset:0;z-index:-1;pointer-events:none;display:flex;align-items:center;justify-content:center;opacity:.14}.wm img{width:min(620px,70vw)}
+header{display:flex;gap:14px;align-items:center;padding:18px clamp(16px,4vw,40px);max-width:1180px;margin:0 auto}
+header img{width:52px;height:52px}header b{display:block;font-size:22px;letter-spacing:-.01em}header small{color:var(--muted)}
+header a{margin-left:auto;color:var(--ink);text-decoration:none;border:1px solid var(--line);background:var(--card);border-radius:20px;padding:8px 14px;font-weight:600;font-size:13px}
+main{max-width:1180px;margin:0 auto;padding:0 clamp(16px,4vw,40px) 60px}
+h1{font-size:32px;letter-spacing:-.02em;margin:8px 0 4px}.lead{color:var(--muted);max-width:760px;margin:0 0 20px}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px;margin-bottom:18px}
+.k{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:16px}.k b{font-size:30px;display:block;letter-spacing:-.02em}.k span{color:var(--muted);font-size:13px}
+.grid{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(0,1fr);gap:16px}@media(max-width:900px){.grid{grid-template-columns:1fr}}
+.card{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:16px 18px;margin-bottom:16px}
+.card h2{font-size:13px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:0 0 12px}
+.rule{display:flex;gap:10px;align-items:flex-start;padding:9px 0;border-top:1px dashed var(--line)}.rule:first-of-type{border-top:0}
+.rule .n{min-width:34px;height:26px;border-radius:13px;background:var(--yel);color:#17181B;font-weight:800;display:grid;place-items:center;font-size:12.5px}
+.rule small{display:block;color:var(--muted);font-size:12px}
+.ev{display:flex;gap:10px;padding:10px 0;border-top:1px solid var(--line)}.ev:first-of-type{border-top:0}
+.ev .ic{width:30px;height:30px;border-radius:9px;background:var(--soft);display:grid;place-items:center;flex:none}
+.ev small{color:var(--muted);font-size:12px}.chip{display:inline-block;font-size:11.5px;font-weight:600;border:1px solid var(--line);border-radius:12px;padding:1px 8px;margin:3px 4px 0 0;background:var(--soft)}
+.why{color:var(--ink2);font-style:italic}
+.bars{display:flex;gap:8px;align-items:flex-end;height:120px;padding-top:6px}.bars div{flex:1;background:var(--blue);border-radius:6px 6px 0 0;min-height:4px;position:relative}
+.bars div span{position:absolute;top:-18px;left:0;right:0;text-align:center;font-size:11px;color:var(--muted)}
+.axis{display:flex;gap:8px;font-size:10.5px;color:var(--muted)}.axis span{flex:1;text-align:center}
+.seci{display:grid;grid-template-columns:1fr 1fr;gap:8px}.seci div{border:1px solid var(--line);border-radius:12px;padding:10px;background:var(--soft)}
+.seci b{display:block;font-size:13px}.seci span{font-size:12.5px;color:var(--muted)}
+.empty{color:var(--muted);font-size:13.5px;padding:6px 0}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+button{border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:10px;height:36px;padding:0 14px;font-weight:600;cursor:pointer}
+button.pri{background:var(--ink);color:var(--paper);border-color:var(--ink)}
+input{height:36px;border:1px solid var(--line);border-radius:10px;padding:0 10px;background:var(--card);color:var(--ink);font:inherit}
+table{width:100%;border-collapse:collapse;font-size:13px}td{padding:6px 0;border-top:1px dashed var(--line);vertical-align:top}td:first-child{font-weight:600;width:38%}
+</style></head><body>
+<div class="wm" aria-hidden="true"><img src="__MARK__" alt=""></div>
+<header><img src="__MARK__" alt=""><div><b>Craft Memory</b><small>what the studio teaches __TOOL__ - wearesdi</small></div><a href="/">← Back to __TOOL__</a></header>
+<main>
+<h1>The studio's know-how, captured as you work</h1>
+<p class="lead">Every time someone picks an option, asks for a change, strikes out a reference, books a designer or files an email, the reason behind it is the craft. This page shows what the tools have learnt from it - and gives it back as advice, with the names of the people it came from.</p>
+<div class="kpis" id="kpis"></div>
+<div id="lib"></div>
+<div class="grid"><div>
+ <div class="card"><h2>Studio rules learnt</h2><div id="rules"></div></div>
+ <div class="card"><h2>Recent decisions and why</h2><div id="recent"></div></div>
+</div><div>
+ <div class="card"><h2>Is it learning? Predicted pick vs actual</h2><div id="acc"></div></div>
+ <div class="card"><h2>Who knows what</h2><div id="exp"></div></div>
+ <div class="card"><h2>What we keep not knowing</h2><div id="gaps"></div></div>
+ <div class="card"><h2>How it learns</h2><div class="seci">
+  <div><b>1 · Working together</b><span>Design reviews and weekly sessions - knowledge passed person to person.</span></div>
+  <div><b>2 · Capture the why</b><span>A decision plus its reason, at the moment it's made - one tap, or words already said.</span></div>
+  <div><b>3 · Join it up</b><span>Reasons grouped by client, category and unit into studio rules; taste learnt from what's picked.</span></div>
+  <div><b>4 · Give it back</b><span>The rules go into the next brief's ideas - cited - and onto this page for new starters.</span></div>
+ </div><p class="empty" style="margin-top:10px">Based on Nonaka &amp; Takeuchi's knowledge-creation spiral (SECI) and Polanyi's "we know more than we can tell". Nothing here costs AI credit - it runs on this PC.</p></div>
+ <div class="card"><h2>Your choice</h2><p class="empty">Decisions are stored with the person's name so credit goes to them. The export for reports is anonymised.</p>
+  <div class="row"><input id="who" placeholder="Your name"><button id="out">Don't learn from me</button><button id="in">Learn from me again</button></div>
+  <div class="row" style="margin-top:10px"><button class="pri" id="csv">Export anonymised CSV</button></div><p class="empty" id="optl"></p></div>
+</div></div>
+</main>
+<script>
+const $=s=>document.querySelector(s),esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const KIND={render_feedback:["🖼","rated a picture"],question_feedback:["❓","rated a question"],question_missing:["➕","added a missing question"],fact_wrong:["⚠","flagged a wrong fact"],meeting_insight:["💬","said in a meeting"],studio_review:["🛠","reviewed a concept"],designer_note:["✍","left a craft note"],option_chosen:["✅","picked an option"],change_requested:["✎","asked for a change"],reference_rejected:["✕","struck out a reference"],
+ assumption_corrected:["↺","corrected an assumption"],booked:["📅","booked"],email_filed:["📥","filed an email"],job_closed:["🏁","closed a job"]};
+const ago=t=>{const s=(Date.now()-new Date(t))/1000;return s<3600?Math.round(s/60)+"m":s<86400?Math.round(s/3600)+"h":Math.round(s/86400)+"d"};
+async function load(){const d=await fetch("api/craft/summary").then(r=>r.json());
+ const acc=d.accuracy,pct=acc.scored?Math.round(100*acc.hits/acc.scored):null,wp=d.decisions?Math.round(100*d.with_why/d.decisions):0;
+ $("#kpis").innerHTML=[[d.decisions,"decisions captured"],[wp+"%","with a reason"],[d.rules.length,"studio rules so far"],[pct===null?"–":pct+"%","picks predicted right"+(acc.scored?` (${acc.scored})`:"")]]
+  .map(([b,s])=>`<div class="k"><b>${b}</b><span>${s}</span></div>`).join("");
+ $("#rules").innerHTML=d.rules.length?d.rules.map(r=>`<div class="rule"><span class="n">${r.n}×</span><div><b>${esc(r.rule)}</b><small>${esc(r.where||"all briefs")}${r.who.length?" · from "+esc(r.who.join(", ")):""}</small></div></div>`).join(""):
+  `<p class="empty">No rules yet. They appear as people pick options and say why - in SDI Same Day Intelligence, a tap under the chosen option; in a live call, just saying it.</p>`;
+ $("#recent").innerHTML=d.recent.length?d.recent.map(e=>{const k=KIND[e.kind]||["•",e.kind];const c=e.context||{};
+  return `<div class="ev"><span class="ic">${k[0]}</span><div><b>${esc(e.who||"Someone")}</b> ${k[1]}${e.summary?`: ${esc(String(e.summary).slice(0,120))}`:""}
+  <small> · ${esc([c.client,c.category,c.unit].filter(Boolean).join(" · "))} · ${esc(e.tool)} · ${ago(e.at)} ago</small>
+  ${e.chips.length?`<div>${e.chips.map(x=>`<span class="chip">${esc(x)}</span>`).join("")}</div>`:""}${e.reason?`<div class="why">“${esc(e.reason)}”</div>`:""}</div></div>`}).join(""):`<p class="empty">Nothing captured yet - it starts with the next brief.</p>`;
+ $("#acc").innerHTML=acc.weeks.length?`<div class="bars">${acc.weeks.map(w=>`<div style="height:${Math.max(4,Math.round(100*w.hits/w.n))}%"><span>${Math.round(100*w.hits/w.n)}%</span></div>`).join("")}</div>
+  <div class="axis">${acc.weeks.map(w=>`<span>${esc(w.week.slice(5))}</span>`).join("")}</div><p class="empty">Each week: how often the tool guessed which option would be chosen, before it was. Rising = it's learning the studio's taste.</p>`:
+  `<p class="empty">Once a few options have been picked, the tool starts guessing the pick before it's made - and this chart shows how often it's right, week by week.</p>`;
+ const ex=Object.entries(d.expertise);$("#exp").innerHTML=ex.length?`<table>${ex.map(([p,cs])=>`<tr><td>${esc(p)}</td><td>${cs.map(([c,n])=>`<span class="chip">${esc(c)} ${n}</span>`).join("")}</td></tr>`).join("")}</table>`:`<p class="empty">Built from bookings and decisions - who works on what kind of job.</p>`;
+ $("#gaps").innerHTML=d.gaps.length?`<table>${d.gaps.map(([f,n])=>`<tr><td>${esc(f.replace(/_/g," "))}</td><td>${n} brief${n===1?"":"s"} didn't know it</td></tr>`).join("")}</table><p class="empty">The questions to ask clients next time.</p>`:`<p class="empty">Fields AMs often don't know yet show up here.</p>`;
+ $("#optl").textContent=d.opted_out.length?`Not learning from: ${d.opted_out.join(", ")}`:"";
+ if(d.library)renderLib(d.library)}
+// A tool's own section - only SDI Recall sends one today (craft_web.add(..., extra=...)): how designers use the library
+function renderLib(L){const box=$("#lib");if(!box||!L||L.searches===undefined)return;
+ const acc=L.accuracy,pct=acc.scored?Math.round(100*acc.hits/acc.scored):null;
+ const kp=[[L.searches,"searches"],[L.opened+L.used,"results opened"],[L.used,"reused in SolidWorks / 3DS Max"],[L.gaps,"searches with no good result"],
+  [pct===null?"–":pct+"%","first result was the one opened"+(acc.scored?` (${acc.scored})`:"")]];
+ box.innerHTML=`<div class="card"><h2>SDI Recall · how designers use the library</h2>
+ <div class="kpis" style="margin-bottom:14px">${kp.map(([b,s])=>`<div class="k"><b>${b}</b><span>${s}</span></div>`).join("")}</div>
+ <div class="grid"><div>
+  <h2>What the library is missing</h2>${L.missing.length?`<table>${L.missing.map(m=>`<tr><td>${esc(m.query)}</td><td>${m.n} search${m.n===1?"":"es"} with nothing worth opening${m.people>1?` · ${m.people} people`:""}${m.brand?` · ${esc(m.brand)}`:""} · ${ago(m.last)} ago</td></tr>`).join("")}</table><p class="empty">Searches nobody opened anything from - the fixtures worth drawing up or filing better next.</p>`:`<p class="empty">Searches nobody opened anything from will show here - the gaps in the library.</p>`}
+  <h2 style="margin-top:18px">Studio favourites</h2>${L.favourites.length?`<table>${L.favourites.map(f=>`<tr><td>${esc(f.name)}</td><td>${esc(f.brand)} · opened ${f.n}×${f.used?`, reused ${f.used}×`:""}${f.people>1?` · ${f.people} people`:""}</td></tr>`).join("")}</table>`:`<p class="empty">The results people open and reuse most.</p>`}
+ </div><div>
+  <h2>Is the ordering learning?</h2>${acc.weeks.length?`<div class="bars">${acc.weeks.map(w=>`<div style="height:${Math.max(4,Math.round(100*w.hits/w.n))}%"><span>${Math.round(100*w.hits/w.n)}%</span></div>`).join("")}</div>
+   <div class="axis">${acc.weeks.map(w=>`<span>${esc(w.week.slice(5))}</span>`).join("")}</div><p class="empty">Each week: how often the result the library put first was the one opened. It rises as the ranking learns what each person and client goes for.</p>`:
+   `<p class="empty">After a few searches, this shows week by week how often the first result was the one opened.</p>`}
+  <h2 style="margin-top:18px">Words the studio means</h2>${L.synonyms.length?`<table>${L.synonyms.map(s=>`<tr><td>${esc(s.from)} → ${esc(s.to)}</td><td>retyped ${s.n}×${s.active?" · now searched together":" · joins searches once seen twice"}</td></tr>`).join("")}</table>`:`<p class="empty">When someone retypes one word as another within a minute, the pair shows here. Seen twice, a search for one finds both.</p>`}
+  <h2 style="margin-top:18px">Was it the one?</h2>${(F=>F&&(F.yes||F.no)?`<p style="margin:0 0 6px"><b>${F.yes}</b> yes · <b>${F.no}</b> not quite <span class="empty">(${Math.round(100*F.yes/(F.yes+F.no))}% of answered opens were the one)</span></p>
+   ${F.right.length?`<div><small class="empty">What made it right: </small>${F.right.map(([c,n])=>`<span class="chip">${esc(c)} ${n}</span>`).join("")}</div>`:""}
+   ${F.wrong.length?`<div><small class="empty">When it missed: </small>${F.wrong.map(([c,n])=>`<span class="chip">${esc(c)} ${n}</span>`).join("")}</div>`:""}`
+   :`<p class="empty">After someone opens a result and comes back, the library asks one question - "Was this the one you needed?" The answers show here, and "when it missed" says whether the library lacks the right shape, size or client.</p>`)(L.feedback)}
+  <p class="empty" style="margin-top:14px">This PC is recorded as <b>${esc(L.you)}</b> - put that name in "Your choice" below to stop the library learning from it.</p>
+ </div></div></div>`;
+ if(L.you&&!$("#who").value)$("#who").value=L.you}
+$("#out").onclick=async()=>{const w=$("#who").value.trim();if(!w)return;await fetch("api/craft/optout",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({who:w,out:true})});load()};
+$("#in").onclick=async()=>{const w=$("#who").value.trim();if(!w)return;await fetch("api/craft/optout",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({who:w,out:false})});load()};
+$("#csv").onclick=()=>{location.href="api/craft/export.csv"};
+load();
+</script></body></html>

@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Same Day Deploy Guide</title>
+<style>
+:root{--bg:#f5f3ee;--card:#fff;--ink:#1d1d1b;--mute:#6b6a65;--line:#e6e2d8;--y:#F9DB3D;--code:#f3f1ea}
+@media (prefers-color-scheme:dark){:root{--bg:#141414;--card:#1e1e1e;--ink:#f1f0ec;--mute:#a7a59e;--line:#333;--code:#262626}}
+body{margin:0;background:var(--bg);color:var(--ink);font:15.5px/1.6 system-ui,Segoe UI,sans-serif}
+.wrap{max-width:960px;margin:0 auto;padding:28px 16px 70px}
+h1{margin:0 0 4px;font-size:30px}h2{margin:34px 0 8px;font-size:21px;border-bottom:2px solid var(--y);padding-bottom:4px}
+.sub{color:var(--mute)}.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 18px;margin:12px 0}
+code,pre{font-family:Consolas,monospace;font-size:13.5px;background:var(--code);border-radius:6px}code{padding:1px 6px}
+pre{padding:10px 12px;overflow:auto}table{width:100%;border-collapse:collapse}td,th{padding:7px 8px;border-top:1px solid var(--line);text-align:left;vertical-align:top}
+th{font-size:13px;color:var(--mute)}.warn{border-left:4px solid #e5484d}.ok{border-left:4px solid #2f8a4f}
+</style></head><body><div class="wrap">
+<h1>SDI Same Day Intelligence: deploy guide</h1>
+<p class="sub">For James. Andy's briefing tool: an account manager talks or types a brief and gets SDI's past work, concept renders, a GA and the brief pack. Updated 2 November 2026.</p>
+
+<div class="card ok"><b>In short:</b> copy <code>SDI_Automation\</code> from this folder to <code>C:\SDI_Automation\</code> on the server, create the Python environment (the keys file <code>.env</code> comes with the folder, nothing to fill in), then start <code>brief_lite\lite_app.py</code> (port 5020) and <code>craft\craft_site.py</code> (port 5030).</div>
+
+<h2>1. What's in this folder</h2>
+<table>
+<tr><th>Path</th><th>What it is</th></tr>
+<tr><td><code>SDI_Automation\brief_lite\</code></td><td>The app. <code>lite_app.py</code> is the server, <code>lite_page.html</code> is the page, plus <code>convo_parts.py</code>, <code>realtime_parts.py</code>, <code>moodboard.py</code>, <code>spaces.py</code>, <code>pdf_pack.py</code>, <code>ga_draw.py</code>, <code>lite_search.py</code> and others.</td></tr>
+<tr><td><code>brief_lite\lite.db</code></td><td>Chats, briefs, projects (people), Spaces and the AI spend log.</td></tr>
+<tr><td><code>brief_lite\projects.db</code>, <code>knowledge.db</code></td><td>The index of SDI's past work and quotes, used for "SDI made this before".</td></tr>
+<tr><td><code>brief_lite\out\</code>, <code>client_files\</code></td><td>Renders, GAs, PDF packs, and files the AMs uploaded.</td></tr>
+<tr><td><code>brief_lite\pwa\</code></td><td>Phone app icons, manifest and service worker.</td></tr>
+<tr><td><code>SDI_Automation\craft\</code></td><td>Craft Memory, the feedback log (<code>craft.db</code>), plus the SDI Craft site on port 5030.</td></tr>
+<tr><td><code>SDI_Automation\studio_voice.py</code></td><td>Free on-server speech-to-text (faster-whisper). Backup for voice notes when OpenAI's transcriber can't be used.</td></tr>
+<tr><td><code>SDI_Automation\studio_data\ai_switch.json</code></td><td>The daily AI spending caps. <code>brief_lite_daily_cap_usd</code> is this tool's.</td></tr>
+<tr><td><code>.env.example</code></td><td>Empty template only (Windows shows it as ".env", type "EXAMPLE File"). Not needed: the real keys are in <code>SDI_Automation\.env</code>.</td></tr>
+<tr><td><code>USER_GUIDE.html</code></td><td>The simple guide for account managers and designers: how a call goes, the questions it asks, what to do if it doesn't hear you. Share it with users at handover.</td></tr>
+<tr><td><code>requirements_full.txt</code></td><td>The exact Python packages it runs with today (Python 3.11.9).</td></tr>
+</table>
+<div class="card warn"><b>Not included, on purpose:</b> nothing - everything, including the keys, is in this K: folder.</div>
+<div class="card warn"><b>Keys: use Muhammad's, not your own.</b> The apps run on SDI's AI accounts (Muhammad's keys). Don't create or connect a personal OpenAI or Anthropic account. Muhammad's ready-made <code>.env</code> is already in this K: folder at <code>SDI_Automation\.env</code>, so everything you need is here on K: (nothing on anyone's laptop). It is copied to <code>C:\SDI_Automation\.env</code> on the server together with the code. Check the file is there after copying: <code>dir C:\SDI_Automation\.env</code>. Every API call reads its key from that one file.</div>
+
+<h2>2. What the server needs</h2>
+<ul>
+<li>Windows 10/11 or Windows Server, with <b>Python 3.11 (64-bit)</b>.</li>
+<li>Outbound internet to <code>api.openai.com</code>, <code>api.anthropic.com</code> (and <code>api.x.ai</code> if Grok is used), plus normal web access for the moodboard's product search.</li>
+<li><b>Read</b> access to W: and K: for SDI's past work pictures. The tool never writes to them.</li>
+<li>A GPU is optional. It speeds up picture matching and transcription; CPU works.</li>
+<li>Ports <b>5020</b> (Same Day) and <b>5030</b> (SDI Craft) open on the SDI network.</li>
+</ul>
+
+<h2>3. Install</h2>
+<pre>xcopy /E /I "K:\IT\AI &amp; Automation\Design\SDI Same Day Intelligence\SDI_Automation" C:\SDI_Automation
+cd C:\SDI_Automation
+py -3.11 -m venv .venv-gpu
+.venv-gpu\Scripts\python.exe -m pip install --upgrade pip
+.venv-gpu\Scripts\python.exe -m pip install -r "K:\IT\AI &amp; Automation\Design\SDI Same Day Intelligence\requirements_full.txt" --extra-index-url https://download.pytorch.org/whl/cu128
+rem the keys file came with the folder - check it is there (do not edit it):
+dir C:\SDI_Automation\.env</pre>
+<p class="sub">No NVIDIA GPU? Install torch for CPU instead: drop the <code>--extra-index-url</code>, and if pip complains about <code>+cu128</code>, remove that suffix from the torch lines.</p>
+<div class="card warn"><b>Keep the path <code>C:\SDI_Automation</code>.</b> Several files read <code>C:\SDI_Automation\.env</code> and <code>C:\SDI_Automation\studio_data\</code> by that exact path. If it has to live elsewhere, search the code for <code>C:\SDI_Automation</code> first.</div>
+
+<h2>4. Start it</h2>
+<pre>C:\SDI_Automation\.venv-gpu\Scripts\python.exe C:\SDI_Automation\brief_lite\lite_app.py
+C:\SDI_Automation\.venv-gpu\Scripts\python.exe C:\SDI_Automation\craft\craft_site.py</pre>
+<p>Then open <code>http://SERVER:5020</code>. The first start takes about 30 seconds while it loads the picture-matching model; "past-work search ready" in the console means it's up.</p>
+<p><b>Keep it running:</b> on the laptop, <code>Studio_Brief_Autostart.bat</code> (in the Startup folder) starts everything and restarts anything that stops. On a server, either run the two commands as Windows services (for example with NSSM), or create Task Scheduler tasks "At startup", "Run whether user is logged on or not", and restart on failure.</p>
+
+<h2>5. App portal: phones and outside the office (Microsoft App Proxy)</h2>
+<p>Publish it the same way as the HR InVentry app: a fixed HTTPS address, SDI Microsoft sign-in, only named people, no VPN. The live voice needs HTTPS, so this is also what makes the mic work on phones.</p>
+<table>
+<tr><th>Setting</th><th>Value</th></tr>
+<tr><td>Application</td><td>Its <b>own</b> App Proxy application, published at the root of its address. Not a sub-path under <code>/app/</code>: the page calls <code>/api/…</code> from the root. Add a tile in the portal that links to it.</td></tr>
+<tr><td>Internal URL</td><td><code>http://SERVER:5020/</code></td></tr>
+<tr><td>External URL</td><td>for example <code>https://sdisameday-sdidisplays.msappproxy.net/</code></td></tr>
+<tr><td>Pre-authentication</td><td>Microsoft Entra ID, with "Assignment required" on. Users: Andy Baxter, Nick, then the account managers.</td></tr>
+<tr><td>Backend application timeout</td><td><b>Long</b> (180 seconds). Some design and brief calls take longer than the default 85 seconds.</td></tr>
+<tr><td>Translate URLs in headers / body</td><td>Yes / No (the defaults)</td></tr>
+<tr><td>Single sign-on</td><td><b>Header-based</b>: send <code>X-SDI-Email</code> = <code>user.mail</code> (and optionally <code>X-SDI-User</code> = <code>user.displayname</code>). The app then opens each person's own project automatically and records who made each brief. Headers are only trusted from the connector IP in <code>LITE_TRUST_FROM</code>.</td></tr>
+<tr><td><code>.env</code> on the server</td><td><code>LITE_TRUST_FROM=</code> the App Proxy connector's IP. People who came through SDI sign-in then aren't asked the team code again. Anyone else not on the server is still asked for <code>LITE_ACCESS_CODE</code>.</td></tr>
+</table>
+<ul>
+<li>The live voice runs from the browser straight to OpenAI (WebRTC). Only the page and its API go through the connector, so the phone just needs normal internet.</li>
+<li>Phone app: open the App Proxy address on the phone, then Add to Home Screen.</li>
+<li>This replaces the Cloudflare quick tunnel used on the laptop today (<code>brief_lite\lite_tunnel.py</code> → <code>PHONE_LINK.txt</code>), whose link changes on every restart.</li>
+</ul>
+
+<h2>6. Costs and limits</h2>
+<table>
+<tr><td>Daily cap</td><td><code>studio_data\ai_switch.json</code> → <code>"brief_lite_daily_cap_usd": 10.0</code>. When a day's spend reaches it, the AI stops until midnight. Edit and save; no restart needed.</td></tr>
+<tr><td>Typical spend</td><td>About $2–3 for a full brief (voice call, first render at high quality, changes at medium, GA, moodboard, voice-note replies). $0 on days nobody uses it. Claude's share is billed on the Anthropic account, the rest on OpenAI.</td></tr>
+<tr><td>Voice model</td><td>Everyone uses the big live model (<code>gpt-realtime</code>), with <code>gpt-4o-transcribe</code> writing out what the AM says. Voice notes: heard by <code>gpt-4o-transcribe</code> (free Whisper as backup), answered in <code>gpt-4o-mini-tts</code> voice "fable" (free Microsoft voice as backup). Design director: <code>claude-opus-5-5</code>.</td></tr>
+<tr><td>Stop button</td><td>The ■ Stop in the chat stops any new render, so no more credit is spent. A picture already being drawn still finishes (it's already paid for) and appears under Images.</td></tr>
+</table>
+
+<h2>7. Check it works</h2>
+<ol>
+<li><code>http://SERVER:5020</code> opens and shows "Who's briefing?".</li>
+<li><code>http://SERVER:5020/api/status</code> answers.</li>
+<li>Type a short brief in a test project. A reply comes back and the "AI spend today" counter moves.</li>
+<li><code>http://SERVER:5030</code> opens SDI Craft.</li>
+</ol>
+
+<h2>8. If something goes wrong</h2>
+<table>
+<tr><td>Chat answers "budget is used up"</td><td>Raise <code>brief_lite_daily_cap_usd</code> in <code>studio_data\ai_switch.json</code>.</td></tr>
+<tr><td>No replies at all</td><td>Check <code>.env</code> has <code>ANTHROPIC_API_KEY</code> and <code>OPENAI_API_KEY</code>, and that the server can reach the APIs.</td></tr>
+<tr><td>Mic or voice doesn't work</td><td>The page must be opened over HTTPS (see section 5), and the browser must be allowed the microphone.</td></tr>
+<tr><td>"SDI made this before" is empty</td><td><code>brief_lite\projects.db</code> is missing, or W:/K: can't be read.</td></tr>
+</table>
+<p class="sub">Questions: Muhammad Yazir.</p>
+</div></body></html>

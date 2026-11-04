@@ -1,0 +1,78 @@
+<!doctype html><html lang="en-GB"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Studio review - SDI Same Day Intelligence</title><link rel="icon" href="/pwa/mark.png?v=4">
+<style>
+:root{--ink:#17181B;--ink2:#3B3D42;--muted:#6E6A64;--paper:#F5F3EF;--card:#fff;--line:#E7E2DA;--soft:#FAF8F5;--red:#C8102E;--green:#1E8E5A;--amber:#B26A00}
+@media (prefers-color-scheme:dark){:root{--ink:#F2F1EE;--ink2:#CFCCC6;--muted:#9C978F;--paper:#111214;--card:#1A1B1E;--line:#2C2D31;--soft:#202125}}
+*{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font:15px/1.5 system-ui,-apple-system,Segoe UI,sans-serif}
+.wrap{max-width:900px;margin:0 auto;padding:16px 16px 40px}
+header{display:flex;gap:12px;align-items:center;margin-bottom:12px}header img{width:44px;height:44px}header b{display:block;font-size:19px}header small{color:var(--muted)}
+.card{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:14px 16px;margin-bottom:14px}
+h2{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:0 0 8px}
+.brief{display:grid;grid-template-columns:120px 1fr;gap:4px 10px;font-size:13.5px}.brief span:nth-child(odd){color:var(--muted)}
+.tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px}.tabs button{height:34px;border:1px solid var(--line);border-radius:17px;background:var(--card);color:var(--ink);padding:0 14px;font-weight:700}
+.tabs button.on{background:var(--ink);color:var(--paper)}
+.stage{position:relative;border-radius:14px;overflow:hidden;background:var(--soft);cursor:crosshair;touch-action:manipulation}
+.stage img{display:block;width:100%;height:auto}
+.pin{position:absolute;transform:translate(-50%,-50%);width:28px;height:28px;border-radius:50%;background:var(--red);color:#fff;font-weight:800;font-size:13px;display:grid;place-items:center;border:2px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,.3)}
+.hint{color:var(--muted);font-size:12.5px;margin:6px 2px 0}
+.pins{margin:8px 0 0;padding-left:20px;font-size:13.5px}
+.verd{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}.verd button{height:56px;border:1.5px solid var(--line);border-radius:14px;background:var(--card);color:var(--ink);font-weight:700;font-size:14px}
+.verd button.on.g{border-color:var(--green);background:color-mix(in srgb,var(--green) 12%,var(--card))}
+.verd button.on.a{border-color:var(--amber);background:color-mix(in srgb,var(--amber) 12%,var(--card))}
+.verd button.on.r{border-color:var(--red);background:color-mix(in srgb,var(--red) 10%,var(--card))}
+.chips button{margin:4px 5px 0 0;height:32px;border:1px solid var(--line);border-radius:16px;background:var(--card);color:var(--ink2);padding:0 12px;font-size:13px;font-weight:600}
+.chips button.on{background:var(--ink);color:var(--paper);border-color:var(--ink)}
+textarea,input{width:100%;border:1px solid var(--line);border-radius:12px;padding:10px 12px;background:var(--card);color:var(--ink);font:inherit}
+textarea{min-height:80px;resize:vertical}
+.row{display:flex;gap:8px;align-items:center;margin-top:8px}
+.mic{flex:none;height:44px;border:1px solid var(--line);border-radius:12px;background:var(--card);color:var(--ink);padding:0 14px;font-weight:700}.mic.rec{background:var(--red);color:#fff;border-color:var(--red)}
+.send{width:100%;height:52px;border:0;border-radius:14px;background:var(--red);color:#fff;font-weight:800;font-size:16px;margin-top:6px}
+.done{text-align:center;padding:40px 16px}.done b{display:block;font-size:22px;margin:10px 0 4px}
+</style></head><body><div class="wrap" id="app">
+<header><img src="/pwa/mark.png?v=4" alt=""><div><b>Studio review</b><small id="sub">SDI Same Day Intelligence · wearesdi</small></div></header>
+<div class="card"><h2>The brief</h2><div class="brief" id="brief"></div></div>
+<div class="card"><h2>The concept - tap the picture to pin a comment</h2><div class="tabs" id="tabs"></div>
+ <div class="stage" id="stage"><img id="img" alt="Concept"></div><p class="hint">Tap any spot to add a note there - "this joint", "too thin", "won't fit the bottles".</p><ol class="pins" id="pins"></ol></div>
+<div class="card"><h2>Can we make it?</h2><div class="verd"><button class="g" data-v="good">👍 Good to go</button><button class="a" data-v="changes">✎ Needs changes</button><button class="r" data-v="no">👎 Can't make it</button></div>
+ <h2 style="margin-top:14px">Why - tap any</h2><div class="chips" id="chips"></div></div>
+<div class="card"><h2>What would you change? (optional)</h2><textarea id="txt" placeholder="e.g. Use 5mm acrylic - 3mm cracked on the last Boots job. Fold the tray edge for strength."></textarea>
+ <div class="row"><button class="mic" id="mic">🎙 Hold to speak</button><input id="who" placeholder="Your name"></div>
+ <button class="send" id="send">Send to the AM</button></div>
+</div>
+<script>
+const T="__TOKEN__",$=s=>document.querySelector(s),esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const CH=["Can be made as is","Too costly","Wrong material","Joints / fixing","Weight / strength","Flat-pack / shipping","Too many parts","Lighting / power",
+ "Products won't fit","Brand rule","Good idea","Better way to build it"];
+let D=null,cur=0,verdict="",chips=new Set(),pins=[];
+try{$("#who").value=localStorage.getItem("srWho")||""}catch(e){}
+async function load(){D=await fetch(`/api/review/${T}`).then(r=>r.json());if(D.error){$("#app").innerHTML=`<div class="done"><b>This review link has expired</b>Ask the AM for a new one.</div>`;return}
+ $("#sub").textContent=`Asked by ${D.asked_by||"an AM"} · ${D.title||""}`;
+ $("#brief").innerHTML=D.brief.map(([k,v])=>`<span>${esc(k)}</span><span>${esc(v)}</span>`).join("");
+ $("#tabs").innerHTML=D.visuals.map((v,i)=>`<button data-i="${i}">${esc(v.name)}</button>`).join("");
+ document.querySelectorAll("#tabs button").forEach(b=>b.onclick=()=>show(+b.dataset.i));
+ $("#chips").innerHTML=CH.map(c=>`<button>${c}</button>`).join("");document.querySelectorAll("#chips button").forEach(b=>b.onclick=()=>{b.classList.toggle("on");chips.has(b.textContent)?chips.delete(b.textContent):chips.add(b.textContent)});
+ show(Math.max(0,D.visuals.findIndex(v=>v.chosen)))}
+function show(i){cur=i;document.querySelectorAll("#tabs button").forEach((b,k)=>b.classList.toggle("on",k===i));$("#img").src=`/review/${T}/img/${D.visuals[i].i}`;drawPins()}
+function drawPins(){document.querySelectorAll(".pin").forEach(p=>p.remove());const st=$("#stage");
+ pins.forEach((p,k)=>{if(p.v!==cur)return;const d=document.createElement("div");d.className="pin";d.textContent=k+1;d.style.left=(p.x*100)+"%";d.style.top=(p.y*100)+"%";st.appendChild(d)});
+ $("#pins").innerHTML=pins.map((p,k)=>`<li>${esc(D.visuals[p.v].name)}: ${esc(p.note)}</li>`).join("")}
+$("#stage").onclick=e=>{if(e.target.classList.contains("pin"))return;const r=$("#img").getBoundingClientRect();const x=(e.clientX-r.left)/r.width,y=(e.clientY-r.top)/r.height;
+ if(x<0||x>1||y<0||y>1)return;const note=prompt("Your note for this spot");if(note&&note.trim()){pins.push({v:cur,x,y,note:note.trim()});drawPins()}};
+document.querySelectorAll(".verd button").forEach(b=>b.onclick=()=>{verdict=b.dataset.v;document.querySelectorAll(".verd button").forEach(x=>x.classList.toggle("on",x===b))});
+// voice note -> words, on this PC (free)
+let rec=null,parts=[];const mic=$("#mic");
+mic.addEventListener("pointerdown",async e=>{e.preventDefault();try{const st=await navigator.mediaDevices.getUserMedia({audio:true});rec=new MediaRecorder(st);parts=[];
+ rec.ondataavailable=d=>d.data.size&&parts.push(d.data);rec.onstop=async()=>{st.getTracks().forEach(t=>t.stop());mic.classList.remove("rec");mic.textContent="Listening back…";
+  const fd=new FormData();fd.append("audio",new Blob(parts,{type:rec.mimeType||"audio/webm"}),"note.webm");
+  const r=await fetch(`/review/${T}/voice`,{method:"POST",body:fd}).then(r=>r.json()).catch(()=>({}));mic.textContent="🎙 Hold to speak";
+  if(r.text)$("#txt").value=($("#txt").value?$("#txt").value+" ":"")+r.text};rec.start(250);mic.classList.add("rec");mic.textContent="Listening… let go"}catch(err){alert("Microphone blocked")}});
+["pointerup","pointerleave","pointercancel"].forEach(ev=>mic.addEventListener(ev,()=>{if(rec&&rec.state==="recording")rec.stop()}));
+$("#send").onclick=async()=>{const who=$("#who").value.trim();if(!who){alert("Add your name - the credit for this goes to you");$("#who").focus();return}
+ if(!verdict&&!chips.size&&!$("#txt").value.trim()&&!pins.length){alert("Tap a verdict, a reason, a pin or write a line first");return}
+ try{localStorage.setItem("srWho",who)}catch(e){}
+ const v=D.visuals[cur];const r=await fetch(`/api/review/${T}`,{method:"POST",headers:{"Content-Type":"application/json"},
+  body:JSON.stringify({who,verdict,chips:[...chips],text:$("#txt").value.trim(),label:v.label,kind:v.kind,pins:pins.map(p=>({on:D.visuals[p.v].name,x:+p.x.toFixed(3),y:+p.y.toFixed(3),note:p.note}))})}).then(r=>r.json()).catch(()=>({}));
+ $("#app").innerHTML=r.ok?`<div class="done"><img src="/pwa/mark.png?v=4" width="64" alt=""><b>Thanks, ${esc(who)} ✓</b>${esc(D.asked_by||"The AM")} will see this in the chat, and the studio's Craft Memory learns from it - with your name on it.</div>`:
+  `<div class="done"><b>That didn't send</b>Please try again.</div>`};
+load();
+</script></body></html>
