@@ -1150,12 +1150,16 @@ async function rtStart(){if(!project){toast("Pick your name first");newBrief();r
  fresh=false;sid=j.session;if(j.brief)showBrief(j.brief);const h=$(".hero");if(h)h.remove();
  const tr0=j.transcription||null;
  const pc=new RTCPeerConnection(),audio=new Audio();audio.autoplay=true;pc.ontrack=e=>{audio.srcObject=e.streams[0];watchOut(e.streams[0])};
+ // 4 Nov 2026 (James: "the render didn't appear on the phone app"): a render takes a minute or two with the mic paused, the
+ // phone locked itself, and a locked phone pauses the page and drops the call. The screen now stays on for the call; a
+ // call that dropped anyway is closed cleanly and the chat reloaded, so whatever was drawn meanwhile is on screen.
+ pc.onconnectionstatechange=()=>{if(rt&&rt.pc===pc&&["failed","closed"].includes(pc.connectionState)){rtStop();toast("The call dropped - everything so far is in the chat. Press Talk to carry on.")}};
  let mic;try{mic=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:false}})}catch(e){toast("Microphone blocked - allow it from the padlock in the address bar");return false}
  pc.addTrack(mic.getTracks()[0]);
  const dc=pc.createDataChannel("oai-events");
  const told=t=>t?((t.prompt||"")+" "+(t.keywords||[]).join(", ")).trim():"";   // what the transcriber was told: prompt + keyword hints
  rt={pc,dc,mic,audio,bubble:null,userRow:null,talking:false,tr:tr0,hints:told(tr0)?[told(tr0)]:[]};
- dc.onopen=()=>{talkUI(true,"Live - just talk. Interrupt me any time.");dc.send(JSON.stringify({type:"response.create"}))};
+ dc.onopen=()=>{talkUI(true,"Live - just talk. Interrupt me any time.");keepAwake(true);dc.send(JSON.stringify({type:"response.create"}))};
  dc.onmessage=e=>rtEvent(JSON.parse(e.data));
  meter(mic);
  const offer=await pc.createOffer();await pc.setLocalDescription(offer);
@@ -1163,7 +1167,13 @@ async function rtStart(){if(!project){toast("Pick your name first");newBrief();r
  if(!ans.ok){rtStop();talkOn=true;$("#talk").classList.add("on");toast("Live voice is resting - using talk mode: I speak, you answer");return false}
  await pc.setRemoteDescription({type:"answer",sdp:await ans.text()});
  return true}
-function rtStop(){if(!rt)return;try{rt.dc.close()}catch(e){}try{rt.pc.close()}catch(e){}rt.mic.getTracks().forEach(t=>t.stop());rt=null;talkOn=false;talkUI(false);loadHist()}
+let wake=null;
+async function keepAwake(on){try{if(on&&!wake&&"wakeLock" in navigator){wake=await navigator.wakeLock.request("screen");wake.addEventListener("release",()=>{wake=null})}
+ else if(!on&&wake){const w=wake;wake=null;await w.release()}}catch(e){}}
+document.addEventListener("visibilitychange",()=>{if(document.visibilityState!=="visible"||!rt)return;
+ if(["failed","closed","disconnected"].includes(rt.pc&&rt.pc.connectionState)){rtStop();toast("The call stopped while the phone was locked - everything so far is in the chat. Press Talk to carry on.");return}
+ keepAwake(true)});   // the browser lets go of the wake lock when the page is hidden: take it again
+function rtStop(){if(!rt)return;keepAwake(false);try{rt.dc.close()}catch(e){}try{rt.pc.close()}catch(e){}rt.mic.getTracks().forEach(t=>t.stop());rt=null;talkOn=false;talkUI(false);loadHist()}
 function meter(stream){const ctx=new (window.AudioContext||window.webkitAudioContext)(),an=ctx.createAnalyser();an.fftSize=512;ctx.createMediaStreamSource(stream).connect(an);
  const buf=new Float32Array(an.fftSize),bars=[...$("#wave").children];
  let loud=0;

@@ -351,6 +351,17 @@ class ThePageTests(unittest.TestCase):
         self.assertEqual(total, len(after))                             # their own reply was coming: not said twice
         self.assertTrue(still_owed)                                     # (their reply clears it when it is sent)
 
+    def test_the_phone_stays_awake_and_a_dropped_call_reloads_the_chat(self):
+        """4 Nov 2026: "the render didn't appear on the phone app" - a minute or two of drawing with the mic paused, the
+        phone locked itself, and a locked phone pauses the page and drops the call."""
+        self.assertIn("keepAwake(true);dc.send", PAGE)                       # on as the call opens
+        self.assertIn("function rtStop(){if(!rt)return;keepAwake(false);", PAGE)
+        self.assertIn('navigator.wakeLock.request("screen")', PAGE)
+        self.assertIn('document.addEventListener("visibilitychange"', PAGE)  # taken again when the page is back
+        stop = page_fn("rtStop")
+        self.assertIn("loadHist()", stop)                                     # a stopped call reloads the chat
+        self.assertIn('pc.onconnectionstatechange=()=>{if(rt&&rt.pc===pc&&["failed","closed"]', PAGE)
+
     def test_a_fresher_hint_is_sent_to_the_transcriber_mid_call(self):
         self.assertIn('session:{type:"realtime",audio:{input:{transcription:j.transcription}}}', PAGE)
         self.assertIn("const tr0=j.transcription||null;", PAGE)
