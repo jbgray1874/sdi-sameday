@@ -4470,6 +4470,13 @@ except Exception:
     RUNNING_VERSION = "unknown"
 
 
+@app.route("/api/version")
+def api_version():
+    """4 Nov 2026: what Update-SameDay.ps1 checks from the laptop after a restart - the version and nothing else, so it
+    needs no team code (the laptop is not this machine). /api/status says more, so it still does."""
+    return jsonify({"version": RUNNING_VERSION})
+
+
 @app.route("/api/status")
 def api_status():
     import lite_search
@@ -4571,7 +4578,7 @@ def _remote():
 def access_gate():
     if not ACCESS_CODE or not _remote():
         return None
-    if request.path in ("/unlock", "/logo.png", "/sw.js") or request.path.startswith("/pwa/"):
+    if request.path in ("/unlock", "/logo.png", "/sw.js", "/api/version") or request.path.startswith("/pwa/"):
         return None
 
     import hmac

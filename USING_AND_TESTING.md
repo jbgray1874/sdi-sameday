@@ -85,58 +85,63 @@ When someone says "it didn't hear me", look in `brief_lite\rt_drops.log` on the 
 
 ## 5. Testing the 4 November changes
 
-### Put the branch on the server
+### Put it on the server (from the laptop, VPN on)
 
-On the laptop, with the VPN on:
+The server has no git, so this runs on the laptop, as Ship-It does. SameDay goes first, then Ship-It:
 
 ```
 cd C:\ClaudeVision
 git pull jbg claude/app-portal-main-2026
-Copy-Item C:\ClaudeVision\sdi-intelligence-backend\deploy\Update-SameDay.ps1 \\10.0.0.5\c$\Tools\
+.\sdi-intelligence-backend\deploy\Update-SameDay.ps1 -Branch claude/inspiring-planck-8juriz
+.\sdi-intelligence-backend\deploy\Ship-It.ps1
 ```
 
-On the server, in PowerShell opened as administrator. The first time, a GitHub sign-in opens: sign in as jbgray1874.
+Update-SameDay ends with "SameDay is running the new code". Ship-It ends green at 4b. The first time, a GitHub sign-in may open: sign in as jbgray1874.
 
-```
-powershell -ExecutionPolicy Bypass -File C:\Tools\Update-SameDay.ps1 -Branch claude/inspiring-planck-8juriz
-```
+### Script A: typed, on a laptop (about 10 minutes)
 
-It ends with "SameDay is running the new code".
+Open SameDay (the app portal tile, or `http://10.0.0.5:5020` in the office), pick your name, and press **+ New chat**. Type each line and press the red arrow.
 
-### Let the voice work on the http address (the test PC only)
+| # | Type | It should |
+|---|---|---|
+| 1 | `Tesco want a gondola end for Milwaukee M18 drills` | Reply, and ask which pack, once |
+| 2 | `1800 high, 1200 wide, 600 deep, black and red, with a lit header` (ignore the pack question) | Not ask the pack again. The Brief panel shows 1800 x 1200 x 600 mm. |
+| 3 | `let's do the internal brief questions first` | Say "Let's do the SDI brief questions now", then ask an internal question |
+| 4 | `deadline is Friday 20 November, budget 5000 pounds, 50 units` | Record all three, then ask the next question, not one of these |
+| 5 | `back to the render` | Go back to the render: past job or something new? |
+| 6 | `something new, make the render` | Draw it (about a minute), then ask "any changes, or finalise?" |
+| 7 | `make the header navy` | Make Option B. A stays on screen. |
+| 8 | `go back to option A and make the shelves oak` | Make Option C from A, not from B |
+| 9 | `build the brief PDF now` | Make the 8-page PDF, with a list of what's still missing |
+| 10 | `actually just the client pack`, then `C is the one` | Change the pack, then make C's GA and client sheet |
 
-In Chrome on the PC you test from:
+**Passes if:** it never asked which pack twice, never asked for something you'd already given, and did the internal questions before the render when you asked.
 
-1. Open `chrome://flags/#unsafely-treat-insecure-origin-as-secure`.
-2. Add `http://10.0.0.5:5020` and set it to Enabled.
-3. Relaunch Chrome.
+### Script B: talking, on a phone (about 10 minutes)
 
-This changes only that browser. It isn't needed on the portal's https address, where the microphone already works.
+Do this outside the office, on mobile data. Open the app portal on the phone, tap SameDay, then **Open**.
 
-### What to try
+- It should open signed in, with no team code.
+- Pick your name, press **+ New chat**, then press **Talk** (yellow) and allow the microphone.
 
-Typed:
+| # | Say | It should |
+|---|---|---|
+| 1 | "Hi, it's Boots. They want a counter unit for No7 serums." | Say it back, and ask one question (the pack, once) |
+| 2 | Ignore that: "About 400 high, 300 wide, 250 deep, navy and white." | Not ask the pack again. Read the size back right. |
+| 3 | "Let's do the studio questions first." | Switch to the internal questions |
+| 4 | "Deadline's the 20th of November, 200 units." | Take both, and ask the next one |
+| 5 | "OK, back to the render. Just draw it." | Say it's drawing. The mic pauses and the render appears. |
+| 6 | "Make the header lit." | Make Option B |
+| 7 | Put a radio or TV on, or get someone to talk nearby. Keep going: "and add a tester tray at the front." | Answer you, not them. "Noisy room" appears. |
+| 8 | If it's very noisy: hold the orb, say "add a tester tray", and let go | Only hear you while you hold it |
+| 9 | "That's the one. Finalise B." | Make B's GA and the client sheet |
+| 10 | "That's all, thanks." | Say goodbye. Everything stays in the chat. |
 
-- [ ] "Tesco want a gondola end for Milwaukee drills, make a render". It should draw, with no pack question first.
-- [ ] Start a brief and answer the pack question with something about the job instead. It should not ask the pack again.
-- [ ] Mid-brief: "let's do the internal questions first", answer two, then "back to the render".
-- [ ] With a render on screen: "change the header to navy", then "go back to option A and make the shelves oak".
-- [ ] Before finalising: "build the brief PDF now".
-- [ ] "Actually just the client pack".
+Then add it to your home screen (Safari: Share, then Add to Home Screen) and open it from the icon. It should open SameDay.
 
-Voice (Talk live):
+**Passes if:** it opened without the team code, never answered the radio or the other person, never asked anything twice, and everything you said shows in the Brief panel.
 
-- [ ] The same as above, out loud, in any order.
-- [ ] Somewhere noisy, or with a radio or a colleague talking nearby. Look for "Noisy room" on screen. It should not answer the other voices.
-- [ ] Very noisy: it should suggest holding the orb. Hold it, talk, let go.
-- [ ] Say the client and a job number. It should read them back correctly.
-
-On the phone:
-
-- [ ] Open the app portal on the phone (outside the office, on mobile data), then SameDay. It should open signed in, with no team code.
-- [ ] Talk live on the phone, then Add to Home Screen and open it from the icon.
-
-Note anything wrong with the time and what was said. The chat keeps everything, and `rt_drops.log` shows what the call threw away.
+**If something's wrong:** note the time and what you said. The chat keeps every line, and on the server `C:\SDI_Automation\brief_lite\rt_drops.log` shows what the call threw away, and why.
 
 ### After testing
 
@@ -144,7 +149,7 @@ If it is good, the branch is merged into main, and from then on the update runs 
 
 ## 6. Updating the server
 
-Always use `Update-SameDay.ps1` on the server (section 5, without `-Branch` for main).
+Always update the server with `Update-SameDay.ps1`, run from the laptop (section 5; without `-Branch` it takes main).
 
 - **What it does.** It keeps the code it replaces, never touches the keys, chats, uploads or spend log, restarts only SameDay and SDI Craft, and checks that SameDay reports the new version.
 - **Not `UPDATE_SAME_DAY.bat`.** That is Muhammad's laptop update, and it must not be used on the server. It copies K: (older code) over the server's own files, and whatever K: holds of Craft's log (`craft\craft.db`) and the budget settings (`studio_data\`) goes over the server's too. It also starts a second SameDay outside the Windows service, which fights the service for port 5020.

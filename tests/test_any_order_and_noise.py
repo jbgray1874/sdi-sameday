@@ -395,6 +395,16 @@ class CarriedToThePhoneTests(unittest.TestCase):
         self.assertEqual(fixed, "/sameday/out/a.png")
 
 
+class UpdateCheckTests(unittest.TestCase):
+    def test_the_laptop_can_read_the_version_without_the_team_code(self):
+        """Update-SameDay.ps1 runs on the laptop and checks the restarted server from there."""
+        c = L.app.test_client()
+        r = c.get("/api/version", environ_base={"REMOTE_ADDR": "10.0.0.20"})
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(set(r.get_json()), {"version"})
+        self.assertEqual(c.get("/api/status", environ_base={"REMOTE_ADDR": "10.0.0.20"}).status_code, 401)
+
+
 class StillTrueTests(unittest.TestCase):
     """What Muhammad's earlier fixes guard, unchanged by any of this."""
 
