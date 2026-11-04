@@ -98,24 +98,26 @@ git pull jbg claude/app-portal-main-2026
 
 Update-SameDay ends with "SameDay is running the new code". Ship-It ends green at 4b. The first time, a GitHub sign-in may open: sign in as jbgray1874.
 
-### Script A: typed, on a laptop (about 10 minutes)
+### Script A: talking, on the web app (a laptop, about 15 minutes)
 
-Open SameDay (the app portal tile, or `http://10.0.0.5:5020` in the office), pick your name, and press **+ New chat**. Type each line and press the red arrow.
+Use the app portal's **https** address, the same one the phone uses. On the office `http://` address the browser won't give it the microphone. Open SameDay, pick your name, press **+ New chat**, then press **Talk** and allow the microphone.
 
-| # | Type | It should |
+| # | Say | It should |
 |---|---|---|
-| 1 | `Tesco want a gondola end for Milwaukee M18 drills` | Reply, and ask which pack, once |
-| 2 | `1800 high, 1200 wide, 600 deep, black and red, with a lit header` (ignore the pack question) | Not ask the pack again. The Brief panel shows 1800 x 1200 x 600 mm. |
-| 3 | `let's do the internal brief questions first` | Say "Let's do the SDI brief questions now", then ask an internal question |
-| 4 | `deadline is Friday 20 November, budget 5000 pounds, 50 units` | Record all three, then ask the next question, not one of these |
-| 5 | `back to the render` | Go back to the render: past job or something new? |
-| 6 | `something new, make the render` | Draw it (about a minute), then ask "any changes, or finalise?" |
-| 7 | `make the header navy` | Make Option B. A stays on screen. |
-| 8 | `go back to option A and make the shelves oak` | Make Option C from A, not from B |
-| 9 | `build the brief PDF now` | Make the 8-page PDF, with a list of what's still missing |
-| 10 | `actually just the client pack`, then `C is the one` | Change the pack, then make C's GA and client sheet |
+| 1 | "Hi, it's Tesco. They want a gondola end for Milwaukee M18 drills." | Say it back, and ask one question |
+| 2 | "Both packs, please." | Take both and move on. It never asks the pack again. |
+| 3 | "Let's do the brief questions first." | Switch to the internal questions |
+| 4 | "Deadline's Friday the 20th of November, budget five thousand pounds, fifty units." | Take all three, and ask something it doesn't have yet |
+| 5 | "Back to the render. 1800 high, 1200 wide, 600 deep, black and red, with a lit header." | Read the size back in that order, then ask: past job, or something new? |
+| 6 | "Did we do anything like this for Milwaukee before?" | Answer in words: job number, what it was, when. (If it finds nothing, check `can_read` W: in section 7.) |
+| 7 | "Something new. Draw it." | Say it's drawing. The mic pauses and the render appears in about a minute. |
+| 8 | "Make the header bigger." | Make Option B. A stays on screen. |
+| 9 | "Go back to A and make the shelves oak." | Make Option C from A, not from B |
+| 10 | "C's the one. Finalise it." | Make C's GA and the client sheet |
+| 11 | "Build the brief PDF now." | Make the 8-page PDF, with a list of what's still missing |
+| 12 | "That's all, thanks." | Say goodbye. Everything stays in the chat. |
 
-**Passes if:** it never asked which pack twice, never asked for something you'd already given, and did the internal questions before the render when you asked.
+**Passes if:** it never asked the pack twice, never re-asked anything you'd said, read the size back right, and never spoke while you were mid-sentence.
 
 ### Script B: talking, on a phone (about 10 minutes)
 
