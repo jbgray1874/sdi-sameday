@@ -1238,7 +1238,7 @@ async function rtHeard(tx,itemId){
  // 28 Oct 2026: two lines heard back to back ("Tesco blue", then noise) made it ask two questions in a row - one reply at a time
  // 3 Nov 2026 (Muhammad): a pause to think isn't the end - wait 1.2 s; if they carry on, this reply is dropped and
  // the next one answers everything they said
- clearTimeout(rt.replyT);rt.replyT=setTimeout(()=>{if(!rt||rt.inTurn)return;if(rt.inResp)rt.pendingCreate=true;else rtSay({type:"response.create"})},1200);
+ clearTimeout(rt.replyT);rt.replyPending=true;rt.replyT=setTimeout(()=>{if(!rt)return;rt.replyPending=false;if(rt.inTurn)return;if(rt.inResp)rt.pendingCreate=true;else rtSay({type:"response.create"})},1200);
  if(late&&!j.turn)j=await lp;
  setTimeout(async()=>{const r=await fetch("/api/session/"+sid).then(r=>r.json()).catch(()=>null);if(r&&r.session)showBrief(r.session.brief)},4000);
  if(j.turn){const w=waiter();w.querySelector(".lbl").textContent=j.kind==="show_ref"?"Opening that drawing…":j.kind==="show_past"?"Looking through SDI's history…":"Making the concept and checking it…";
@@ -1249,7 +1249,12 @@ async function rtHeard(tx,itemId){
 function rtLog(role,text){fetch("/api/rt/log",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({session:sid,role,text})}).catch(()=>{});
  if(role==="user")setTimeout(async()=>{const r=await fetch("/api/session/"+sid).then(r=>r.json()).catch(()=>null);if(r&&r.session)showBrief(r.session.brief)},4000)}
 function rtSay(o){if(rt&&rt.paused&&o.type==="response.create")return;   // paused: it notes things, but says nothing until Continue
+ // 4 Nov 2026 (James: "doesn't talk over"): six things start the voice speaking on their own - a render finishing, a
+ // tool's answer, a queued follow-up, an upload, the noisy-room tip, "didn't catch that". None may start while the AM
+ // is mid-sentence or holding the orb: it is owed, and said once their turn is over (their own reply covers it).
+ if(rt&&o.type==="response.create"){if(rt.inTurn||rt.held){rt.owed=true;return}rt.owed=false}
  if(rt&&rt.dc.readyState==="open")rt.dc.send(JSON.stringify(o))}
+function owedLater(){clearTimeout(rt.owedT);rt.owedT=setTimeout(()=>{if(rt&&rt.owed&&!rt.inTurn&&!rt.held&&!rt.inResp&&!rt.replyPending)rtSay({type:"response.create"})},2500)}
 // 27 Oct 2026 (Muhammad): while a render is drawn the mic is off - whispers, "umm" and the room behind are never heard as
 // the AM; it comes back on by itself when the picture is on screen
 // Stop pressed on a live call: the voice carries straight on - never a silent pause
@@ -1299,13 +1304,13 @@ function quietCheck(){if(!rt||!rt.noisy)return;const now=Date.now();if((rt.junk|
   setTD(null);rtSay({type:"response.cancel"});rtSay({type:"output_audio_buffer.clear"});rtSay({type:"input_audio_buffer.clear"});
   rt.speaking=false;mics(true);talkUI(true,"Listening… let go when you've finished")});
  const up=()=>{if(!holding||!rt)return;holding=false;b.classList.remove("rec");
-  setTimeout(()=>{rtSay({type:"input_audio_buffer.commit"});talkUI(true,"Thinking…");setTimeout(()=>{if(rt){rt.held=false;setTD(autoTD())}},1500)},250)};
+  setTimeout(()=>{rtSay({type:"input_audio_buffer.commit"});talkUI(true,"Thinking…");setTimeout(()=>{if(rt){rt.held=false;setTD(autoTD());if(rt.owed)owedLater()}},1500)},250)};
  ["pointerup","pointerleave","pointercancel"].forEach(ev=>b.addEventListener(ev,up))})();
 async function rtEvent(ev){const ty=ev.type||"";
- if(ty==="input_audio_buffer.speech_started"){clearTimeout(rt.replyT);clearTimeout(rt.againT);if(rt.speaking&&!rt.noisy&&(rt.lvl||0)>Math.max(0.05,(rt.floor||0)*4)){rtSay({type:"response.cancel"});rtSay({type:"output_audio_buffer.clear"});rt.pendingCreate=false}rt.inTurn=true;rt.peak=0;rt.speaking=false;talkUI(true,"Listening…");rt.youLive="";
+ if(ty==="input_audio_buffer.speech_started"){clearTimeout(rt.replyT);rt.replyPending=false;clearTimeout(rt.owedT);clearTimeout(rt.againT);if(rt.speaking&&!rt.noisy&&(rt.lvl||0)>Math.max(0.05,(rt.floor||0)*4)){rtSay({type:"response.cancel"});rtSay({type:"output_audio_buffer.clear"});rt.pendingCreate=false}rt.inTurn=true;rt.peak=0;rt.speaking=false;talkUI(true,"Listening…");rt.youLive="";
   if(!rt.rendering){if(LS.past){LS.past=false;LS.showing=false}lsYou("…",true);if(!LS.showing)lsBlur(true)}if(rt.bubble&&!rt.bubble.dataset.done){rt.bubble.dataset.done=1}
   rt.userRow=row('<span style="opacity:.6">…</span>',true)}
- else if(ty==="input_audio_buffer.speech_stopped"){rt.inTurn=false;talkUI(true,"Thinking…")}
+ else if(ty==="input_audio_buffer.speech_stopped"){rt.inTurn=false;talkUI(true,"Thinking…");if(rt.owed)owedLater()}   // what it held back while they spoke, unless their own reply covers it
  else if(ty==="conversation.item.input_audio_transcription.delta"){rt.youLive=(rt.youLive||"")+(ev.delta||"");if(!rt.rendering)lsYou(junkHeard(rt.youLive)?"…":rt.youLive,true)}
  else if(ty==="conversation.item.input_audio_transcription.completed"){rtHeard(ev.transcript,ev.item_id)}   // 3 Nov 2026: junk is dropped silently, nothing on screen
  if(ty==="conversation.item.input_audio_transcription.completed"){const tx=junkHeard(ev.transcript)?"":(ev.transcript||"").trim();

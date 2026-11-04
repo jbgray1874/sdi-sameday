@@ -135,6 +135,7 @@ Do this outside the office, on mobile data. Open the app portal on the phone, ta
 | 6b | Change direction: "Actually, make it a wall bay, not a counter unit." | Say it back ("So a wall bay now, not the counter unit"), work out the size again, and offer a fresh design rather than changing B |
 | 7 | Put a radio or TV on, or get someone to talk nearby. Keep going: "and add a tester tray at the front." | Answer you, not them. "Noisy room" appears. |
 | 8 | If it's very noisy: hold the orb, say "add a tester tray", and let go | Only hear you while you hold it |
+| 8b | Talk over it while it's speaking. Then give a long answer with a pause in the middle ("It needs... a lit header and, um, four shelves"). | Stop at once when you talk. Never start speaking while you're mid-sentence, and wait out the pause. |
 | 9 | "That's the one. Finalise B." | Make B's GA and the client sheet |
 | 10 | "That's all, thanks." | Say goodbye. Everything stays in the chat. |
 

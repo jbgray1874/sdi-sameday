@@ -329,6 +329,28 @@ class ThePageTests(unittest.TestCase):
         self.assertEqual(got[4], 0.85)
         self.assertEqual(got[5], "semantic_vad")
 
+    def test_it_never_starts_speaking_while_the_am_is_talking(self):
+        """4 Nov 2026 (James: "doesn't talk over"): a render finishing, a tool's answer or a queued follow-up could
+        start the voice mid-sentence. Now it is held back and said once their turn is over - unless their own reply
+        covers it."""
+        js = (page_fn("rtSay") + "\n" + page_fn("owedLater") + "\n"
+              "const sent=[];let rt={paused:false,inTurn:true,held:false,inResp:false,replyPending:false,"
+              "dc:{readyState:'open',send:x=>sent.push(JSON.parse(x).type)}};"
+              "rtSay({type:'conversation.item.create'});rtSay({type:'response.create'});"   # a render finished mid-sentence
+              "const held=[...sent],owed=rt.owed;"
+              "rt.inTurn=false;owedLater();"                                                   # their turn ends, nothing to reply to
+              "setTimeout(()=>{const after=[...sent];"
+              "rt.inTurn=true;rtSay({type:'response.create'});rt.inTurn=false;rt.replyPending=true;owedLater();"
+              "setTimeout(()=>{console.log(JSON.stringify([held,owed,after,sent.length,rt.owed]))},2700)},2700)")
+        r = subprocess.run([NODE, "-e", js], capture_output=True, text=True, timeout=30)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        held, owed, after, total, still_owed = json.loads(r.stdout)
+        self.assertEqual(held, ["conversation.item.create"])           # the note goes in; the voice stays quiet
+        self.assertTrue(owed)
+        self.assertEqual(after[-1], "response.create")                  # ...and speaks once they've finished
+        self.assertEqual(total, len(after))                             # their own reply was coming: not said twice
+        self.assertTrue(still_owed)                                     # (their reply clears it when it is sent)
+
     def test_a_fresher_hint_is_sent_to_the_transcriber_mid_call(self):
         self.assertIn('session:{type:"realtime",audio:{input:{transcription:j.transcription}}}', PAGE)
         self.assertIn("const tr0=j.transcription||null;", PAGE)
