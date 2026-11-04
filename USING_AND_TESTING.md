@@ -10,23 +10,22 @@ There is one SameDay. It runs on the server (10.0.0.5, port 5020), and every way
 
 | Way in | Address | Works from |
 |---|---|---|
-| Browser | `http://10.0.0.5:5020` | The office network, or the VPN |
-| App portal tile | The same address | The same |
-| Intranet left menu, AI Services | The same address | The same |
-| Phone app (the icon on the home screen) | The App Proxy `https://` address, once it is set up | Anywhere |
+| Phone (app portal tile, or the home-screen icon) | SDI Intelligence's own https address, at `/sameday/` | Anywhere, signed in with your SDI account |
+| App portal tile or intranet menu on a laptop | The same `/sameday/` on whichever portal address you're using | The same |
+| Directly | `http://10.0.0.5:5020` | The office network, or the VPN (team code) |
+
+**On the phone (4 November 2026).** SDI Intelligence is already published through App Proxy, so it reaches phones over https with Microsoft sign-in. It carries SameDay at `/sameday/` on that same address (`sameday_proxy.py` in ClaudeVision). That needs no new Entra app, and over https the microphone works. Signed in with Microsoft, you aren't asked for the team code. The live voice goes from the phone straight to OpenAI, the same as in the office.
 
 All the work happens on the server, so every way in has the same functions: the brief, the renders, the GA, the PDFs, the web look-ups, the past-job look-ups and the AI spend cap. The voice uses the same model everywhere.
 
 These are the only differences:
 
-| | Browser on a laptop or PC | Phone |
+| | https (the portal's address, on a phone or a laptop) | http (`10.0.0.5`) |
 |---|---|---|
-| Typed brief, files, renders, GA, PDFs | Yes, on `http://` | Yes |
-| Live voice | Only on an `https://` page, or with the test switch in section 5 | Only on `https://`, so after App Proxy |
-| Listening | Tuned for a laptop mic at arm's length (`far_field`) | Tuned for a phone held close (`near_field`), which is usually better in noise |
-| Install as an app | Not needed | Needs `https://`. Safari: Share, then Add to Home Screen. Chrome: menu, then Install app. |
-
-Browsers only allow the microphone on `https://` pages. That is why the voice and the phone app both wait for the App Proxy step (`SAMEDAY_GO_LIVE.html` part A, in ClaudeVision).
+| Typed brief, files, renders, GA, PDFs | Yes | Yes |
+| Live voice | Yes | No: browsers only allow the microphone on https |
+| Add to the home screen as an app | Yes. Safari: Share, then Add to Home Screen. Chrome: menu, then Install app. | No |
+| Listening | Phone: tuned for a phone held close (`near_field`). Laptop: tuned for a laptop mic (`far_field`). | |
 
 ### Not working on the server yet (the same on every way in)
 
@@ -112,7 +111,7 @@ In Chrome on the PC you test from:
 2. Add `http://10.0.0.5:5020` and set it to Enabled.
 3. Relaunch Chrome.
 
-This changes only that browser. It is not needed once App Proxy gives SameDay an `https://` address.
+This changes only that browser. It isn't needed on the portal's https address, where the microphone already works.
 
 ### What to try
 
@@ -131,6 +130,11 @@ Voice (Talk live):
 - [ ] Somewhere noisy, or with a radio or a colleague talking nearby. Look for "Noisy room" on screen. It should not answer the other voices.
 - [ ] Very noisy: it should suggest holding the orb. Hold it, talk, let go.
 - [ ] Say the client and a job number. It should read them back correctly.
+
+On the phone:
+
+- [ ] Open the app portal on the phone (outside the office, on mobile data), then SameDay. It should open signed in, with no team code.
+- [ ] Talk live on the phone, then Add to Home Screen and open it from the icon.
 
 Note anything wrong with the time and what was said. The chat keeps everything, and `rt_drops.log` shows what the call threw away.
 
@@ -152,7 +156,9 @@ Always use `Update-SameDay.ps1` on the server (section 5, without `-Branch` for 
 |---|---|
 | The page won't load | On the server: `Get-Service SDISameDay`, and the end of `C:\SDI_Automation\logs\SDISameDay.log` |
 | The team code is refused | Check it's the current code. The cookie fix of 4 November is in this branch. |
-| Talk live won't start | Is the page `https://`, or the Chrome switch on? Is the OpenAI key in date, and is the day's budget left? The page says which. |
+| Talk live won't start | Is the page `https://` (the portal's address), or the Chrome switch on? Is the OpenAI key in date, and is the day's budget left? The page says which. |
+| On the phone it says "SameDay isn't answering" | SameDay is down on the server. SDI Intelligence is up, but `SDISameDay` isn't. |
+| On the phone the page opens but nothing works | The server's SameDay is older than this branch, so it doesn't know `/sameday/`. Run `Update-SameDay.ps1`. |
 | It didn't hear something | `C:\SDI_Automation\brief_lite\rt_drops.log` |
 | No past jobs found | The W: change (section 1), not yet made |
 | Spend looks wrong | `ai_calls` in `lite.db`. The live voice is counted at `gpt-realtime`'s price until its own is set in `.env` as `LITE_RT_PRICE`. |

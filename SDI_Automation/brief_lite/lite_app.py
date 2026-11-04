@@ -4477,16 +4477,76 @@ def api_status():
                     "whatsapp": bool(WA_TOKEN and WA_PHONE_ID), "spent_today": round(spent_today(), 3), "cap": daily_cap()})
 
 
+# ---------------------------------------------------------------- on the phone, through SDI Intelligence
+# 4 Nov 2026 (James: "the app needs to work on the phone"). SDI Intelligence is already published through App Proxy -
+# https, Microsoft sign-in, reachable from any phone - so it carries SameDay at /sameday/ (its sameday_proxy.py). On
+# https the microphone works too. SameDay itself still answers at its root as before; when SDI Intelligence asks
+# (X-Forwarded-Prefix, from this machine only), the page, its manifest and its service worker are given the prefix,
+# and a small script on the page puts it in front of every address the page asks for ("/api/..." -> "/sameday/api/...").
+_PREFIX_OK = re.compile(r"^/[a-z0-9][a-z0-9_-]{0,30}$")
+
+
+def _prefix():
+    p = (request.headers.get("X-Forwarded-Prefix") or "").strip().rstrip("/")
+    return p if p and _PREFIX_OK.match(p) and (request.remote_addr or "") in _LOCAL else ""
+
+
+PREFIX_SHIM = r"""<script>window.SD_BASE=%s;
+(function(){var B=window.SD_BASE;if(!B)return;
+function fix(u){if(typeof u!=="string"||u.charAt(0)!=="/"||u.charAt(1)==="/"||u===B||u.indexOf(B+"/")===0)return u;return B+u}
+window.SD_FIX=fix;
+var F=window.fetch;window.fetch=function(u,o){return F.call(window,typeof u==="string"?fix(u):u,o)};
+var XO=XMLHttpRequest.prototype.open;XMLHttpRequest.prototype.open=function(m,u){var a=[].slice.call(arguments);a[1]=fix(u);return XO.apply(this,a)};
+var WO=window.open;window.open=function(u){var a=[].slice.call(arguments);a[0]=fix(u);return WO.apply(window,a)};
+function setter(C,prop){if(!C)return;var d=Object.getOwnPropertyDescriptor(C.prototype,prop);if(!d||!d.set)return;
+ Object.defineProperty(C.prototype,prop,{configurable:true,enumerable:d.enumerable,get:d.get,set:function(v){d.set.call(this,fix(v))}})}
+[window.HTMLImageElement,window.HTMLMediaElement,window.HTMLSourceElement,window.HTMLScriptElement,window.HTMLIFrameElement].forEach(function(C){setter(C,"src")});
+[window.HTMLAnchorElement,window.HTMLLinkElement].forEach(function(C){setter(C,"href")});
+setter(window.HTMLFormElement,"action");
+if(navigator.serviceWorker){var R=navigator.serviceWorker.register.bind(navigator.serviceWorker);
+ navigator.serviceWorker.register=function(u,o){return R(fix(u),Object.assign({scope:B+"/"},o||{}))}}
+var URLRE=new RegExp("url\\(([\\x27\\x22]?)/(?!/|"+B.slice(1)+"/)","g");
+function fixEl(el){if(!el||el.nodeType!==1)return;["src","href","poster","action"].forEach(function(a){var v=el.getAttribute(a);if(v){var w=fix(v);if(w!==v)el.setAttribute(a,w)}});
+ var s=el.getAttribute("style");if(s&&s.indexOf("url(")>=0){var t=s.replace(URLRE,"url($1"+B+"/");if(t!==s)el.setAttribute("style",t)}}
+function sweep(n){fixEl(n);if(n.querySelectorAll)n.querySelectorAll("[src],[href],[style],[poster],[action]").forEach(fixEl)}
+new MutationObserver(function(ms){ms.forEach(function(m){if(m.type==="attributes")fixEl(m.target);else m.addedNodes.forEach(function(n){if(n.nodeType===1)sweep(n)})})})
+ .observe(document.documentElement,{subtree:true,childList:true,attributes:true,attributeFilter:["src","href","style","poster","action"]});
+document.addEventListener("DOMContentLoaded",function(){sweep(document.documentElement)});
+})();</script>"""
+
+
+def with_prefix(text, p):
+    """The page's own fixed addresses, before any script runs (its icons, manifest and service worker)."""
+    for q in ('"', "'", "(", "`"):
+        for root in ("/pwa/", "/logo.png", "/sw.js", "/brandlogo/"):
+            text = text.replace(q + root, q + p + root)
+    return text
+
+
 @app.route("/pwa/<name>")
 def pwa_file(name):
     if name not in ("manifest.webmanifest", "icon-180.png", "icon-192.png", "icon-512.png", "mark.png", "lockup.png"):
         abort(404)
     mt = "application/manifest+json" if name.endswith(".webmanifest") else "image/png"
+    p = _prefix()
+    if p and name == "manifest.webmanifest":     # installed from the phone: it opens at /sameday/, not the portal's root
+        m = json.load(open(os.path.join(HERE, "pwa", name), encoding="utf-8"))
+        m["start_url"], m["scope"], m["id"] = p + "/", p + "/", p + "/"
+        for ic in m.get("icons") or []:
+            ic["src"] = p + ic["src"] if str(ic.get("src", "")).startswith("/") else ic.get("src")
+        return Response(json.dumps(m), mimetype=mt, headers={"Cache-Control": "no-cache"})
     return send_file(os.path.join(HERE, "pwa", name), mimetype=mt, max_age=3600)
 
 
 @app.route("/sw.js")
 def service_worker():   # served from the root so it can look after the whole app
+    p = _prefix()
+    if p:
+        js = open(os.path.join(HERE, "pwa", "sw.js"), encoding="utf-8").read()
+        js = with_prefix(js, p).replace('startsWith("/api")', f'startsWith("{p}/api")') \
+            .replace('startsWith("/file")', f'startsWith("{p}/file")').replace('=== "/"', f'=== "{p}/"')
+        return Response(js, mimetype="application/javascript", headers={"Service-Worker-Allowed": p + "/",
+                                                                         "Cache-Control": "no-cache"})
     r = send_file(os.path.join(HERE, "pwa", "sw.js"), mimetype="application/javascript", max_age=0)
     r.headers["Service-Worker-Allowed"] = "/"
     return r
@@ -4549,7 +4609,11 @@ def unlock():
 
 @app.route("/")
 def page():
-    return Response(open(os.path.join(HERE, "lite_page.html"), encoding="utf-8").read(), mimetype="text/html")
+    html = open(os.path.join(HERE, "lite_page.html"), encoding="utf-8").read()
+    p = _prefix()
+    if p:     # carried by SDI Intelligence at /sameday/ (see _prefix)
+        html = with_prefix(html, p).replace("<head>", "<head>" + PREFIX_SHIM % json.dumps(p), 1)
+    return Response(html, mimetype="text/html")
 
 
 def warm():

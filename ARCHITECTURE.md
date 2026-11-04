@@ -106,6 +106,15 @@ Tests: `tests/test_any_order_and_noise.py`. They run offline on a copy of the ap
 - **Refreshing the index.** `python brief_lite\build_projects.py` takes about 10 seconds, needs no AI, and reads the scan files already on the server.
 - **Earlier client files.** Files uploaded to an earlier brief for the same client are background only. They never lead a new render or GA.
 
+## 4c. On the phone (4 November 2026)
+
+SDI Intelligence (port 8071, already published through App Proxy) carries SameDay at `/sameday/` on its own https address (`sameday_proxy.py` in ClaudeVision):
+
+- **Who gets in.** From outside the office, only people signed in with their SDI Microsoft account. Writes must come from that same address.
+- **What SameDay gets.** It gets `X-Forwarded-Prefix: /sameday`, from 127.0.0.1 only. That puts the prefix into the page, the manifest and the service worker, and a small script on the page puts it in front of every address the page asks for (`PREFIX_SHIM` in `lite_app.py`).
+- **No team code.** The request comes from this machine, so the team code isn't asked; Microsoft sign-in has been asked instead.
+- **Unchanged.** Opened directly at `:5020`, nothing changes.
+
 ## 5. Data, spend and safety
 
 - **Read-only on W: and K:.** The app never writes to the shared drives; everything it makes goes to `brief_lite\out\`.

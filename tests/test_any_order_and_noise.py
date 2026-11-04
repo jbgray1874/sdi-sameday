@@ -333,6 +333,68 @@ class ThePageTests(unittest.TestCase):
         self.assertIn("const tr0=j.transcription||null;", PAGE)
 
 
+class CarriedToThePhoneTests(unittest.TestCase):
+    """4 Nov 2026 (James: "the app needs to work on the phone"): SDI Intelligence carries SameDay at /sameday/ on its
+    https address (its sameday_proxy.py). Asked from this machine with X-Forwarded-Prefix, the page, the manifest and the
+    service worker take the prefix; opened directly, nothing changes."""
+    P = {"X-Forwarded-Prefix": "/sameday"}
+
+    def setUp(self):
+        self.c = L.app.test_client()
+
+    def test_the_page_is_unchanged_when_opened_directly(self):
+        plain = self.c.get("/").get_data(as_text=True)
+        self.assertEqual(plain, (WORK / "brief_lite" / "lite_page.html").read_text(encoding="utf-8"))
+        self.assertNotIn("SD_BASE", plain)
+
+    def test_carried_the_page_asks_for_sameday_addresses(self):
+        h = self.c.get("/", headers=self.P).get_data(as_text=True)
+        self.assertIn('window.SD_BASE="/sameday"', h)
+        self.assertLess(h.index("SD_BASE"), h.index('rel="manifest"'))      # before anything else loads
+        self.assertIn('href="/sameday/pwa/manifest.webmanifest"', h)
+        self.assertEqual(h.count('"/pwa/'), 0)
+
+    def test_only_this_machine_may_give_the_prefix(self):
+        h = self.c.get("/", headers=self.P, environ_base={"REMOTE_ADDR": "10.0.0.20"}).get_data(as_text=True)
+        self.assertNotIn("SD_BASE", h)
+        h = self.c.get("/", headers={"X-Forwarded-Prefix": "/x\"><script>"}).get_data(as_text=True)
+        self.assertNotIn("SD_BASE", h)
+
+    def test_installed_on_the_phone_it_opens_at_sameday(self):
+        m = json.loads(self.c.get("/pwa/manifest.webmanifest", headers=self.P).get_data(as_text=True))
+        self.assertEqual((m["start_url"], m["scope"]), ("/sameday/", "/sameday/"))
+        self.assertTrue(all(i["src"].startswith("/sameday/pwa/") for i in m["icons"]))
+        r = self.c.get("/sw.js", headers=self.P)
+        self.assertEqual(r.headers["Service-Worker-Allowed"], "/sameday/")
+        js = r.get_data(as_text=True)
+        self.assertIn('startsWith("/sameday/api")', js)
+        self.assertNotIn('"/pwa/', js)
+
+    def test_carried_there_is_no_team_code_because_microsoft_sign_in_was_asked(self):
+        carried = self.c.get("/", headers=self.P).get_data(as_text=True)       # from this machine: SDI Intelligence
+        self.assertNotIn("Enter the team access code", carried)
+        elsewhere = self.c.get("/", environ_base={"REMOTE_ADDR": "10.0.0.20"}).get_data(as_text=True)
+        self.assertIn("Enter the team access code", elsewhere)              # anyone else still needs it
+
+    @unittest.skipUnless(NODE, "node is not installed")
+    def test_the_page_script_puts_the_prefix_in_front_of_every_address(self):
+        h = self.c.get("/", headers=self.P).get_data(as_text=True)
+        shim = h.split("<script>", 1)[1].split("</script>", 1)[0]
+        js = ("const calls=[];global.window=global;window.fetch=(u)=>calls.push(u);"
+              "global.XMLHttpRequest=function(){};XMLHttpRequest.prototype.open=function(m,u){calls.push(u)};"
+              "global.navigator={};global.MutationObserver=function(){this.observe=()=>{}};"
+              "global.document={documentElement:{},addEventListener(){}};"
+              + shim + ";fetch('/api/chat');fetch('/sameday/api/x');fetch('https://api.openai.com/v1/x');"
+              "fetch('//cdn.example/x');new XMLHttpRequest().open('GET','/file?p=1');"
+              "console.log(JSON.stringify([calls,window.SD_FIX('/out/a.png')]))")
+        r = subprocess.run([NODE, "-e", js], capture_output=True, text=True, timeout=30)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        calls, fixed = json.loads(r.stdout)
+        self.assertEqual(calls, ["/sameday/api/chat", "/sameday/api/x", "https://api.openai.com/v1/x", "//cdn.example/x",
+                                 "/sameday/file?p=1"])
+        self.assertEqual(fixed, "/sameday/out/a.png")
+
+
 class StillTrueTests(unittest.TestCase):
     """What Muhammad's earlier fixes guard, unchanged by any of this."""
 
