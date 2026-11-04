@@ -313,7 +313,10 @@ def _top_clients(n=20):
     if not _CLIENTS:
         try:
             import sqlite3
-            con = sqlite3.connect(os.path.join(os.path.dirname(os.path.abspath(__file__)), "projects.db"))
+            path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "projects.db")
+            if not os.path.exists(path):      # never let sqlite make an empty one
+                raise FileNotFoundError(path)
+            con = sqlite3.connect(path)
             _CLIENTS.extend(b for (b,) in con.execute("SELECT brand FROM projects WHERE brand != '' GROUP BY brand "
                                                       "ORDER BY count(*) DESC LIMIT 40") if b and len(b) < 30)
             con.close()

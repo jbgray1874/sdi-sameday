@@ -435,7 +435,12 @@ class UpdateCheckTests(unittest.TestCase):
         c = L.app.test_client()
         r = c.get("/api/version", environ_base={"REMOTE_ADDR": "10.0.0.20"})
         self.assertEqual(r.status_code, 200)
-        self.assertEqual(set(r.get_json()), {"version", "can_read"})
+        js = r.get_json()
+        self.assertEqual(set(js), {"version", "can_read", "past_work"})
+        # no team code here, so only counts, yes / no and a short reason - no jobs, clients or paths
+        self.assertEqual(set(js["past_work"]), {"jobs", "estimates", "pictures", "why"})
+        self.assertIsInstance(js["past_work"]["jobs"], int)
+        self.assertLessEqual(len(js["past_work"]["why"]), 200)
         self.assertEqual(c.get("/api/status", environ_base={"REMOTE_ADDR": "10.0.0.20"}).status_code, 401)
 
 
@@ -660,6 +665,123 @@ class TheTightenedInstructionsTests(unittest.TestCase):
         for tool in re.findall(r"\b(record_answers|set_pack|focus|show_past_work|make_concepts|choose_option|"
                                r"change_option|more_options|finish_brief)\b", rt.VOICE_RULES):
             self.assertIn(tool, names)
+
+
+def _past_jobs_index(folder):
+    """A small projects.db as the W: indexer makes it: three jobs, their pictures and drawings."""
+    import sqlite3
+    con = sqlite3.connect(folder / "projects.db")
+    con.executescript("""
+        CREATE TABLE projects(job_no TEXT, name TEXT, brand TEXT, folder TEXT, first_date TEXT, last_date TEXT, n_drawings INT,
+            n_images INT, n_renders INT, drawn_by TEXT, titles TEXT, weight_kg REAL, design_days TEXT, designers TEXT);
+        CREATE TABLE project_images(img_id INTEGER PRIMARY KEY, job_no TEXT, kind TEXT, name TEXT, src TEXT, thumb TEXT);""")
+    con.executemany("INSERT INTO projects VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)", [
+        ("12148", "12148 - Rollershutter Forecourt Bunker", "Tesco", r"W:\Tesco\12148", "2025-11-03", "2026-02-10", 14, 4, 2,
+         None, '["GA1 Forecourt Bunker", "Shutter detail"]', None, None, None),
+        ("10474", "10474 - Boots No7 Triple Mod", "Boots", r"W:\Boots\10474", "2023-03-01", "2023-06-01", 9, 2, 1,
+         None, '["GA1 Triple Mod"]', None, None, None),
+        ("11800", "11800 - Milwaukee M18 Gondola End", "TTI", r"W:\TTI\11800", "2024-05-01", "2024-07-01", 6, 2, 1,
+         None, '["GA1 Gondola End"]', None, None, None)])
+    con.executemany("INSERT INTO project_images VALUES (?,?,?,?,?,?)", [
+        (0, "12148", "drawing", "12148-00 GA", r"W:\Tesco\12148\GA.pdf", "t0.jpg"),
+        (1, "12148", "render", "bunker front", r"W:\Tesco\12148\front.png", "t1.jpg"),
+        (2, "12148", "render", "bunker side", r"W:\Tesco\12148\side.png", "t2.jpg"),
+        (3, "10474", "render", "triple mod", r"W:\Boots\10474\r.png", "t3.jpg"),
+        (4, "11800", "creative", "gondola visual", r"W:\TTI\11800\v.jpg", "t4.jpg"),
+        (5, "11800", "drawing", "11800 GA", r"W:\TTI\11800\GA.pdf", "t5.jpg")])
+    con.commit()
+    con.close()
+
+
+class PastJobsWithoutThePictureIndexTests(unittest.TestCase):
+    """4 November 2026 (James): "can it see the W:/ ? It keeps saying it can't see past jobs". The service could read
+    W: and K:, but the past-work search opened the picture index (all_img_index.npz) first, the server has none, and
+    so every look-up failed - a job's own number too. Now the job index is enough; pictures only add look-alikes."""
+
+    def setUp(self):
+        import lite_search
+        self.S = lite_search
+        self.keep = {k: getattr(lite_search, k) for k in ("JOBS_DB", "ESTIMATES_DB", "PICTURES", "clip_model")}
+        self.dir = Path(tempfile.mkdtemp(prefix="pastjobs-"))
+        _past_jobs_index(self.dir)
+        self._fresh(JOBS_DB=str(self.dir / "projects.db"), ESTIMATES_DB=str(self.dir / "knowledge.db"),
+                    PICTURES=str(self.dir / "all_img_index.npz"))
+
+    def _fresh(self, **attrs):
+        if self.S._state.get("con"):
+            self.S._state["con"].close()
+        for d in (self.S._state, self.S._pic, self.S._clip):
+            d.clear()
+        for k, v in attrs.items():
+            setattr(self.S, k, v)
+
+    def tearDown(self):
+        self._fresh(**self.keep)
+        shutil.rmtree(self.dir, ignore_errors=True)
+
+    def test_a_job_named_by_its_number_or_its_name_is_found(self):
+        self.assertEqual(self.S.named_jobs("refer to job 12148"), ["12148"])
+        rr = self.S.resolve_reference("the coal bunker we did", "Tesco")
+        self.assertEqual(rr["options"][0][0], "12148")
+        self.assertEqual(self.S.project_rows(["12148"])["12148"]["name"], "12148 - Rollershutter Forecourt Bunker")
+
+    def test_the_brief_finds_its_past_jobs_by_words_with_their_renders(self):
+        res = self.S.search("coal bunker with a roller shutter", client="Tesco")
+        self.assertEqual(res[0]["job_no"], "12148")
+        self.assertEqual([im["kind"] for im in res[0]["images"]], ["render", "render"])    # renders, not the GA
+        res = self.S.search("Milwaukee M18 gondola end")                                   # no client said yet
+        self.assertIn("11800", [r["job_no"] for r in res])
+        self.assertNotIn("10474", [r["job_no"] for r in res])
+
+    def test_what_it_can_find_is_reported_and_why_pictures_are_off(self):
+        st = self.S.status()
+        self.assertEqual(st["jobs"], 3)
+        self.assertFalse(st["pictures"])
+        self.assertFalse(st["estimates"])
+        self.assertIn("all_img_index.npz", st["why"])
+        self.assertIsNone(self.S.pictures())
+        self.assertFalse((self.dir / "knowledge.db").exists())
+
+    def test_no_job_index_is_said_and_never_made_empty(self):
+        self._fresh(JOBS_DB=str(self.dir / "missing" / "projects.db"))
+        st = self.S.status()
+        self.assertEqual((st["jobs"], st["why"]), (0, "no job index (projects.db)"))
+        with self.assertRaises(FileNotFoundError):
+            self.S.named_jobs("job 12148")
+        self.assertFalse((self.dir / "missing" / "projects.db").exists())
+
+    def test_a_picture_index_newer_than_the_job_index_is_not_used(self):
+        import numpy as np
+        np.savez(self.dir / "all_img_index.npz", emb=np.zeros((9, 4), dtype=np.float32))    # 9 pictures, 6 in projects.db
+        self._fresh(clip_model=lambda: object())
+        self.assertIsNone(self.S.pictures())                 # picture 7 would be labelled as some other job
+        self.assertIn("newer than the job index", self.S.status()["why"])
+        self.assertEqual(self.S.search("coal bunker", client="Tesco")[0]["job_no"], "12148")
+
+    def test_sdi_made_this_before_needs_only_the_job_index(self):
+        here = WORK / "brief_lite"
+        shutil.copy(self.dir / "projects.db", here / "projects.db")
+        try:
+            said = convo.same_before({"brief": {"client": "Tesco", "unit_type": "coal bunker"}})
+        finally:
+            (here / "projects.db").unlink()
+        self.assertTrue(said.startswith("12148 Rollershutter Forecourt Bunker (2026"), said)
+        self.assertFalse((here / "knowledge.db").exists())          # no K: estimates index: no quote, nothing made
+        self.assertEqual(convo.same_before({"brief": {"client": "Tesco", "unit_type": "coal bunker"}}), "")
+        self.assertFalse((here / "projects.db").exists())
+
+    def test_the_update_check_hears_about_past_work(self):
+        js = L.app.test_client().get("/api/version").get_json()
+        self.assertEqual(js["past_work"]["jobs"], 3)
+        self.assertIn("pictures", js["past_work"])
+
+    def test_web_pictures_are_not_used_unchecked_without_clip(self):
+        keep = L.moodboard.G.get("clip")
+        L.moodboard.G["clip"] = lambda: None
+        try:
+            self.assertEqual(L.moodboard._rank([str(self.dir / "projects.db")], "a gondola end", 2), [])
+        finally:
+            L.moodboard.G["clip"] = keep
 
 
 class StillTrueTests(unittest.TestCase):

@@ -11,43 +11,136 @@ against SDI's own past work, two ways at once:
 Results are grouped per past JOB, so the answer is "we did 10474 Boots BRI
 Triple Mod in 2023 - here are its renders, 14 drawings, quoted at GBP1,023 a unit".
 """
-import datetime, json, os, re, sqlite3, threading
+import datetime, json, os, re, sqlite3, threading, time
 import numpy as np
 
 BASE = r"C:\SDI_Automation"
 HERE = os.path.join(BASE, "brief_lite")
+JOBS_DB = os.path.join(HERE, "projects.db")              # every job on W:, its drawings and pictures (built from W:)
+ESTIMATES_DB = os.path.join(HERE, "knowledge.db")         # the estimates on K:
+PICTURES = os.path.join(BASE, "all_img_index.npz")       # CLIP vectors of W:'s pictures, for look-alike matching
 _lock = threading.Lock()
 _state = {}
+_pic_lock = threading.Lock()
+_pic = {}
+_clip_lock = threading.Lock()
+_clip = {}
 
 STOP = set("""a an the and or of for to in on at by with from is are be it this that we they need needs want wants
 like about around approx approximately roughly mm cm m metre metres meter meters unit units display displays
 new client brief please would could should can will make made some one two three x by""".split())
 
 
+# 4 Nov 2026 (James: "it keeps saying it can't see past jobs"). This used to open the picture index first, and the
+# server has no all_img_index.npz, so the whole past-work search failed - finding a job by its number or name too,
+# although the job index (projects.db) was there and the service could read W:. Now the job index loads on its own,
+# and picture matching is an extra: on when the picture index and CLIP are there, and without them past jobs are
+# still found - by number, name, drawing titles, client and the kind of unit.
 def _load():
+    """The job index (projects.db): plain SQL, quick, no GPU. Everything that finds a past job needs only this."""
     with _lock:
         if _state:
             return _state
-        z = np.load(os.path.join(BASE, "all_img_index.npz"))
-        emb = z["emb"].astype(np.float32)
-        con = sqlite3.connect(os.path.join(HERE, "projects.db"), check_same_thread=False)
-        kinds = np.array([k for (k,) in con.execute("SELECT kind FROM project_images ORDER BY img_id")])
-        jobs = [j for (j,) in con.execute("SELECT job_no FROM project_images ORDER BY img_id")]
-        import torch
-        from sentence_transformers import SentenceTransformer
-        dev = "cuda" if torch.cuda.is_available() else "cpu"
-        model = SentenceTransformer("clip-ViT-B-32", device=dev)
-        t = torch.from_numpy(emb).to(dev)
-        if dev == "cuda":
-            t = t.half()
+        if not os.path.exists(JOBS_DB):       # never let sqlite make an empty one in its place
+            raise FileNotFoundError(f"no job index: {JOBS_DB} is missing")
+        con = sqlite3.connect(JOBS_DB, check_same_thread=False)
         from collections import Counter
         df = Counter()
         for (txt,) in con.execute("SELECT name || ' ' || COALESCE(titles,'') FROM projects"):
             df.update(set(re.findall(r"[a-z0-9&]{2,}", norm(txt))))
-        _state.update(df=df, n_jobs=sum(1 for _ in con.execute("SELECT 1 FROM projects")))
-        _state.update(emb=t, kinds=kinds, jobs=jobs, model=model, dev=dev, con=con,
-                      weight=np.where(kinds == "render", 1.0, np.where(kinds == "creative", 0.93, 0.80)).astype(np.float32))
+        _state.update(con=con, df=df, n_jobs=sum(1 for _ in con.execute("SELECT 1 FROM projects")))
         return _state
+
+
+def clip_model():
+    """CLIP - the brief's words and pictures in one space - or None when torch / sentence-transformers won't load.
+    Spaces and the moodboard use it too. A failure is tried again after half an hour, not on every call."""
+    with _clip_lock:
+        if _clip.get("m") is not None:
+            return _clip["m"]
+        if _clip.get("at") and time.time() - _clip["at"] < 1800:
+            return None
+        _clip.update(at=time.time(), m=None, dev="cpu", why="")
+        try:
+            import torch
+            from sentence_transformers import SentenceTransformer
+            dev = "cuda" if torch.cuda.is_available() else "cpu"
+            _clip.update(m=SentenceTransformer("clip-ViT-B-32", device=dev), dev=dev)
+        except Exception as e:
+            _clip["why"] = "CLIP didn't load: " + str(e)[:160]
+            print("past-work pictures: " + _clip["why"], flush=True)
+        return _clip["m"]
+
+
+def pictures(wait=False):
+    """W:'s picture index ready to search - {emb, kinds, jobs, weight, model, dev} - or None, with the reason in
+    status()["why"]. Only look-alike matching needs it. While it is loading (CLIP can take a minute at start-up) a
+    search doesn't wait for it - it goes by words; only warm() waits (wait=True)."""
+    if _pic.get("ok"):
+        return _pic
+    if not _pic_lock.acquire(blocking=wait):
+        return None
+    try:
+        if _pic.get("ok"):
+            return _pic
+        if _pic.get("at") and time.time() - _pic["at"] < 1800:
+            return None
+        _pic.clear()
+        _pic["at"] = time.time()
+        if not os.path.exists(PICTURES):
+            _pic["why"] = "no picture index (all_img_index.npz)"
+            print(f"past-work pictures off: {PICTURES} is missing - past jobs are found by number, name and words",
+                  flush=True)
+            return None
+        try:
+            s = _load()
+            model = clip_model()
+            if model is None:
+                _pic["why"] = _clip.get("why") or "CLIP didn't load"
+                return None
+            emb = np.load(PICTURES)["emb"].astype(np.float32)
+            kinds = np.array([k for (k,) in s["con"].execute("SELECT kind FROM project_images ORDER BY img_id")])
+            jobs = [j for (j,) in s["con"].execute("SELECT job_no FROM project_images ORDER BY img_id")]
+            n = emb.shape[0]
+            if n > len(jobs):     # picture i is job jobs[i]: a picture index newer than the job index would mislabel them
+                _pic["why"] = (f"the picture index ({n} pictures) is newer than the job index ({len(jobs)}) - "
+                               "copy both from the same day")
+                print("past-work pictures off: " + _pic["why"], flush=True)
+                return None
+            import torch
+            dev = _clip["dev"]
+            t = torch.from_numpy(emb).to(dev)
+            if dev == "cuda":
+                t = t.half()
+            kinds = kinds[:n]
+            _pic.update(ok=True, why="", emb=t, n=n, kinds=kinds, jobs=jobs[:n], model=model, dev=dev,
+                        weight=np.where(kinds == "render", 1.0, np.where(kinds == "creative", 0.93, 0.80)).astype(np.float32))
+            print(f"past-work pictures on: {n} pictures", flush=True)
+            return _pic
+        except Exception as e:
+            _pic["why"] = "picture index didn't load: " + str(e)[:160]
+            print("past-work pictures off: " + _pic["why"], flush=True)
+            return None
+    finally:
+        _pic_lock.release()
+
+
+def status():
+    """What /api/version and the laptop's checks report: can past jobs be found, are the K: estimates there, is picture
+    matching on. Never loads CLIP itself (that can take a minute) - says 'still loading' instead."""
+    out = {"jobs": 0, "estimates": os.path.exists(ESTIMATES_DB), "pictures": bool(_pic.get("ok")), "why": ""}
+    if not _state and _lock.locked():     # the first seconds after a start: answer now, don't wait for it
+        out["why"] = "job index still loading"
+        return out
+    try:
+        out["jobs"] = _load()["n_jobs"]
+    except Exception as e:
+        out["why"] = "no job index (projects.db)" if isinstance(e, FileNotFoundError) else "job index: " + str(e)[:120]
+        return out
+    if not out["pictures"]:
+        out["why"] = ("no picture index (all_img_index.npz)" if not os.path.exists(PICTURES) else
+                      _pic.get("why") or "picture index still loading")
+    return out
 
 
 # Colour, finish and size words describe every job, so they say nothing about WHICH job. Words for the kind of unit
@@ -77,11 +170,16 @@ def rarity(w):
 
 
 def image_hits(query, k=400):
-    s = _load()
-    import torch
-    q = s["model"].encode([query], convert_to_tensor=True, normalize_embeddings=True).to(s["dev"])
-    q = q.half() if s["dev"] == "cuda" else q
-    sims = (s["emb"] @ q.T).squeeze(1).float().cpu().numpy() * s["weight"]
+    """The pictures most like the brief's words - none when picture matching is off."""
+    p = pictures()
+    if not p:
+        return []
+    q = p["model"].encode([query], convert_to_tensor=True, normalize_embeddings=True).to(p["dev"])
+    q = q.half() if p["dev"] == "cuda" else q
+    sims = (p["emb"] @ q.T).squeeze(1).float().cpu().numpy() * p["weight"]
+    k = min(k, len(sims) - 1)
+    if k < 1:
+        return []
     top = np.argpartition(-sims, k)[:k]
     return sorted(((int(i), float(sims[i])) for i in top), key=lambda x: -x[1])
 
@@ -94,7 +192,7 @@ NOT_UNIT_PROMPTS = ["abstract artwork or a graphic design", "a brand logo", "the
 
 def unit_probs(ids):
     """For each image: how likely it is a picture of a display unit (not artwork, a logo, a room or a drawing). Zero-shot CLIP."""
-    s = _load()
+    s = pictures()
     if "T" not in s:
         import torch
         t = s["model"].encode(UNIT_PROMPTS + NOT_UNIT_PROMPTS, convert_to_tensor=True, normalize_embeddings=True).to(s["dev"])
@@ -104,13 +202,26 @@ def unit_probs(ids):
     return torch.softmax(logits, dim=1)[:, :len(UNIT_PROMPTS)].sum(dim=1).cpu().numpy()
 
 
+def first_unit_images(job, k=4):
+    """The job's first renders, then creative visuals, by the job index alone (no picture matching)."""
+    return [(i, 0.0) for (i,) in _load()["con"].execute(
+        "SELECT img_id FROM project_images WHERE job_no=? AND kind IN ('render','creative') "
+        "ORDER BY CASE kind WHEN 'render' THEN 0 ELSE 1 END, img_id LIMIT ?", (job, k))]
+
+
 def best_unit_images(job, query_vec, k=4, min_unit=0.45):
-    """The k pictures of this job that are most (a) a real display unit and (b) like the brief. Empty if the job has none."""
+    """The k pictures of this job that are most (a) a real display unit and (b) like the brief. Empty if the job has none.
+    With picture matching off (query_vec None), its first renders."""
+    p = pictures() if query_vec is not None else None
+    if not p:
+        return first_unit_images(job, k)
     s = _load()
     ids = [i for (i,) in s["con"].execute(
-        "SELECT img_id FROM project_images WHERE job_no=? AND kind IN ('render','creative') LIMIT 400", (job,))]
+        "SELECT img_id FROM project_images WHERE job_no=? AND kind IN ('render','creative') LIMIT 400", (job,))
+           if i < p["n"]]
     if not ids:
         return []
+    s = p
     sims = (s["emb"][ids] @ query_vec.T).squeeze(1).float().cpu().numpy()
     top = np.argsort(-sims)[:120]
     ids, sims = [ids[i] for i in top], sims[top]
@@ -440,16 +551,37 @@ def job_pictures(job, n=3, hint=""):
     return out
 
 
+def word_hits(bw, k=80):
+    """Without picture matching: jobs with renders whose name or drawing titles share the brief's describing words, the
+    rarer the word the more it counts ('no7' says far more than 'shelf'). [(job, score)], best first."""
+    if not bw:
+        return []
+    s = _load()
+    out = []
+    for j, nm, titles in s["con"].execute("SELECT job_no, name, titles FROM projects WHERE n_renders>0"):
+        tw = set(norm(f"{nm} {titles or ''}").split())
+        tw |= {w[:-1] for w in tw if len(w) > 4 and w.endswith("s")}
+        hit = {w for w in bw if w in tw or (len(w) > 4 and w.endswith("s") and w[:-1] in tw)}
+        if hit and (hit - TYPE_WORDS or len(hit) >= 2):    # one common unit word alone ('shelf') isn't a match
+            out.append((j, min(0.3, 2 * sum(rarity(w) for w in hit))))
+    out.sort(key=lambda x: -x[1])
+    return out[:k]
+
+
 def search(brief_text, client="", n=6, pin=()):
     """Best past jobs for a brief, each with its best-matching renders and what it cost. pin: jobs the AM named - always first."""
     s = _load()
-    hits = image_hits(f"a retail display: {brief_text}")
+    pics = pictures()
+    hits = image_hits(f"a retail display: {brief_text}") if pics else []
     cw = set(words(client))
     # words that name the thing: no bare numbers (sizes), no size/colour/finish words that every job shares
     bw = {w for w in words(brief_text) if not w.isdigit() and w not in GENERIC} - cw
     per_job = {}
+    if not pics:     # 4 Nov 2026: no picture matching - the brief's own words against job names and drawing titles
+        for j, sc in word_hits(bw):
+            per_job[j] = {"score": sc, "imgs": []}
     for i, sim in hits:
-        j = s["jobs"][i]
+        j = pics["jobs"][i]
         if not j:
             continue
         d = per_job.setdefault(j, {"score": 0.0, "imgs": [], "best": 0.0})
@@ -502,8 +634,10 @@ def search(brief_text, client="", n=6, pin=()):
     ranked_all = (mine if len(mine) >= 3 else mine + [j for j in order if j not in mine])[:n * 4]   # extra, some get dropped below
     # Pictures: for every job, the ones that are really a display unit and look like THIS brief. A job whose pictures are only
     # artwork, a logo or a shop interior ("Entrance-0") is dropped - it tells the AM nothing about the unit.
-    q = s["model"].encode([f"a retail display: {brief_text}"], convert_to_tensor=True, normalize_embeddings=True).to(s["dev"])
-    q = q.half() if s["dev"] == "cuda" else q
+    q = None
+    if pics:
+        q = pics["model"].encode([f"a retail display: {brief_text}"], convert_to_tensor=True, normalize_embeddings=True).to(pics["dev"])
+        q = q.half() if pics["dev"] == "cuda" else q
     kept = []
     for j in ranked_all:
         imgs = best_unit_images(j, q)

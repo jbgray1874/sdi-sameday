@@ -29,10 +29,9 @@ These are the only differences:
 
 ### Not working on the server yet (the same on every way in)
 
-- **Past SDI jobs from W:.** The server runs SameDay as a Windows service, and a service can't see mapped drives. The `W:` and `S:` paths in `lite_app.py` need their full `\\server\share` names, so until Muhammad changes them, past-job look-ups come back empty.
-- **The picture index.** `all_img_index.npz` was not in the K: folder, so the picture search is off on the server.
+- **The picture index.** `all_img_index.npz` was not in the K: folder, so look-alike picture matching is off on the server. Past jobs are still found by number, name, drawing titles, client and kind of unit. Copy it from Muhammad's laptop (`C:\SDI_Automation\`) to the server's `C:\SDI_Automation\`, with `brief_lite\projects.db` from the same day, then restart SDISameDay.
 
-Both are listed for Muhammad in `SAMEDAY_GO_LIVE.html` part D.
+W:, S: and K: themselves are fine: SameDay maps them for itself at start, and `Update-SameDay.ps1` says whether it can read each one. It does not search the drives file by file during a call. It searches index files made from them: `projects.db` (the jobs on W:), `knowledge.db` (the estimates on K:) and the picture index. `Update-SameDay.ps1` and `Check-SameDay-Call.ps1` both say how many past jobs it can find, whether the estimates are there, and whether picture matching is on.
 
 ## 2. Using it
 
@@ -169,7 +168,7 @@ Always update the server with `Update-SameDay.ps1`, run from the laptop (section
 | On the phone it says "SameDay isn't answering" | SameDay is down on the server. SDI Intelligence is up, but `SDISameDay` isn't. |
 | On the phone the page opens but nothing works | The server's SameDay is older than this branch, so it doesn't know `/sameday/`. Run `Update-SameDay.ps1`. |
 | It didn't hear something | `C:\SDI_Automation\brief_lite\rt_drops.log` |
-| No past jobs found | The W: change (section 1), not yet made |
+| No past jobs found | Run `Check-SameDay-Call.ps1`. Section 1 says how many past jobs SameDay can find and lists the index files on the server. "NONE" means `projects.db` is missing from `C:\SDI_Automation\brief_lite`. Before 4 November the missing picture index stopped every look-up; `Update-SameDay.ps1` fixes that. |
 | Spend looks wrong | `ai_calls` in `lite.db`. The live voice is counted at `gpt-realtime`'s price until its own is set in `.env` as `LITE_RT_PRICE`. |
 
 Tests for the 4 November changes run offline, with no keys and no drives:

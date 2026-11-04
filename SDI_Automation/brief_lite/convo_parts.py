@@ -564,6 +564,8 @@ def same_before(s):
     if not words:
         return ""
     here = os.path.dirname(os.path.abspath(__file__))
+    if not os.path.exists(os.path.join(here, "projects.db")):     # never let sqlite make an empty one
+        return ""
     try:
         con = sqlite3.connect(os.path.join(here, "projects.db"))
         words = list(dict.fromkeys([w[:-1] if len(w) > 4 and w.endswith("s") and not w.endswith("ss") else w for w in words]))
@@ -577,12 +579,18 @@ def same_before(s):
                 # folder name, not a job. Real jobs are named '<job> - ...'; backups and archives are never jobs.
                 and not str(r[0]).startswith("0") and re.match(r"\s*" + re.escape(str(r[0])) + r"\b", r[1] or "")
                 and not re.search(r"back-?ups?\b|\barchive", r[1] or "", re.I)][:25]
-        kn = sqlite3.connect(os.path.join(here, "knowledge.db"))
     except Exception:
         return ""
     score_w = set(words) | {w for w in re.findall(r"[a-z0-9]{3,}", b["unit_type"].lower()) if w not in ("unit", "display", "the", "for", "and")}
-    quote = {job: kn.execute("SELECT unit_cost, qty FROM estimates WHERE job_no=? AND unit_cost>=40 ORDER BY mtime DESC LIMIT 1",
-                             (job,)).fetchone() for job, _, _ in rows}
+    quote = {job: None for job, _, _ in rows}
+    kn_path = os.path.join(here, "knowledge.db")     # the K: estimates; the jobs still count without them
+    kn = sqlite3.connect(kn_path) if os.path.exists(kn_path) else None
+    try:
+        for job in (list(quote) if kn else []):
+            quote[job] = kn.execute("SELECT unit_cost, qty FROM estimates WHERE job_no=? AND unit_cost>=40 ORDER BY mtime DESC "
+                                    "LIMIT 1", (job,)).fetchone()
+    except sqlite3.Error:
+        pass
     # the most words of the brief's name in the job's name, then ones with a quote, then the newest
     # 3 Nov 2026: 'wine' says which job far more than 'bay' does (an M&S wine bay showed card wall bays first)
     generic = {"bay", "bays", "gondola", "fsdu", "stand", "wall", "shelf", "shelves", "bin", "header", "plinth", "counter", "table",
@@ -604,7 +612,8 @@ def same_before(s):
         out.append(f"{job} {nm} ({(last or '')[:4]}{q})")
         if len(out) >= 3:
             break
-    kn.close()
+    if kn:
+        kn.close()
     return "; ".join(out)
 
 

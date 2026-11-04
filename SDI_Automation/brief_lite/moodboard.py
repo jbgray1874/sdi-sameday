@@ -148,6 +148,8 @@ def _rank(paths, text, keep, min_sim=0.2):
     """CLIP: keep the pictures that really show `text`, most like it first, no near-duplicates."""
     from PIL import Image
     m = G["clip"]()
+    if m is None:     # no CLIP on this machine: unchecked web pictures (logos, banners) would mislead the render
+        return []
     ims, ok = [], []
     for p in paths:
         try:

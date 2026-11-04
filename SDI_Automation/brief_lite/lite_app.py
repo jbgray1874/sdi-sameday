@@ -4623,14 +4623,21 @@ def can_read():
 @app.route("/api/version")
 def api_version():
     """4 Nov 2026: what Update-SameDay.ps1 checks from the laptop after a restart - the version, and whether the service
-    can read W:, S: and K: (yes / no only), so it needs no team code. /api/status says more, so it still does."""
-    return jsonify({"version": RUNNING_VERSION, "can_read": can_read()})
+    can read W:, S: and K: (yes / no only), so it needs no team code. /api/status says more, so it still does.
+    past_work: how many past jobs it can find, whether the K: estimates and picture matching are there, and why not."""
+    try:
+        import lite_search
+        past = lite_search.status()
+    except Exception as e:
+        past = {"jobs": 0, "estimates": False, "pictures": False, "why": str(e)[:120]}
+    return jsonify({"version": RUNNING_VERSION, "can_read": can_read(), "past_work": past})
 
 
 @app.route("/api/status")
 def api_status():
     import lite_search
-    return jsonify({"version": RUNNING_VERSION, "search_ready": bool(lite_search._state), "openai_key": bool(os.environ.get("OPENAI_API_KEY")),
+    return jsonify({"version": RUNNING_VERSION, "search_ready": bool(lite_search._state), "past_work": lite_search.status(),
+                    "openai_key": bool(os.environ.get("OPENAI_API_KEY")),
                     "whatsapp": bool(WA_TOKEN and WA_PHONE_ID), "spent_today": round(spent_today(), 3), "cap": daily_cap()})
 
 
@@ -4774,13 +4781,16 @@ def page():
 
 
 def warm():
+    import lite_search
+    try:      # 4 Nov 2026: the job index first - past jobs no longer wait for (or fail with) the picture index
+        print(f"SDI Same Day Intelligence: past-work search ready - {lite_search._load()['n_jobs']} jobs", flush=True)
+    except Exception as e:
+        print("! past-work search not ready:", e, flush=True)
     try:
-        import lite_search
-        lite_search._load()
-        print("SDI Same Day Intelligence: past-work search ready")
+        lite_search.pictures(wait=True)     # says itself whether picture matching is on, and why not
         spaces.requeue_unfinished()
     except Exception as e:
-        print("! search not ready:", e)
+        print("! past-work pictures:", e, flush=True)
 
 
 _guard_sdks()                 # hard daily cap on every paid call, whatever calls it
@@ -4788,11 +4798,11 @@ import convo_parts as convo   # the conversation - uses this module's FIELDS, db
 convo.bind(globals())
 import spaces                 # the AM's inspiration libraries (Andy's "ChatGPT Space")
 spaces.bind(spent_today=spent_today, daily_cap=daily_cap, log_cost=log_cost,
-            clip=lambda: __import__("lite_search")._load()["model"])
+            clip=lambda: __import__("lite_search").clip_model())
 sys.path.insert(0, os.path.join(BASE, "craft"))
 import craft, craft_web       # Craft Memory: the studio's know-how, captured as people work (Tracy, KTP, 14 Oct 2026)
 craft_web.add(app, "showroom", "SDI Same Day Intelligence", "/pwa/mark.png?v=4")
-CLIP = lambda: __import__("lite_search")._load()["model"]
+CLIP = lambda: __import__("lite_search").clip_model()
 
 
 def who_of(s):
@@ -4801,7 +4811,7 @@ def who_of(s):
 
 import moodboard              # the real products + the best examples, found online (Andy: "ChatGPT found the best things")
 moodboard.bind(spent_today=spent_today, daily_cap=daily_cap, log_cost=log_cost,
-               clip=lambda: __import__("lite_search")._load()["model"])
+               clip=lambda: __import__("lite_search").clip_model())
 import realtime_parts as rt   # live voice (ChatGPT-style) - same tools, same brief
 rt.bind(globals())
 
