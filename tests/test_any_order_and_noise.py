@@ -401,8 +401,138 @@ class UpdateCheckTests(unittest.TestCase):
         c = L.app.test_client()
         r = c.get("/api/version", environ_base={"REMOTE_ADDR": "10.0.0.20"})
         self.assertEqual(r.status_code, 200)
-        self.assertEqual(set(r.get_json()), {"version"})
+        self.assertEqual(set(r.get_json()), {"version", "can_read"})
         self.assertEqual(c.get("/api/status", environ_base={"REMOTE_ADDR": "10.0.0.20"}).status_code, 401)
+
+
+class KeepingTrackTests(unittest.TestCase):
+    """James, 4 Nov 2026: "we lead but the user might change direction and we need to keep track, as every job might be
+    slightly different"."""
+
+    def test_a_new_unit_is_a_new_direction_and_a_refinement_is_not(self):
+        self.assertTrue(L.new_direction("gondola end", "wall bay"))
+        self.assertTrue(L.new_direction("FSDU", "counter unit"))
+        for old, new in (("gondola end", "double-sided gondola end"), ("FSDU", "floor standing display unit"),
+                         ("counter unit", "CDU"), ("wall bays", "wall bay"), ("", "wall bay")):
+            with self.subTest(old=old, new=new):
+                self.assertFalse(L.new_direction(old, new))
+
+    def test_a_change_of_unit_reopens_what_depended_on_it(self):
+        who = new_chat()
+        say(who, "Tesco want a gondola end", {"client": "Tesco", "unit_type": "gondola end"})
+        _, s = say(who, "you choose the size", {}, "answer")          # pencilled in, nothing drawn
+        self.assertIn("(assumed)", s["brief"].get("size", ""))
+        out, s = say(who, "actually make it a wall bay instead", {"unit_type": "wall bay"})
+        b = s["brief"]
+        self.assertEqual(b["unit_type"], "wall bay")
+        self.assertEqual(b["_direction"]["from"], "gondola end")
+        self.assertIn("size", b["_direction"]["reopened"])
+        self.assertNotIn("1800", b.get("size") or "")          # the gondola end's typical size is not kept for a wall bay
+        self.assertIn({"field": "unit_type", "from": "gondola end", "to": "wall bay"},
+                      [{k: c[k] for k in ("field", "from", "to")} for c in b["_changes"]])
+        self.assertIn("a wall bay now, not the gondola end", " ".join(r.get("text") or "" for r in out))
+        # it was asked "past job or new?" just before: the change is the AM steering, not the answer - nothing drawn
+        self.assertFalse(b.get("design_route"))
+        self.assertFalse(s["visuals"])
+
+    def test_an_answer_replaced_is_logged_and_an_assumption_filled_is_not(self):
+        b = {"size": "1800 x 1000 x 450 mm (assumed)", "colours_graphics": "red"}
+        L.keep_track(b, [], voice=False)
+        self.assertNotIn("_changes", b)
+        self.assertFalse(L.said_before(b["size"]))
+        self.assertTrue(L.said_before(b["colours_graphics"]))
+
+    def test_the_voice_is_told_once(self):
+        c = L.app.test_client()
+        who = new_chat()
+        _, s = say(who, "Boots want a gondola end", {"client": "Boots", "unit_type": "gondola end"})
+        L.log_msg(s["id"], "in", "actually it's a wall bay now")
+        args = {"updates": {"unit_type": "wall bay"}}
+        first = json.loads(c.post("/api/rt/tool", json={"session": s["id"], "name": "record_answers", "arguments": args}
+                                  ).get_json()["output"])
+        self.assertEqual(first["direction_changed"]["now"], "wall bay")
+        self.assertIn("unit_type: gondola end -> wall bay", first["recent_changes"])
+        L.log_msg(s["id"], "in", "it holds No7 serums")
+        again = json.loads(c.post("/api/rt/tool", json={"session": s["id"], "name": "record_answers",
+                                                        "arguments": {"updates": {"products_held": "No7 serums"}}}
+                                  ).get_json()["output"])
+        self.assertEqual(again["direction_changed"], "")
+
+    def test_the_call_is_told_to_lead_and_to_follow_a_change(self):
+        who = new_chat()
+        _, s = say(who, "Tesco want a gondola end", {"client": "Tesco", "unit_type": "gondola end"})
+        text = rt.instructions(s)
+        self.assertIn("YOU LEAD, THEY STEER", text)
+        self.assertIn("never bring back an answer they replaced", text)
+
+
+class TheLiveTranscriberTests(unittest.TestCase):
+    def brief(self, **kw):
+        return {"id": "t", "visuals": [], "brief": dict({"_flow": 2}, **kw)}
+
+    def test_the_newer_live_transcriber_with_keyword_hints(self):
+        tr = rt.transcription(self.brief(client="M&S", unit_type="wine bay", liked_job="12148 Rollershutter Bunker"))
+        self.assertEqual(tr["model"], "gpt-live-transcribe")
+        self.assertEqual(tr["languages"], ["en"])
+        self.assertNotIn("language", tr)
+        self.assertEqual(tr["delay"], "low")
+        self.assertIn("M and S", tr["keywords"])
+        self.assertIn("12148 Rollershutter Bunker", tr["keywords"])
+        self.assertTrue(all(re.fullmatch(r"[A-Za-z0-9' -]{2,40}", k) for k in tr["keywords"]))
+        self.assertLessEqual(len(tr["keywords"]), 40)
+        self.assertLessEqual(len(tr["prompt"]), 500)
+
+    def test_the_previous_one_when_asked(self):
+        tr = rt.transcription(self.brief(client="Lindt"), live=False)
+        self.assertEqual((tr["model"], tr["language"]), ("gpt-4o-transcribe", "en"))
+        self.assertNotIn("keywords", tr)
+
+    def test_a_call_still_starts_if_openai_refuses_the_new_one(self):
+        import requests
+
+        class R:
+            def __init__(self, code, body):
+                self.status_code, self.ok, self._b, self.text = code, code < 400, body, json.dumps(body)
+
+            def json(self):
+                return self._b
+        sent = []
+
+        def fake_post(url, **kw):
+            tr = kw["json"]["session"]["audio"]["input"]["transcription"]
+            sent.append(tr["model"])
+            return R(400, {"error": "unknown parameter"}) if tr["model"] == "gpt-live-transcribe" else R(200, {"value": "ek_test"})
+        real, key = requests.post, os.environ.get("OPENAI_API_KEY")
+        requests.post, os.environ["OPENAI_API_KEY"] = fake_post, "test"
+        try:
+            j = L.app.test_client().post("/api/rt/session", json={"who": "t", "new": True}).get_json()
+        finally:
+            requests.post = real
+            if key is None:
+                os.environ.pop("OPENAI_API_KEY", None)
+            else:
+                os.environ["OPENAI_API_KEY"] = key
+        self.assertEqual(sent, ["gpt-live-transcribe", "gpt-4o-transcribe"])
+        self.assertEqual(j["key"], "ek_test")
+        self.assertEqual(j["transcription"]["model"], "gpt-4o-transcribe")
+        self.assertFalse(L.RT_LIVE[j["session"]])
+
+    def test_a_read_back_of_the_keywords_is_dropped(self):
+        tr = rt.transcription(self.brief(client="Lindt", unit_type="counter unit"))
+        listed = ", ".join(tr["keywords"][2:10])
+        self.assertTrue(L.echo_of(listed, rt.hint_text(tr)))
+
+
+class TheDrivesTests(unittest.TestCase):
+    def test_the_laptop_hears_whether_the_service_can_read_the_drives(self):
+        j = L.app.test_client().get("/api/version", environ_base={"REMOTE_ADDR": "10.0.0.20"}).get_json()
+        self.assertEqual(set(j["can_read"]), {"W", "S", "K"})
+
+    def test_each_drive_has_its_network_name(self):
+        self.assertEqual(L.DRIVES["K"], r"\\sdi-dc01\shareddata$\Shared")       # the one Publish reads every day
+        self.assertTrue(all(v.startswith("\\\\") for v in L.DRIVES.values()))
+        src = (WORK / "brief_lite" / "lite_app.py").read_text(encoding="utf-8")
+        self.assertLess(src.index("    map_drives()"), src.index("threading.Thread(target=warm"))
 
 
 class StillTrueTests(unittest.TestCase):

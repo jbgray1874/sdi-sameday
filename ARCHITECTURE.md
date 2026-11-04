@@ -54,7 +54,7 @@ That is the usual order, not a fixed one (section 4b): the AM can do the interna
 | Job | Model | Notes |
 |---|---|---|
 | Live call (voice) | OpenAI `gpt-realtime-2` (set by `LITE_RT_BIG_MODEL`; put `gpt-realtime` back there to roll back) | Same model for everyone. Turn-taking is `semantic_vad`; noisy mode uses `server_vad` (section 4). Its spend is counted at `gpt-realtime`'s price until its own is set in `.env` as `LITE_RT_PRICE` (audio in, audio out, text in, text out, cached, USD per million tokens). A model with no price is never counted at the cheap mini price. |
-| Live transcription | OpenAI `gpt-4o-transcribe` | Its vocabulary prompt (`heard_hint()`) holds SDI's words, this brief's own names (client, store, unit, products, people, past jobs) and SDI's usual clients. It is updated during the call as the brief names more. |
+| Live transcription | OpenAI `gpt-live-transcribe` (since 4 November 2026; `LITE_RT_TRANSCRIBE_LIVE`). If OpenAI refuses it for a call, SameDay uses `gpt-4o-transcribe`, which is deprecated and shuts down on 26 February 2027. | It is told keyword hints (`keywords()`) plus a short prompt. Its vocabulary prompt (`heard_hint()`) holds SDI's words, this brief's own names (client, store, unit, products, people, past jobs) and SDI's usual clients. It is updated during the call as the brief names more. |
 | Voice notes in | OpenAI `gpt-4o-transcribe` | Falls back to local Whisper if OpenAI fails |
 | Voice notes out | OpenAI `gpt-4o-mini-tts`, voice "fable" (British) | Falls back to the free edge-tts voice |
 | Chat turns, checks, GA size check | Claude Haiku | Cheap and fast |
@@ -106,6 +106,17 @@ Tests: `tests/test_any_order_and_noise.py`. They run offline on a copy of the ap
 - **Refreshing the index.** `python brief_lite\build_projects.py` takes about 10 seconds, needs no AI, and reads the scan files already on the server.
 - **Earlier client files.** Files uploaded to an earlier brief for the same client are background only. They never lead a new render or GA.
 
+## 4b2. Keeping track (4 November 2026)
+
+The voice leads: after each answer it moves to the next most useful open question for this job. The account manager steers, and whatever they raise comes first. Every answer that replaces an earlier one is logged in `_changes`; the voice sees the last four as `recent_changes`.
+
+A change of the unit itself (a gondola end becoming a wall bay, checked by `new_direction()`) is a new direction:
+
+- What was only guessed for the old unit (its typical size, fixing, lighting and so on) is dropped, so it's worked out again for the new one.
+- The past-work search starts again.
+- The voice is told once (`direction_changed`) to say the change back. If options are already on screen, it offers a fresh design rather than changing the old picture.
+- A reply that changes the brief is never taken as the answer to "past job or new?", so nothing is drawn before the change is taken in.
+
 ## 4c. On the phone (4 November 2026)
 
 SDI Intelligence (port 8071, already published through App Proxy) carries SameDay at `/sameday/` on its own https address (`sameday_proxy.py` in ClaudeVision):
@@ -117,6 +128,7 @@ SDI Intelligence (port 8071, already published through App Proxy) carries SameDa
 
 ## 5. Data, spend and safety
 
+- **W:, S: and K: on the server.** The past-work indexes hold paths as `W:\...`, `S:\...` and `K:\...`. A Windows service has no mapped drives, so at start SameDay maps any missing letter for itself, by its network name (`map_drives()`; `LITE_DRIVES` in `.env` overrides). `/api/version` reports which drives it can read, and `Update-SameDay.ps1` prints that.
 - **Read-only on W: and K:.** The app never writes to the shared drives; everything it makes goes to `brief_lite\out\`.
 - **Spend.** Every AI call is logged in `lite.db` (table `ai_calls`). The daily cap is in `studio_data\ai_switch.json` → `brief_lite_daily_cap_usd`, currently **$10**. When the cap is reached the page says so clearly. To give a fresh $10 for the rest of a day, set `brief_lite_budget_reset_at` to the current time, for example `2026-11-03T15:06:36`. Spend then counts from that moment until midnight. The log itself is never changed. No restart is needed.
 - **Chats.** Chats are never hard-deleted: deleting one sets `state='deleted'`.

@@ -1153,7 +1153,8 @@ async function rtStart(){if(!project){toast("Pick your name first");newBrief();r
  let mic;try{mic=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:false}})}catch(e){toast("Microphone blocked - allow it from the padlock in the address bar");return false}
  pc.addTrack(mic.getTracks()[0]);
  const dc=pc.createDataChannel("oai-events");
- rt={pc,dc,mic,audio,bubble:null,userRow:null,talking:false,tr:tr0,hints:tr0&&tr0.prompt?[tr0.prompt]:[]};
+ const told=t=>t?((t.prompt||"")+" "+(t.keywords||[]).join(", ")).trim():"";   // what the transcriber was told: prompt + keyword hints
+ rt={pc,dc,mic,audio,bubble:null,userRow:null,talking:false,tr:tr0,hints:told(tr0)?[told(tr0)]:[]};
  dc.onopen=()=>{talkUI(true,"Live - just talk. Interrupt me any time.");dc.send(JSON.stringify({type:"response.create"}))};
  dc.onmessage=e=>rtEvent(JSON.parse(e.data));
  meter(mic);
@@ -1324,7 +1325,7 @@ async function rtEvent(ev){const ty=ev.type||"";
 async function rtTool(call_id,name,args){
  const LBL={make_concepts:"Making the concepts and checking them…",choose_option:"Drawing the GA and the client sheet…",change_option:"Changing that option…",more_options:"Making more options…",finish_brief:"Building the full brief PDF…",show_past_work:"Looking through SDI's history…"};
  let j;try{j=await fetch("/api/rt/tool",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({session:sid,name,arguments:args})}).then(r=>r.json())}catch(e){j={output:JSON.stringify({error:String(e)})}}
- if(j.transcription&&j.transcription.prompt&&rt){rt.hints=[...(rt.hints||[]),j.transcription.prompt].slice(-3);rt.tr=j.transcription;   // the brief named more: the transcriber listens for it too
+ if(j.transcription&&j.transcription.prompt&&rt){rt.hints=[...(rt.hints||[]),((j.transcription.prompt||"")+" "+(j.transcription.keywords||[]).join(", ")).trim()].slice(-3);rt.tr=j.transcription;   // the brief named more: the transcriber listens for it too
   rtSay({type:"session.update",session:{type:"realtime",audio:{input:{transcription:j.transcription}}}})}
  rtSay({type:"conversation.item.create",item:{type:"function_call_output",call_id,output:j.output||"{}"}});
  // 27 Oct 2026: the voice asked "which pack?" and called a tool in the same breath, then asked it AGAIN when the tool

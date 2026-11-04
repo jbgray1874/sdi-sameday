@@ -2258,13 +2258,20 @@ def handle(number, name, text, image_path=None, voice=False, ch=None, new=False,
         b["output"] = "3D render and technical GA"
         if len(text or "") < 40:      # "everything please" answers the output question - not lighting or anything else
             upd = {}
+    changed = []
     for k, v in upd.items():
         if k in FIELDS and v not in (None, "", []):
             v = v if isinstance(v, str) else json.dumps(v) if not isinstance(v, (int, float)) else str(v)
             if "(assumed)" in str(b.get(k) or "") and str(v) != str(b.get(k)):
                 craft.log("showroom", "assumption_corrected", who_of(s), s["id"], craft.context_of(b),
                           {"field": k, "assumed": b.get(k), "actual": v, "summary": f"{k.replace('_', ' ')}: {v}"})
+            if said_before(b.get(k)) and k != "other_notes" and _plain(b.get(k)) != _plain(v):
+                changed.append((k, str(b.get(k)), v))
             b[k] = (b["other_notes"] + "; " + v) if k == "other_notes" and b.get("other_notes") else v
+    direction = keep_track(b, changed, voice=t_override is not None or record_only,
+                           drawn=any(v.get("kind") == "render" for v in s["visuals"]))
+    if direction and t_override is None and not record_only:
+        prefix += direction + " "
     for k in t.get("not_known") or []:
         if k in FIELDS and k not in ("client", "unit_type") and not convo.real(b.get(k)):
             b[k] = convo.UNKNOWN
@@ -2703,8 +2710,10 @@ def handle(number, name, text, image_path=None, voice=False, ch=None, new=False,
         r_ = design_route_from(text) or (t.get("updates") or {}).get("design_route")
         if r_ in ("past", "new", "mix", "own"):
             b["design_route"] = r_
-        elif b.get("_route_asked"):
+        elif b.get("_route_asked") and not changed:
             b["design_route"] = "mix"          # asked once: never block the picture on it
+        # 4 Nov 2026: but a reply that changes the brief ("actually make it a wall bay") is the AM steering, not an
+        # answer to past / mix / new - it is taken in, and the question stays open, rather than drawing straight away
     if b.get("_flow") and b.get("design_route") in ("new", "mix") and not convo.real(b.get("repeat_of")):
         b["repeat_of"] = "New design"          # past / mix / new answered it - never asked again as "is it a repeat?"
     if ASSUME.search(text or "") or t.get("assume"):
@@ -3146,6 +3155,64 @@ WHERE_RENDER = re.compile(r"\bwhere('?s| is| are)\b.{0,20}\b(render|visual|conce
                           r"\b(render|visual|concept|image|picture)s?\b.{0,20}\b(ready|done|finished|coming)\b.{0,10}\?", re.I)
 
 
+# ---------------------------------------------------------------- keeping track (4 Nov 2026)
+# James: "we lead but the user might change direction and we need to keep track, as every job might be slightly
+# different". Every answer that replaces an earlier one is logged (_changes). A change of the unit itself - a gondola
+# end that becomes a wall bay - is a new direction: what was only pencilled in for the old unit (its typical size,
+# fixing, lighting...) is dropped so it is worked out again for the new one, the past-work search starts again, and
+# a picture already drawn stays to compare while a fresh design is offered for the new direction.
+_SAME_WORDS = {"unit", "units", "display", "displays", "the", "a", "an", "for", "with", "and", "new", "sdi", "one", "type"}
+_EXPAND = {"fsdu": "free standing display unit", "cdu": "counter display unit", "pos": "point of sale"}
+
+
+def _plain(v):
+    return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9 ]+", " ", str(v or "").lower())).strip()
+
+
+def said_before(v):
+    """An earlier answer the AM gave - not a gap, a 'not known' or something only assumed."""
+    return convo.real(v) and v != convo.UNKNOWN and "(assumed" not in str(v)
+
+
+def _unit_words(v):
+    words = " ".join(_EXPAND.get(w, w) for w in _plain(v).split()).split()
+    return {w[:-1] if len(w) > 3 and w.endswith("s") else w for w in words if w not in _SAME_WORDS}
+
+
+def new_direction(old, new):
+    """True when the unit itself changed (gondola end -> wall bay), not when it was refined
+    (gondola end -> double-sided gondola end, FSDU -> floor-standing unit)."""
+    a, b_ = _unit_words(old), _unit_words(new)
+    return bool(a and b_ and not (a & b_))
+
+
+def keep_track(b, changed, voice=False, drawn=False):
+    """Log what changed; on a new direction, re-open what depended on the old one. Returns a line to say it back."""
+    if not changed:
+        return ""
+    at = datetime.now().strftime("%H:%M")
+    b["_changes"] = ((b.get("_changes") or []) + [{"field": k, "from": o[:120], "to": n[:120], "at": at}
+                                                   for k, o, n in changed])[-30:]
+    turn = next(((o, n) for k, o, n in changed if k == "unit_type" and new_direction(o, n)), None)
+    if not turn:
+        return ""
+    old, new = turn
+    reopened = [k for k in ("size", "fixing", "installation", "lighting", "placement", "materials")
+                if "(assumed" in str(b.get(k) or "")]
+    for k in reopened:
+        b.pop(k, None)
+    for k in ("_same_before", "_ref_confirm", "_ref_ask", "_ref_more", "_ref_shown", "_ref_ask_shown", "_ref_more_shown"):
+        b.pop(k, None)
+    b["_direction"] = {"from": old[:80], "to": new[:80], "at": at, "reopened": reopened, "drawn": drawn,
+                       "following": b.get("liked_job") if b.get("_ref_job") else ""}
+    if voice:
+        b["_direction_new"] = 1          # the voice is told once, in its next tool result
+    return (f"Got it - a {new} now, not the {old}."
+            + (" I'll work the size and details out again for it." if reopened else "")
+            + (" The options so far stay on screen; say \"draw it\" for a fresh design of the new one."
+               if drawn else ""))
+
+
 def set_pack(b, pk, assumed=False):
     """The AM's pack: 'internal' is Andy's whole template; 'client' and 'both' make the render and its GA first.
     assumed: the AM never said (4 Nov 2026) - both, so nothing is missed; the AM's own choice replaces it any time."""
@@ -3355,15 +3422,26 @@ def api_rt_session():
     if not s["brief"].get("briefing_date"):
         s["brief"]["briefing_date"] = f"{date.today():%a %d %b %Y}"
         save_session(s)
-    r = requests.post("https://api.openai.com/v1/realtime/client_secrets", timeout=20,
-                      headers={"Authorization": f"Bearer {os.environ['OPENAI_API_KEY']}"},
-                      json={"expires_after": {"anchor": "created_at", "seconds": 120},
-                            "session": rt.session_config(s, far=not js.get("mobile"), model=(model := rt.model_for(_project_name(project), js.get("demo"))))})
+    model = rt.model_for(_project_name(project), js.get("demo"))
+
+    def ask(live):
+        return requests.post("https://api.openai.com/v1/realtime/client_secrets", timeout=20,
+                             headers={"Authorization": f"Bearer {os.environ['OPENAI_API_KEY']}"},
+                             json={"expires_after": {"anchor": "created_at", "seconds": 120},
+                                   "session": rt.session_config(s, far=not js.get("mobile"), model=model, live=live)})
+    # 4 Nov 2026: the newer live transcriber first (better in noise); if OpenAI won't take it here, the previous one -
+    # a call must always start
+    live = True
+    r = ask(True)
+    if not r.ok and 400 <= r.status_code < 500 and r.status_code != 401:
+        print("live voice: gpt-live-transcribe refused, using the previous transcriber:", r.text[:200], flush=True)
+        live, r = False, ask(False)
     if not r.ok:
         return jsonify({"error": f"voice service: {r.text[:200]}"}), 502
     rt.SESSION_MODEL[s["id"]] = model
-    tr = rt.transcription(s)
-    RT_HINT[s["id"]] = [tr["prompt"]]
+    RT_LIVE[s["id"]] = live
+    tr = rt.transcription(s, live)
+    RT_HINT[s["id"]] = [rt.hint_text(tr)]
     # the page needs the hint to spot it read back, and the transcriber settings to send an updated hint mid-call
     return jsonify({"key": r.json()["value"], "model": model, "session": s["id"], "brief": s["brief"], "transcription": tr})
 
@@ -3491,9 +3569,10 @@ def api_rt_tool():
         time.sleep(0.1)
     s = _session_by_id(s["id"]) or s
     out_ = {"turn": jid, "slow": False, "output": rt.tool_result(s, JOBS[jid]["ch"].out)}
-    tr = rt.transcription(s)
-    if tr["prompt"] not in RT_HINT.get(s["id"], []):     # 4 Nov 2026: the transcriber hears this brief's new names too
-        RT_HINT[s["id"]] = (RT_HINT.get(s["id"], []) + [tr["prompt"]])[-3:]
+    _told_direction(s)
+    tr = rt.transcription(s, RT_LIVE.get(s["id"], True))
+    if rt.hint_text(tr) not in RT_HINT.get(s["id"], []):     # 4 Nov 2026: the transcriber hears this brief's new names too
+        RT_HINT[s["id"]] = (RT_HINT.get(s["id"], []) + [rt.hint_text(tr)])[-3:]
         out_["transcription"] = tr
     return jsonify(out_)
 
@@ -3568,6 +3647,13 @@ def api_rt_log():
         JOBS[jid]["tool"] = kind
         return jsonify({"ok": True, "turn": jid, "kind": kind})
     return jsonify({"ok": True})
+
+
+def _told_direction(s):
+    """A new direction goes into one tool result, then it is the voice's to say back - not repeated every turn."""
+    if s and s["brief"].get("_direction_new"):
+        s["brief"].pop("_direction_new", None)
+        save_session(s)
 
 
 def _last_am_line(sid):
@@ -4368,7 +4454,8 @@ def openai_transcribe(path, sid=None):
         return None
 
 
-RT_HINT = {}   # chat id -> the transcriber hints this live call was given (realtime_parts.heard_hint), newest last
+RT_HINT = {}   # chat id -> the transcriber hints this live call was given (realtime_parts.hint_text), newest last
+RT_LIVE = {}   # chat id -> True when OpenAI took gpt-live-transcribe for the call, False when it fell back
 
 
 def echo_of(text, hint):
@@ -4470,11 +4557,56 @@ except Exception:
     RUNNING_VERSION = "unknown"
 
 
+# ---------------------------------------------------------------- the drives, for a Windows service (4 Nov 2026)
+# The past-work indexes (projects.db, knowledge.db) hold paths as Muhammad's laptop saw them - W:\..., S:\..., K:\...
+# A Windows service has no mapped drives, so on the server every one of those paths was missing and past-job look-ups
+# came back empty. At start, any of these letters that isn't there is mapped for this service by its network name
+# (read-only use; nothing is written to the drives). LITE_DRIVES in .env overrides, e.g.
+#   LITE_DRIVES=W=\\sdi-dc01\CAD;S=\\sdi-dc01\shareddata$\Company data;K=\\sdi-dc01\shareddata$\Shared
+DRIVES = {"W": r"\\sdi-dc01\CAD", "S": r"\\sdi-dc01\shareddata$\Company data", "K": r"\\sdi-dc01\shareddata$\Shared"}
+for _pair in os.environ.get("LITE_DRIVES", "").split(";"):
+    if "=" in _pair and len(_pair.split("=", 1)[0].strip()) == 1:
+        DRIVES[_pair.split("=", 1)[0].strip().upper()] = _pair.split("=", 1)[1].strip()
+DRIVE_STATE = {}
+
+
+def map_drives():
+    """Map W:, S: and K: for this process where Windows hasn't (a service). Says what happened; never raises."""
+    if os.name != "nt":
+        return {}
+    import subprocess
+    for letter, unc in DRIVES.items():
+        root = letter + ":\\"
+        if os.path.isdir(root):
+            DRIVE_STATE[letter] = "there"
+            continue
+        try:
+            r = subprocess.run(["net", "use", letter + ":", unc, "/persistent:no"], capture_output=True, text=True,
+                               timeout=30, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+            DRIVE_STATE[letter] = "mapped" if os.path.isdir(root) else \
+                "not mapped: " + re.sub(r"\s+", " ", (r.stderr or r.stdout or "")).strip()[:160]
+        except Exception as e:
+            DRIVE_STATE[letter] = "not mapped: " + str(e)[:160]
+        print(f"drive {letter}: -> {unc}: {DRIVE_STATE[letter]}", flush=True)
+    return DRIVE_STATE
+
+
+def can_read():
+    """Whether SameDay itself (the service) can read each drive now - what past-work look-ups depend on."""
+    out = {}
+    for letter in DRIVES:
+        try:
+            out[letter] = os.path.isdir(letter + ":\\") and bool(next(os.scandir(letter + ":\\"), None))
+        except OSError:
+            out[letter] = False
+    return out
+
+
 @app.route("/api/version")
 def api_version():
-    """4 Nov 2026: what Update-SameDay.ps1 checks from the laptop after a restart - the version and nothing else, so it
-    needs no team code (the laptop is not this machine). /api/status says more, so it still does."""
-    return jsonify({"version": RUNNING_VERSION})
+    """4 Nov 2026: what Update-SameDay.ps1 checks from the laptop after a restart - the version, and whether the service
+    can read W:, S: and K: (yes / no only), so it needs no team code. /api/status says more, so it still does."""
+    return jsonify({"version": RUNNING_VERSION, "can_read": can_read()})
 
 
 @app.route("/api/status")
@@ -4664,6 +4796,7 @@ if __name__ == "__main__":
     except OSError:
         print(f"Port {PORT} already in use - SDI Same Day Intelligence is already running.")
         sys.exit(0)
+    map_drives()                  # before the past-work search loads: its paths are W:\..., S:\..., K:\...
     threading.Thread(target=warm, daemon=True).start()
     from waitress import serve
     print(f"SDI Same Day Intelligence on http://localhost:{PORT}")

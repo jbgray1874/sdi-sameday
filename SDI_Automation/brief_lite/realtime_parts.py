@@ -16,7 +16,7 @@ and stops the moment the AM talks over it. This file gives that model its brief 
 Everything a tool does goes through lite_app.handle() with the intent already decided, so voice, text and WhatsApp
 always build the same brief. Cost: gpt-realtime (set in .env, 20 Oct 2026; was gpt-realtime-mini), about 5-8p a minute of talking, logged per response.
 """
-import json, os
+import json, os, re
 from datetime import datetime
 
 G = {}
@@ -233,6 +233,13 @@ def instructions(s):
         "record_answers; a newer answer replaces the older one, and a change that alters the picture is offered as a "
         "new option ('Want me to redraw it with 1100 high?'). The brief is complete when every question is answered, "
         "in whatever order - not when they were asked in order.\n"
+        "- YOU LEAD, THEY STEER (4 Nov 2026, James): every job is a little different. After each answer, move the "
+        "brief on yourself - the next most useful open question (next_questions[0]), worded for THIS job - so the AM "
+        "never has to think what comes next. But whatever the AM raises comes first, and their change of direction "
+        "wins: a different unit, size, look, past job or order of questions. Say a change back in one line ('So a wall "
+        "bay now, not the gondola end'), record it, and treat what depended on the old direction as open again (the "
+        "tool result's direction_changed says what). Keep track: recent_changes and already_known_never_ask_again "
+        "are the brief as it stands - never re-ask any of it, and never bring back an answer they replaced.\n"
         "- NOISE AND OTHER VOICES: you're on a phone or laptop in an office, a car or a store. Only the AM talking to you "
         "counts. A line that makes no sense here (another conversation, a TV, someone on the phone, one stray word) is "
         "not an answer: ignore it, or ask once 'Sorry - was that for me?'. Never record a fact you only half-heard: ask "
@@ -315,6 +322,11 @@ def instructions(s):
            "FAR or the conversation. Say in one short line where we got to, then ask the next question."))
 
 
+# 4 Nov 2026: gpt-4o-transcribe has a successor for live audio, gpt-live-transcribe (OpenAI, 29 July 2026): fewer errors on
+# short phrases, numbers, specialist words and speech over loud background noise, and keyword hints. gpt-4o-transcribe
+# is deprecated (OpenAI: shut down 26 Feb 2027). The live one is asked for first; if OpenAI won't take it in a voice
+# session, /api/rt/session falls back to gpt-4o-transcribe, so a call always starts.
+TRANSCRIBE_LIVE = os.environ.get("LITE_RT_TRANSCRIBE_LIVE", "gpt-live-transcribe")
 TRANSCRIBE = os.environ.get("LITE_RT_TRANSCRIBE", "gpt-4o-transcribe")
 SDI_WORDS = ("client pack, internal pack, both, FSDU, gondola end, wall bay, counter unit, plinth, header, shelf-edge strip, "
              "dump bin, totem, slatwall, powder coat, acrylic, MDF, Dibond, foamex, LED, GA, render, forecourt, coal bunker, AdBlue")
@@ -362,15 +374,47 @@ def heard_hint(s):
     return out[:900]
 
 
-def transcription(s):
+def keywords(s, n=40):
+    """The words the live transcriber should expect, as a list (gpt-live-transcribe's keyword hints): this brief's own
+    names first, then SDI's words and clients. Only letters, digits, spaces, apostrophes and hyphens - OpenAI refuses
+    a session whose keywords hold other characters ("M&S" is sent as "M and S")."""
+    b = (s or {}).get("brief") or {}
+    words = []
+    for k in ("client", "retailer", "unit_type", "products_held", "hero_products", "project_name", "account_manager",
+              "customer_name", "liked_job"):
+        v = str(b.get(k) or "")
+        if v and "(assumed)" not in v and v.lower() not in ("not known", "unknown"):
+            words += [v]
+    for x in str(b.get("_same_before") or "").split("; ")[:3]:
+        words.append(x.split(" (")[0])
+    words += [w.strip() for w in SDI_WORDS.split(",")] + _top_clients(25)
+    out = []
+    for w in words:
+        w = re.sub(r"\s+", " ", re.sub(r"[^A-Za-z0-9' -]+", " ", w.replace("&", " and "))).strip()[:40]
+        if len(w) >= 2 and w.lower() not in (x.lower() for x in out):
+            out.append(w)
+    return out[:n]
+
+
+def transcription(s, live=True):
+    """The transcriber's settings for a call. live: gpt-live-transcribe (keyword hints, plural languages, low delay);
+    otherwise the previous gpt-4o-transcribe settings."""
+    if live and TRANSCRIBE_LIVE:
+        return {"model": TRANSCRIBE_LIVE, "prompt": heard_hint(s)[:500], "keywords": keywords(s), "languages": ["en"],
+                "delay": "low"}
     return {"model": TRANSCRIBE, "language": "en", "prompt": heard_hint(s)}
 
 
-def session_config(s, far=True, model=None):
+def hint_text(tr):
+    """Everything the transcriber was told, as one text - what a read-back in silence would look like."""
+    return (tr.get("prompt") or "") + " " + ", ".join(tr.get("keywords") or [])
+
+
+def session_config(s, far=True, model=None, live=True):
     return {"type": "realtime", "model": model or RT_MODEL, "instructions": instructions(s),
             # 27 Oct 2026: "Boots" was heard as "boards" - the transcriber is told the names it will hear (heard_hint).
             # If it ever reads them back, the page's junkHeard() and the server's hint_echo() drop the line.
-            "audio": {"input": {"transcription": transcription(s),
+            "audio": {"input": {"transcription": transcription(s, live),
                                 "turn_detection": {"type": "semantic_vad", "eagerness": "low", "interrupt_response": False,
                                                    "create_response": False},
                                 "noise_reduction": {"type": "far_field" if far else "near_field"}},
@@ -436,6 +480,18 @@ def tool_result(s, replies):
             {"ask_the_am": "No past SDI job matched what they said - ask for the job number, or a few more words from its "
                            "name or the fixture."} if b.get("_ref_more") and not b.get("_ref_job") else ""),
         "following_past_job": b.get("liked_job") if b.get("_ref_job") else "",
+        # 4 Nov 2026 (James: "keep track - every job might be slightly different")
+        "direction_changed": (
+            {"now": b["_direction"]["to"], "was": b["_direction"]["from"],
+             "say_back": f"Say it back in one line ('So a {b['_direction']['to']} now, not the {b['_direction']['from']}').",
+             "open_again": b["_direction"].get("reopened") or [],
+             "then": ("Options already on screen are of the old unit: offer a fresh design of the new one (more_options n=1) "
+                      "- never change the old picture into it." if b["_direction"].get("drawn") else
+                      "Carry on with what's still open for the new unit.")
+                     + (f" They were following past job {b['_direction']['following']} - check it still fits."
+                        if b["_direction"].get("following") else "")}
+            if b.get("_direction_new") and b.get("_direction") else ""),
+        "recent_changes": [f"{c['field']}: {c['from']} -> {c['to']}" for c in (b.get("_changes") or [])[-4:]],
         "already_known_never_ask_again": {k: v for k, v in b.items() if not k.startswith("_") and convo.real(v)},
         "essentials_missing": need,
         "output_wanted": b.get("output") or "not chosen yet - see now_do",
