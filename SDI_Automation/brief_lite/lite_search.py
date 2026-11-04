@@ -19,6 +19,7 @@ HERE = os.path.join(BASE, "brief_lite")
 JOBS_DB = os.path.join(HERE, "projects.db")              # every job on W:, its drawings and pictures (built from W:)
 ESTIMATES_DB = os.path.join(HERE, "knowledge.db")         # the estimates on K:
 PICTURES = os.path.join(BASE, "all_img_index.npz")       # CLIP vectors of W:'s pictures, for look-alike matching
+WALK_SECONDS = float(os.environ.get("LITE_WALK_SECONDS", "8"))     # longest a look through one job's W: folder may take
 _lock = threading.Lock()
 _state = {}
 _pic_lock = threading.Lock()
@@ -476,12 +477,19 @@ def live_files(job, cap=1600):
     out = []
     if not r or not r[0] or not os.path.isdir(r[0]):
         return out
-    for root, _, files in os.walk(r[0]):
+    # 4 Nov 2026 (Andy's call froze): a job folder on W: can hold tens of thousands of CAD files and only a few PDFs - the
+    # walk stops after WALK_SECONDS whatever it has found, so a look-up never holds the call (or a render) up
+    t0 = time.time()
+    for root, dirs, files in os.walk(r[0]):
         for f in files:
             if f.lower().endswith((".pdf", ".png", ".jpg", ".jpeg")):
                 out.append((os.path.splitext(f)[0], os.path.join(root, f)))
                 if len(out) >= cap:
                     return out
+        if time.time() - t0 > WALK_SECONDS:
+            print(f"live files {job}: stopped after {WALK_SECONDS}s with {len(out)} files", flush=True)
+            dirs[:] = []
+            break
     return out
 
 
@@ -543,10 +551,11 @@ def job_pictures(job, n=3, hint=""):
                 if src.lower().endswith((".png", ".jpg", ".jpeg")) and not re.search(r"decal|maps|supplied|artwork|logo", src, re.I)]
     rows.sort(key=lambda r: (-4 * len(hw & set(words((r[1] or "").lower()))), {"render": 0, "creative": 1}.get(r[2], 2)))
     out = []
+    t0 = time.time()
     for src, _, _ in rows:
         if os.path.exists(src):
             out.append(src)
-        if len(out) >= n:
+        if len(out) >= n or time.time() - t0 > WALK_SECONDS:     # files moved on W: - don't check hundreds of them
             break
     return out
 

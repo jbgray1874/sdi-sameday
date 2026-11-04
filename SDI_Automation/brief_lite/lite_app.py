@@ -2052,9 +2052,82 @@ def show_ref_files(ch, b, jobs, hint="", n=2):
     return shown
 
 
+# 4 Nov 2026 (Andy): "it was suggesting a past job and being quite forceful - I was trying to move it away from that and it
+# was still insisting, then it froze". On a live call nothing let it go: the "something new" check sat after the point where
+# a call's lines return, "no" only led to the other matches and then a job number, and the render stayed refused. Now any
+# of these, while a past job is being checked or offered, drops it - typed or on a call - and it isn't suggested again
+# unless they name one.
+DROP_REF = re.compile(
+    r"\b(something (new|different|else|fresh|original)|brand[- ]?new|(a )?fresh (one|design|idea|start|concept|look)|"
+    r"from scratch|start (again|afresh|over)|clean sheet|blank (sheet|canvas)|new (design|concept|idea)|"
+    r"(don'?t|do not|didn'?t) (want|need|like) (that|those|them|a past|the past|any past|the old|an old|a reference|"
+    r"to (follow|use|copy|base))|without (it|a past job|that|one|them|the (old|past|previous) (one|job))|"
+    r"forget (it|that|them|those|about (it|that|them)|the (job|past job|old one|reference))|never ?mind|doesn'?t matter|"
+    r"no past job|no reference|not (based on|like|from) (that|this|it|the old|a past|any|those)|skip (it|that|this)|"
+    r"ignore (it|that|them|those|the (past|old))|move (on|away)|none of (them|those|these)|neither( of (them|those))?|"
+    r"not interested)\b", re.I)
+# A job already chosen is only let go when they say so plainly - "make the shutter something different" changes the
+# design, not the job it follows.
+DROP_CHOSEN = re.compile(
+    r"\b((not|don'?t|do not) (want to |need to )?(follow|use|copy|base it on) (it|that|this|the (old |past )?(job|one))|"
+    r"forget (the|that) (job|past job|old one|reference)|no past job|no reference|without (a|the) (past|old) (job|one)|"
+    r"from scratch|start (again|afresh|over)|clean sheet|completely (new|different)|brand[- ]?new|new design|"
+    r"fresh design|something (completely|totally) (new|different))\b", re.I)
+NO_ANSWER = re.compile(r"^\W*(no|nope|nah|neither|none|not really|i don'?t know|don'?t know|not sure|can'?t remember)\b", re.I)
+SAYS_YES = re.compile(r"^\W*(yes|yeah|yep|yup|ya|correct|exactly|spot on|that'?s (it|the one|right|correct)|that one)\b", re.I)
+NAMES_ONE = re.compile(r"\b(refer|job|drawing|file|called|the one|it was|was the|with the)\b", re.I)
+
+
+def _plain_no(text):
+    """'no' / 'don't know' and nothing more - not 'no, it was the one with the wine racks', which names another."""
+    return bool(NO_ANSWER.search(text or "")) and not NAMES_ONE.search(text or "") and len((text or "").split()) <= 8
+
+
+def _job_no(label):
+    m_ = re.match(r"\s*(\d{3,6})", str(label or ""))
+    return m_.group(1) if m_ else None
+
+
+def drop_ref(b):
+    """Let go of the past job being checked, offered or followed: nothing of it is used, it is not offered again, and
+    the design is a new one (unless it follows their own files)."""
+    gone = set(b.get("_ref_declined") or [])
+    for lab in [(b.get("_ref_confirm") or {}).get("label")] + list(b.get("_ref_ask") or []) + list(b.get("_ref_list") or []):
+        if _job_no(lab):
+            gone.add(_job_no(lab))
+    if b.get("_ref_job"):
+        gone.add(str(b["_ref_job"]))
+        if b.get("_size_from_ref") and str(b.get("size") or "").endswith(f"(from {b['_ref_job']})"):
+            b.pop("size", None)           # the old job's size - never said by the AM
+        if "follow it closely" in str(b.get("liked_job") or ""):
+            b.pop("liked_job", None)
+    for k_ in ("_ref_confirm", "_ref_ask", "_ref_more", "_ref_list", "_ref_job", "_ref_hint", "_ref_redraw",
+               "_redraw_for_ref", "_size_from_ref", "_ref_weak"):
+        b.pop(k_, None)
+    b["_ref_declined"] = sorted(gone)
+    b["_ref_off"] = 1
+    b["_ref_checked"] = b.get("liked_job")
+    if b.get("design_route") != "own":
+        b["design_route"] = "new"
+    if not convo.real(b.get("repeat_of")):
+        b["repeat_of"] = "New design"     # so "is this a repeat of the one we made before?" isn't asked either
+
+
+def ref_pending(b):
+    return bool(b.get("_ref_confirm") or b.get("_ref_ask") or (b.get("_ref_more") and not b.get("_ref_job")))
+
+
 def ref_lookup(b, text):
     """The past SDI job the AM points at, for the typed chat AND the live call (2 Nov 2026: the live call skipped it and
-    drew straight away). Sets _ref_confirm / _ref_ask / _ref_more, or _ref_job once the AM has said yes."""
+    drew straight away). Sets _ref_confirm / _ref_ask / _ref_more, or _ref_job once the AM has said yes - and lets it go
+    when they move away from it (drop_ref)."""
+    if not re.search(r"\b\d{3,6}\b", text or "") and not SAYS_YES.search(text or ""):   # 'yes - but something different'
+        if (ref_pending(b) and DROP_REF.search(text or "")) or (b.get("_ref_job") and DROP_CHOSEN.search(text or "")):
+            drop_ref(b)
+            return
+        if b.get("_ref_more") and not b.get("_ref_job") and _plain_no(text):
+            drop_ref(b)                   # asked once for its number: "no" / "don't know" is the end of it
+            return
     # 2 Nov 2026 (Andy / Muhammad): the past SDI job the AM points at - by number, name, a fixture or file name inside it, or
     # when it was made. The tool always checks back ("Do you mean 12148 - Rollershutter Forecourt Bunker?") before following it.
     def _ref_label(o):
@@ -2066,6 +2139,7 @@ def ref_lookup(b, text):
             b["_ref_job"], b["design_route"], b["_ref_hint"] = m_.group(1), "past", hint
             b["liked_job"] = f"{label} - the AM asked to follow it closely"
             b["_ref_redraw"] = 1
+            b.pop("_ref_off", None)       # they chose one after all
         for k_ in ("_ref_ask", "_ref_confirm"):
             b.pop(k_, None)
     ref_done = False
@@ -2091,11 +2165,16 @@ def ref_lookup(b, text):
             ref_done = True
         elif re.search(r"^\W*(no|nope|nah|not (that|this|it|the)|wrong|different|another)\b", text or "", re.I):
             b.pop("_ref_confirm", None)
-            if rc.get("others"):
-                b["_ref_ask"] = rc["others"]
-            else:
-                b["_ref_more"] = 1      # nothing else fits - ask them for the number or a few more words
-            ref_done = not re.search(r"\b(refer|job|drawing|file|called|the one)\b", text or "", re.I)
+            b["_ref_declined"] = sorted(set(b.get("_ref_declined") or []) | {_job_no(rc["label"])} - {None})
+            names_one = re.search(r"\b(refer|job|drawing|file|called|the one)\b", text or "", re.I)
+            others = [x for x in rc.get("others") or [] if _job_no(x) not in b["_ref_declined"]]
+            if others and not b.get("_ref_others_offered"):
+                b["_ref_ask"] = others      # the other matches - offered once
+                b["_ref_others_offered"] = 1
+            elif not names_one:
+                drop_ref(b)                 # 4 Nov 2026 (Andy): no is no - it used to go on to ask for a job number
+                return
+            ref_done = not names_one
     if not ref_done and b.get("_ref_ask") and b.get("client"):
         # the AM picking from the ones read out - a number, a word from a name, "the first / second one"
         said_w = [w for w in re.findall(r"[a-z]{4,}|\d{3,6}", (text or "").lower())
@@ -2111,32 +2190,44 @@ def ref_lookup(b, text):
             b["_ref_confirm"] = {"label": hit, "hint": text, "others": [x for x in b["_ref_ask"] if x != hit]}
             b.pop("_ref_ask", None)
             ref_done = True
+        elif _plain_no(text):
+            drop_ref(b)                   # none of the ones read out
+            return
     if b.get("_ref_job") and not re.search(r"\b\d{3,6}\b", text or "") and not re.search(
             r"\b(different|another|instead|not (that|this)|wrong|other one|change the (job|reference))\b", text or "", re.I):
         return                            # 3 Nov 2026: 'follow that past job' - it's already chosen, nothing new to find
     asking_ = re.match(r"\s*(what|which|when|who|how|have|did|do|is|was|were|are)\b", text or "", re.I) \
         and not re.search(r"\b(refer|reference|based? on|follow|use (it|that|the)|like that|same as)\b", text or "", re.I)
+    # 4 Nov 2026: "like the" in its wanting sense ("I'd like the header lit", "they'd like the shelves in oak") set off a
+    # past-job search and the voice offered a job nobody asked for - only "like the one we did", "like that", ...
     if not ref_done and not asking_ and b.get("client") and not convo.pack_from(text or "") and (re.search(
-            r"\b(refer|reference|based? on|like (the|that|this|our|we)|same as|similar to|called|fixture|follow|"
+            r"\b(refer|reference|based? on|(?<!\bi )(?<!'d )(?<!ould )(?<!\bwe )(?<!they )(?<!you )like (the|that|this|our|we)|"
+            r"same as|similar to|called|fixture|follow|"
             r"latest|last (one|year|month)|this (month|year)|we (did|made|drew|just))\b", text or "", re.I)
             or re.search(r"\b(job|drawing|ga|dwg|project)\s*(number|no\.?|#)?\s*\d{3,6}\b", text or "", re.I)):
         # 3 Nov 2026 (demo check): 'just the job sheet for the studio' set off a past-job search
         try:
             import lite_search
             rr = lite_search.resolve_reference(text, b.get("client", ""), context=str(b.get("unit_type") or ""))
-            labels = [_ref_label(o) for o in rr["options"]]
+            # a job they already turned down isn't offered again - unless they name its number
+            declined = set(b.get("_ref_declined") or []) - set(re.findall(r"\b\d{3,6}\b", text or ""))
+            opts = [o for o in rr["options"] if str(o[0]) not in declined]
+            labels = [_ref_label(o) for o in opts]
             if labels:
                 b["_ref_list"] = labels
-            if rr["pick"]:
-                lab = next((_ref_label(o) for o in rr["options"] if o[0] == rr["pick"]), str(rr["pick"]))
+                b.pop("_ref_others_offered", None)
+            pick = rr["pick"] if rr["pick"] and str(rr["pick"]) not in declined else None
+            if pick:
+                lab = next((_ref_label(o) for o in opts if o[0] == pick), str(pick))
                 b["_ref_confirm"] = {"label": lab, "hint": text, "others": [x for x in labels if x != lab]}
                 b.pop("_ref_ask", None)
                 b.pop("_ref_more", None)
-            elif rr["ask"]:
+            elif labels and (rr["ask"] or rr["pick"]):
                 b["_ref_ask"] = labels
                 b["_ref_weak"] = bool(rr.get("weak"))
                 b.pop("_ref_more", None)
-            elif re.search(r"\b(refer|reference|job|drawing|file|called|fixture|we (did|made|drew))\b", text or "", re.I):
+            elif not rr["options"] and re.search(r"\b(refer|reference|job|drawing|file|called|fixture|we (did|made|drew))\b",
+                                                 text or "", re.I):
                 b["_ref_more"] = 1
         except Exception as e:
             print("past job lookup:", str(e)[:160], flush=True)
@@ -2608,7 +2699,8 @@ def handle(number, name, text, image_path=None, voice=False, ch=None, new=False,
         ref_lookup(b, "refer to " + text)        # 'show me 12148' - look it up and confirm it too
     elif not want_see:
         ref_lookup(b, text)
-    if want_see and not b.get("_ref_confirm") and not b.get("_ref_ask") and not b.get("_ref_job") and b.get("liked_job"):
+    if want_see and not b.get("_ref_confirm") and not b.get("_ref_ask") and not b.get("_ref_job") and b.get("liked_job") \
+            and not b.get("_ref_off"):
         ref_lookup(b, "refer to " + str(b["liked_job"]))
     if want_see:
         jobs = ref_job_of(b, text)
@@ -2686,13 +2778,9 @@ def handle(number, name, text, image_path=None, voice=False, ch=None, new=False,
         # follow the job at all. Now the job gets its own render (and size), and the client pack is made from that.
         intent, t["n_options"], t["reply"] = "more_options", 1, ""
         b["_redraw_for_ref"] = b["_ref_job"]
-    ref_open = b.get("_ref_confirm") or b.get("_ref_ask") or (b.get("_ref_more") and not b.get("_ref_job"))
-    if ref_open and re.search(r"\b(something new|brand new|make it new|without (it|a past job|that|one)|forget (it|that|the job)|"
-                              r"never ?mind|doesn'?t matter|no past job|no reference|skip (it|that))\b", text or "", re.I):
-        for k_ in ("_ref_confirm", "_ref_ask", "_ref_more"):
-            b.pop(k_, None)
-        if re.search(r"\bnew\b", text or "", re.I):
-            b["design_route"] = "new"
+    ref_open = ref_pending(b)
+    if ref_open and (DROP_REF.search(text or "") or re.search(r"\bmake it new\b", text or "", re.I)):
+        drop_ref(b)                       # 'show me it... actually forget it, something new' (ref_lookup didn't run)
         ref_open = None
     if ref_open and intent_wants_render(t, text) and not voice:
         save_session(s)                   # 3 Nov 2026 (Muhammad): unsure which job = ask again, never draw something odd
@@ -3373,13 +3461,21 @@ def _start_turn(who, name, text, image_path=None, new=False, t_override=None, lo
     JOBS[jid] = {"ch": ch, "done": False, "session": None, "brief": {}, "error": None}
 
     def run():
+        t0 = time.time()
         try:
             if lock:
                 with _busy:
+                    waited = time.time() - t0
+                    if waited > 5:    # 4 Nov 2026 (Andy: "then it froze"): renders run one at a time - say when one waited
+                        print(f"turn {sid or who} {JOBS[jid].get('tool') or 'turn'}: waited {waited:.0f}s behind another "
+                              "render", flush=True)
                     _, s = handle(who, name, text, image_path=image_path, ch=ch, new=new, t_override=t_override, sid=sid, project=project)
             else:   # live voice answers: no AI call, never wait behind a slow concept turn
                 _, s = handle(who, name, text, image_path=image_path, ch=ch, new=new, t_override=t_override, sid=sid, project=project)
             JOBS[jid].update(session=s["id"], brief=s["brief"])
+            took = time.time() - t0
+            if took > (150 if lock else 8):
+                print(f"turn {s['id']} {JOBS[jid].get('tool') or 'turn'}: took {took:.0f}s", flush=True)
         except Exception as e:
             JOBS[jid]["error"] = str(e)[:300]
             ch.out.append({"type": "text", "text": "Today's AI budget for SDI Same Day Intelligence is used up, so I've stopped - nothing more will be "
@@ -3526,25 +3622,36 @@ def api_rt_tool():
                 "the pack question again - follow what they just said. They can change the pack any time by saying so.")})})
     if js.get("name") == "make_concepts":
         b_ = s["brief"]
-        if not b_.get("_ref_job") and not (b_.get("_ref_confirm") or b_.get("_ref_ask")) and convo.real(b_.get("liked_job")) \
-                and not NOPE.match(str(b_.get("liked_job"))) and not b_.get("_ref_checked") == b_.get("liked_job"):
+        if args.get("design_route") == "new" and (ref_pending(b_) or b_.get("_ref_job")):
+            # 4 Nov 2026 (Andy): they want a new design - a past job still being checked no longer holds the render up
+            # (a new design follows no past job, so nothing unconfirmed is drawn from)
+            drop_ref(b_)
+            save_session(s)
+        liked_ = str(b_.get("liked_job") or "")
+        undeclined = set(re.findall(r"\b\d{3,6}\b", liked_)) - set(b_.get("_ref_declined") or [])
+        if not b_.get("_ref_job") and not ref_pending(b_) and convo.real(b_.get("liked_job")) and not NOPE.match(liked_) \
+                and not b_.get("_ref_checked") == b_.get("liked_job") and args.get("design_route") != "new" \
+                and not DROP_REF.search(liked_) and (undeclined or not b_.get("_ref_off")):
+            # 4 Nov 2026: "something new" saved as the liked job was looked up on W: as if it named one
             b_["_ref_checked"] = b_.get("liked_job")
             try:
                 ref_lookup(b_, f"refer to {b_.get('liked_job')} {_last_am_line(s['id']) or ''}")
             except Exception as e:
                 print("ref lookup (tool):", str(e)[:160], flush=True)
             save_session(s)
+        way_out = (" If they'd rather not follow a past job, call make_concepts again with design_route 'new' - never "
+                   "ask about the past job more than once.")
         if b_.get("_ref_confirm"):
             return jsonify({"slow": False, "output": json.dumps({"error": "Not drawing yet - check the past job first. Ask: 'Do you "
-                            f"mean {b_['_ref_confirm']['label']}?' If yes, call make_concepts again (it will follow that job); if no, "
-                            "the other matches are offered."})})
+                            f"mean {b_['_ref_confirm']['label']}?' If yes, call make_concepts again (it will follow that job)."
+                            + way_out})})
         if b_.get("_ref_ask"):
             return jsonify({"slow": False, "output": json.dumps({"error": "Not drawing yet - more than one past job fits. Read "
-                            "these out and ask which one they mean: " + "; ".join(b_["_ref_ask"][:3])})})
+                            "these out and ask which one they mean: " + "; ".join(b_["_ref_ask"][:3]) + "." + way_out})})
         if b_.get("_ref_more") and not b_.get("_ref_job"):
             return jsonify({"slow": False, "output": json.dumps({"error": "Not drawing yet - the past job they asked for wasn't "
-                            "found. Ask for its job number (digit by digit is fine), or whether to design it new without it. "
-                            "Never draw from a job they didn't confirm."})})
+                            "found. Ask once for its job number (digit by digit is fine). Never draw from a job they didn't "
+                            "confirm." + way_out})})
     if js.get("name") == "show_past_work" and not PAST_Q.search(_last_am_line(s["id"]) or ""):
         # 2 Nov 2026: "can you show me the client pack?" brought up past work - only when the AM asks for past work
         return jsonify({"slow": False, "output": json.dumps({"error": "Not shown: the AM didn't ask for past work. If they asked to "

@@ -245,8 +245,11 @@ the SDI internal brief PDF - in a call that feels like talking to a sharp collea
   Offer only the jobs in which_past_job, never your own list, and for "the latest" or "this year" go by their dates.
   Never say a job is chosen unless which_past_job says so. A garbled number: ask which one.
 - Its GA or pictures open in the chat beside the call as you check it, so "show me" means it's already opening: "It's
-  on screen now - is that the one?" Seeing it is not a yes. If no, offer the other matches, and never draw in between.
+  on screen now - is that the one?" Seeing it is not a yes. If no, offer the other matches once, and never draw in between.
   No GA on file: say so and suggest following its renders.
+- Suggest a past job at most once, and they can always say no. If they move away from it ("something new", "forget
+  that", "none of those"), let it go straight away: one line ("Fine - something new then"), carry on with the brief,
+  and don't bring a past job up again unless they do. For the render that means design_route new.
 - A question about past work ("what did we last make for them?") is answered in words from sdi_made_before - number,
   what, when. Call show_past_work only when they ask to see it.
 
@@ -452,11 +455,16 @@ def tool_result(s, replies):
         "check_with_am": convo.brief_conflicts(b),
         "which_past_job": (
             {"confirm_with_am": f"Check it's the right job before using it - ask: 'Do you mean {b['_ref_confirm']['label']}?' "
-                                "(yes -> it's followed; no -> the others are offered)"} if b.get("_ref_confirm") else
+                                "(yes -> it's followed; no -> the others are offered once; 'something new' -> it's dropped)"}
+            if b.get("_ref_confirm") else
             {"ask_the_am": "More than one past SDI job fits - read these out briefly and ask which one they mean (a number, "
-                           "a word from the name, or 'the first one' is enough):", "options": b["_ref_ask"]} if b.get("_ref_ask") else
-            {"ask_the_am": "No past SDI job matched what they said - ask for the job number, or a few more words from its "
-                           "name or the fixture."} if b.get("_ref_more") and not b.get("_ref_job") else ""),
+                           "a word from the name, or 'the first one' is enough), or if they'd rather do something new:",
+             "options": b["_ref_ask"]} if b.get("_ref_ask") else
+            {"ask_the_am": "No past SDI job matched what they said - ask once for the job number, or whether to design it "
+                           "new without one."} if b.get("_ref_more") and not b.get("_ref_job") else
+            # 4 Nov 2026 (Andy): it kept pushing a past job after he'd moved away from it
+            {"dropped": "They don't want to follow a past job - it's a new design. Don't suggest a past job again unless "
+                        "they ask for one."} if b.get("_ref_off") and not b.get("_ref_job") else ""),
         "following_past_job": b.get("liked_job") if b.get("_ref_job") else "",
         # 4 Nov 2026 (James: "keep track - every job might be slightly different")
         "direction_changed": (

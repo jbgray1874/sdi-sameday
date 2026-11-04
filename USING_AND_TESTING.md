@@ -63,6 +63,7 @@ The questions follow the usual order, but nothing forces it. Everything you say 
 | "Change the header to navy" | A new option (B, C…) is made from the one on screen. The earlier ones stay. |
 | "Go back to option A and make the shelves oak" | The new option is made from A |
 | "Something completely different" | A whole new design |
+| "Something new" / "forget that one" / "none of those", while it is checking a past job | It drops the past job at once, and doesn't suggest it again unless you name one. "No" to a suggested job offers the other matches once, then lets it go. |
 | "Build the brief PDF now" | The 8-page PDF is made from what is known, with a list of what is still missing |
 | A date, budget, quantity or new size, early or late | Recorded straight away. The newest answer wins. |
 
@@ -168,6 +169,7 @@ Always update the server with `Update-SameDay.ps1`, run from the laptop (section
 | On the phone it says "SameDay isn't answering" | SameDay is down on the server. SDI Intelligence is up, but `SDISameDay` isn't. |
 | On the phone the page opens but nothing works | The server's SameDay is older than this branch, so it doesn't know `/sameday/`. Run `Update-SameDay.ps1`. |
 | It didn't hear something | `C:\SDI_Automation\brief_lite\rt_drops.log` |
+| It seemed to freeze on a call | After 5 minutes waiting for a render the call carries on by itself and says so. `Check-SameDay-Call.ps1` shows any turn that took too long ("took …s") or waited behind another render. |
 | No past jobs found | Run `Check-SameDay-Call.ps1`. Section 1 says how many past jobs SameDay can find and lists the index files on the server. "NONE" means `projects.db` is missing from `C:\SDI_Automation\brief_lite`. Before 4 November the missing picture index stopped every look-up; `Update-SameDay.ps1` fixes that. |
 | Spend looks wrong | `ai_calls` in `lite.db`. The live voice is counted at `gpt-realtime`'s price until its own is set in `.env` as `LITE_RT_PRICE`. |
 

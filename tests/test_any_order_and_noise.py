@@ -34,6 +34,7 @@ L = importlib.import_module("lite_app")
 convo, rt = L.convo, L.rt
 
 # offline: no AI, no drives, no web
+REF_LOOKUP = L.ref_lookup                                   # the real one, for the past-job tests
 L.ref_lookup = lambda b, text: None
 L.moodboard.start = lambda s: None
 L.guess_client = convo.guess_client = lambda text: None     # reads the picture index on C:
@@ -782,6 +783,197 @@ class PastJobsWithoutThePictureIndexTests(unittest.TestCase):
             self.assertEqual(L.moodboard._rank([str(self.dir / "projects.db")], "a gondola end", 2), [])
         finally:
             L.moodboard.G["clip"] = keep
+
+
+BUNKER = "12148 - Rollershutter Forecourt Bunker (2026-02)"
+OTHER = "11800 - Milwaukee M18 Gondola End (2024-07)"
+
+
+class LettingGoOfAPastJobTests(unittest.TestCase):
+    """4 November 2026 (Andy, after testing): "it was suggesting a past job and it was being quite forceful around that -
+    I was trying to move it away from that but it was still insisting. Then it froze." On a call nothing let a suggested
+    job go: "something new" was read only after a call's lines had returned, "no" led to the other matches and then a
+    job number, and the render stayed refused."""
+
+    def setUp(self):
+        import lite_search
+        self.S = lite_search
+        self.keep = {k: getattr(lite_search, k) for k in ("JOBS_DB", "ESTIMATES_DB", "PICTURES", "WALK_SECONDS")}
+        self.dir = Path(tempfile.mkdtemp(prefix="letgo-"))
+        _past_jobs_index(self.dir)
+        self._fresh(JOBS_DB=str(self.dir / "projects.db"), ESTIMATES_DB=str(self.dir / "knowledge.db"),
+                    PICTURES=str(self.dir / "all_img_index.npz"))
+        self.client = L.app.test_client()
+        self.who = new_chat()
+        _, self.s = say(self.who, "Tesco want a coal bunker", {"client": "Tesco", "unit_type": "coal bunker"})
+        self.stub, L.ref_lookup = L.ref_lookup, REF_LOOKUP          # the real look-up, on the small job index
+
+    def _fresh(self, **attrs):
+        if self.S._state.get("con"):
+            self.S._state["con"].close()
+        for d in (self.S._state, self.S._pic, self.S._clip):
+            d.clear()
+        for k, v in attrs.items():
+            setattr(self.S, k, v)
+
+    def tearDown(self):
+        L.ref_lookup = self.stub
+        self._fresh(**self.keep)
+        shutil.rmtree(self.dir, ignore_errors=True)
+
+    def brief(self, **state):
+        s = L._session_by_id(self.s["id"])
+        s["brief"].update(state)
+        L.save_session(s)
+        return s
+
+    def on_the_call(self, text):
+        """What the AM says on a live call, the way the call sends it (record_only - where it used to be lost)."""
+        L.handle(self.who, "Test", text, voice=True, record_only=True, sid=self.s["id"])
+        return L._session_by_id(self.s["id"])["brief"]
+
+    def test_something_new_on_a_call_lets_the_suggested_job_go(self):
+        self.brief(_ref_confirm={"label": BUNKER, "hint": "", "others": [OTHER]})
+        b = self.on_the_call("No, let's do something new")
+        for k in ("_ref_confirm", "_ref_ask", "_ref_more"):
+            self.assertNotIn(k, b)
+        self.assertEqual(b.get("design_route"), "new")
+        self.assertIn("12148", b.get("_ref_declined"))
+        self.assertIn("dropped", json.loads(rt.tool_result(L._session_by_id(self.s["id"]), []))["which_past_job"])
+
+    def test_other_ways_of_moving_away_work_too(self):
+        for said in ("forget that, start again", "I don't want a past job", "none of those", "never mind that one",
+                     "something different please", "we'll do it from scratch"):
+            with self.subTest(said=said):
+                self.brief(_ref_ask=[BUNKER, OTHER], _ref_off=None, design_route=None)
+                b = self.on_the_call(said)
+                self.assertNotIn("_ref_ask", b)
+                self.assertTrue(b.get("_ref_off"))
+
+    def test_no_offers_the_others_once_then_no_is_no(self):
+        self.brief(_ref_confirm={"label": BUNKER, "hint": "", "others": [OTHER]})
+        b = self.on_the_call("No")
+        self.assertEqual(b.get("_ref_ask"), [OTHER])
+        b = self.on_the_call("No")
+        self.assertNotIn("_ref_ask", b)
+        self.assertNotIn("_ref_more", b)            # it used to go on to ask for a job number
+        self.assertTrue(b.get("_ref_off"))
+
+    def test_no_with_nothing_else_never_asks_for_a_number(self):
+        self.brief(_ref_confirm={"label": BUNKER, "hint": "", "others": []})
+        b = self.on_the_call("nope")
+        self.assertNotIn("_ref_more", b)
+        self.assertTrue(b.get("_ref_off"))
+
+    def test_yes_with_a_design_change_still_follows_the_job(self):
+        self.brief(_ref_confirm={"label": BUNKER, "hint": "", "others": []})
+        b = self.on_the_call("Yes, that one, but make the shutter something different")
+        self.assertEqual(b.get("_ref_job"), "12148")
+        self.assertFalse(b.get("_ref_off"))
+
+    def test_describing_another_job_is_not_taken_as_a_no(self):
+        self.brief(_ref_more=1)
+        b = self.on_the_call("not sure of the number, it was the one with the roller shutter")
+        self.assertFalse(b.get("_ref_off"))
+
+    def test_letting_go_also_answers_is_it_a_repeat(self):
+        self.brief(_ref_confirm={"label": BUNKER, "hint": "", "others": []})
+        b = self.on_the_call("forget it, something new")
+        self.assertEqual(b.get("repeat_of"), "New design")
+
+    def test_asked_once_for_a_number_dont_know_ends_it(self):
+        self.brief(_ref_more=1)
+        b = self.on_the_call("I don't know it")
+        self.assertNotIn("_ref_more", b)
+        self.assertTrue(b.get("_ref_off"))
+
+    def test_a_chosen_job_stays_for_a_design_change_and_goes_when_they_say_so(self):
+        self.brief(_ref_job="12148", design_route="past", liked_job=BUNKER + " - the AM asked to follow it closely",
+                   size="1500 x 2000 x 900 mm (from 12148)", _size_from_ref="12148")
+        b = self.on_the_call("make the shutter something different, maybe grey")
+        self.assertEqual(b.get("_ref_job"), "12148")
+        b = self.on_the_call("actually forget the past job, start again")
+        self.assertNotIn("_ref_job", b)
+        self.assertEqual(b.get("design_route"), "new")
+        self.assertNotIn("size", b)                 # the old job's size, never said by the AM
+        self.assertNotIn("liked_job", b)
+
+    def test_a_new_design_is_never_held_up_by_a_past_job_being_checked(self):
+        self.brief(_ref_confirm={"label": BUNKER, "hint": "", "others": []})
+        refused = json.loads(self.client.post("/api/rt/tool", json={"session": self.s["id"], "name": "make_concepts",
+                             "arguments": {"output": "3D render", "design_route": "past"}}).get_json()["output"])
+        self.assertIn("Not drawing yet", refused["error"])
+        self.assertIn("design_route 'new'", refused["error"])        # the way out is always given
+        keep = (L._start_turn, L._busy_until_done)
+        started = []
+
+        def fake_turn(*a, **k):
+            started.append(a)
+            L.JOBS["fake"] = {"ch": L.Channel("pending"), "done": True, "session": self.s["id"], "brief": {}, "error": None}
+            return "fake"
+        L._start_turn, L._busy_until_done = fake_turn, (lambda *a: None)
+        try:
+            out = json.loads(self.client.post("/api/rt/tool", json={"session": self.s["id"], "name": "make_concepts",
+                             "arguments": {"output": "3D render", "design_route": "new"}}).get_json()["output"])
+        finally:
+            L._start_turn, L._busy_until_done = keep
+        self.assertTrue(out.get("started"), out)
+        self.assertEqual(len(started), 1)
+        self.assertNotIn("_ref_confirm", L._session_by_id(self.s["id"])["brief"])
+
+    def test_something_new_saved_as_the_liked_job_is_not_looked_up(self):
+        self.brief(liked_job="something new, not the old one")
+        keep = L.ref_lookup
+        looked = []
+        L.ref_lookup = lambda b, text: looked.append(text)
+        try:
+            self.client.post("/api/rt/tool", json={"session": self.s["id"], "name": "make_concepts",
+                             "arguments": {"output": "3D render", "design_route": "mix"}})
+        finally:
+            L.ref_lookup = keep
+        self.assertEqual(looked, [])
+
+    def test_wanting_something_is_not_pointing_at_a_past_job(self):
+        b = {"client": "Tesco", "unit_type": "coal bunker"}
+        for said in ("I'd like the header lit", "they'd like the shelves in oak", "we like the blue"):
+            with self.subTest(said=said):
+                L.ref_lookup(b, said)
+                self.assertFalse(L.ref_pending(b), b)
+        L.ref_lookup(b, "make it like the bunker we did")
+        self.assertTrue(L.ref_pending(b))
+
+    def test_a_job_turned_down_is_not_offered_again_unless_named(self):
+        b = {"client": "Tesco", "unit_type": "coal bunker", "_ref_declined": ["12148"], "_ref_off": 1}
+        L.ref_lookup(b, "make it like the bunker we did")
+        self.assertNotIn("12148", json.dumps({k: b.get(k) for k in ("_ref_confirm", "_ref_ask")}))
+        L.ref_lookup(b, "actually, refer to job 12148")
+        self.assertTrue(b.get("_ref_confirm", {}).get("label", "").startswith("12148"))
+
+    def test_the_voice_is_told_to_let_it_go(self):
+        self.assertIn("Suggest a past job at most once", rt.VOICE_RULES)
+        self.assertIn("offer the other matches once", rt.VOICE_RULES)
+
+    def test_a_big_job_folder_on_w_never_holds_the_call_up(self):
+        import sqlite3
+        root = self.dir / "W" / "12148"
+        (root / "deep" / "deeper").mkdir(parents=True)
+        (root / "GA.pdf").write_bytes(b"%PDF")
+        (root / "deep" / "deeper" / "late.pdf").write_bytes(b"%PDF")
+        con = sqlite3.connect(self.dir / "projects.db")
+        con.execute("UPDATE projects SET folder=? WHERE job_no='12148'", (str(root),))
+        con.commit()
+        con.close()
+        self._fresh(WALK_SECONDS=0)
+        self.assertEqual([n for n, _ in self.S.live_files("12148")], ["GA"])      # stopped after the first folder
+        self._fresh(WALK_SECONDS=8)
+        self.assertEqual(sorted(n for n, _ in self.S.live_files("12148")), ["GA", "late"])
+
+    def test_the_page_never_waits_for_ever(self):
+        page = (WORK / "brief_lite" / "lite_page.html").read_text(encoding="utf-8")
+        self.assertIn("async function pollQuiet(turn,wait,maxMs)", page)
+        self.assertEqual(page.count("pollQuiet(j.turn,w,"), 2)              # both waits have a limit
+        self.assertEqual(page.count("if(w.dataset.late)"), 2)               # and both carry on, honestly
+        self.assertNotIn("pollQuiet(j.turn,w)", page)
 
 
 class StillTrueTests(unittest.TestCase):
