@@ -75,6 +75,10 @@ NOW_DO = {   # 4 Nov 2026: tightened with VOICE_RULES - each says only what this
     "confirm": "Say the clash in check_with_am in one sentence, suggest what's usual, and ask: keep it as they said, or "
                "change it? Wait for a clear answer, record any change, then make_concepts.",
     "render": "Call make_concepts now with the design_route they gave.",
+    # 4 Nov 2026: stage() returns "ga" for a GA-only brief, and there was no hint for it - NOW_DO["ga"] raised
+    # KeyError in every tool result, so a voice call asking for only the GA broke at its next tool call
+    "ga": "They want only the technical GA: call make_concepts with output 'GA only' - it's drawn from the brief's size "
+          "in about 30 seconds. Say once that it's coming.",
     "rendering": "It's being drawn. Say nothing more until it's on screen; if they speak, answer in a few words.",
     "finalising": "The GA and client pack are being made. Say once that they're on the way, then nothing until they're "
                   "on screen - never that they're done before then.",

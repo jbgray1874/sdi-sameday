@@ -598,6 +598,14 @@ class TheTightenedInstructionsTests(unittest.TestCase):
         self.assertTrue(stages)
         self.assertLessEqual(stages | {"rendering", "finalising"}, set(rt.NOW_DO))
 
+    def test_a_ga_only_call_gets_its_hint(self):
+        """It had none: NOW_DO["ga"] raised KeyError, so every tool result of a GA-only voice call failed."""
+        s = {"id": "g", "visuals": [], "brief": {"_flow": 2, "_pack": "client", "client": "Tesco", "unit_type": "gondola end",
+                                                  "size": "1800 x 1200 x 600 mm", "output": "GA only", "_render_q_done": 1,
+                                                  "products_held": "drills", "colours_graphics": "red"}}
+        self.assertEqual(convo.stage(s), "ga")
+        self.assertIn("GA only", json.loads(rt.tool_result(s, []))["now_do"])
+
     def test_each_tool_named_in_the_rules_exists(self):
         names = {t["name"] for t in rt.TOOLS}
         for tool in re.findall(r"\b(record_answers|set_pack|focus|show_past_work|make_concepts|choose_option|"
