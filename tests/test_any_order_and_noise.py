@@ -12,6 +12,7 @@ AM's words would give, so what is tested is the app's own flow - the part that u
 """
 import importlib
 import json
+from datetime import datetime
 import os
 import re
 import shutil
@@ -246,7 +247,7 @@ class ListeningInANoisyRoomTests(unittest.TestCase):
         who = new_chat()
         _, s = say(who, "Tesco want a gondola end", {"client": "Tesco", "unit_type": "gondola end"})
         text = rt.instructions(s)
-        for part in ("ANY ORDER", "focus(internal)", "NOISE AND OTHER VOICES", "hold the orb", "ask ONCE which pack"):
+        for part in ("# At any point", "focus internal", "Only the AM talking to you counts", "hold the orb", "ask once"):
             self.assertIn(part, text)
         self.assertNotIn("Then STOP and wait", text)
         self.assertIn("focus", [x["name"] for x in rt.TOOLS])
@@ -462,8 +463,8 @@ class KeepingTrackTests(unittest.TestCase):
         who = new_chat()
         _, s = say(who, "Tesco want a gondola end", {"client": "Tesco", "unit_type": "gondola end"})
         text = rt.instructions(s)
-        self.assertIn("YOU LEAD, THEY STEER", text)
-        self.assertIn("never bring back an answer they replaced", text)
+        self.assertIn("# You lead, they steer", text)
+        self.assertIn("never bring back an answer they\n  replaced", text)
 
 
 class TheLiveTranscriberTests(unittest.TestCase):
@@ -533,6 +534,75 @@ class TheDrivesTests(unittest.TestCase):
         self.assertTrue(all(v.startswith("\\\\") for v in L.DRIVES.values()))
         src = (WORK / "brief_lite" / "lite_app.py").read_text(encoding="utf-8")
         self.assertLess(src.index("    map_drives()"), src.index("threading.Thread(target=warm"))
+
+
+class TheTightenedInstructionsTests(unittest.TestCase):
+    """4 Nov 2026 (James: "tighten the voice instructions now"): one structured brief, every earlier rule kept once."""
+    KEPT = {
+        "names exactly as heard": "Names exactly as heard",
+        "no extra first name or surname": "never add a first name or surname",
+        "never guess a half-heard answer": "never guess and never move on",
+        "a past job is said back first": "say its full number and name back",
+        "seeing a GA is not a yes": "Seeing it is not a yes",
+        "only the jobs offered by the app": "Offer only the jobs in which_past_job",
+        "latest by date": "go by their dates",
+        "past work answered in words": "answered in words from sdi_made_before",
+        "show_past_work only when asked": "Call show_past_work only when they ask to see it",
+        "never claim a render": "Never say a render is coming, being made or ready",
+        "quiet while drawing": "then say nothing and ask nothing until it's on screen",
+        "pack asked once": "ask once: the client pack",
+        "set_pack only on their word": "Call set_pack only with what THEY said",
+        "internal brief by any name": "any of them, at any point, means they want it",
+        "Boots means both": '"Boots" or "booth" on its own means both',
+        "never invent figures": "Never invent sizes, colours, materials, quantities or dates",
+        "record before the next question": "before your next question",
+        "Not saved means ask again": '"Not saved", ask that question again',
+        "a 'not' answer is not a material": "isn't a material or a colour",
+        "whole-unit size": "Size is the whole unit",
+        "changes become new options": "next letter and the others stay",
+        "stop means stop": '"Stop", "cancel that"',
+        "Showroom notes": '"[Showroom: ...]" note',
+        "no price promises": "Never promise a price",
+        "drives read-only": "read-only to you",
+        "noise and other voices": "Sorry - was that for me?",
+        "thinking pauses": "they're thinking. Wait quietly",
+        "answer their question first": "Whatever the AM raises comes first",
+        "flag what looks wrong": "If something looks wrong",
+        "right part of the day": "Greet only with the right part of",
+    }
+
+    def setUp(self):
+        who = new_chat()
+        _, self.s = say(who, "Tesco want a gondola end", {"client": "Tesco", "unit_type": "gondola end"})
+        self.text = rt.instructions(self.s)
+
+    def test_every_earlier_rule_is_still_there(self):
+        for rule, words in self.KEPT.items():
+            with self.subTest(rule=rule):
+                self.assertIn(words, self.text)
+
+    def test_it_is_shorter_and_has_no_incident_diary(self):
+        self.assertLess(len(rt.VOICE_RULES), 8500)
+        self.assertIsNone(re.search(r"\b\d{1,2} (Oct|Nov) 2026\b", rt.VOICE_RULES))     # dates live in the code comments
+        self.assertLess(len(re.findall(r"\b[A-Z]{4,}\b", rt.VOICE_RULES)), 6)           # no wall of capitals
+
+    def test_the_fixed_part_comes_first_for_the_cache(self):
+        self.assertTrue(self.text.startswith(rt.VOICE_RULES))
+        self.assertNotIn(datetime.now().strftime("%H:%M"), rt.VOICE_RULES)
+        self.assertIn("# This call", self.text)
+        self.assertIn("BRIEF SO FAR", self.text)
+
+    def test_every_stage_has_its_hint(self):
+        src = (WORK / "brief_lite" / "convo_parts.py").read_text(encoding="utf-8")
+        stages = set(re.findall(r'return "([a-z_]+)"', src.split("def stage(s):", 1)[1].split("\ndef ", 1)[0]))
+        self.assertTrue(stages)
+        self.assertLessEqual(stages | {"rendering", "finalising"}, set(rt.NOW_DO))
+
+    def test_each_tool_named_in_the_rules_exists(self):
+        names = {t["name"] for t in rt.TOOLS}
+        for tool in re.findall(r"\b(record_answers|set_pack|focus|show_past_work|make_concepts|choose_option|"
+                               r"change_option|more_options|finish_brief)\b", rt.VOICE_RULES):
+            self.assertIn(tool, names)
 
 
 class StillTrueTests(unittest.TestCase):
