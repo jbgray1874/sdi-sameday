@@ -718,6 +718,14 @@ body.branded .main.live-blur .vs-work #vs-bar,body.branded .main.live-blur .vs-w
  padding:22px 30px;border-radius:24px;background:var(--card);border:1px solid var(--line);box-shadow:0 26px 60px rgba(20,40,90,.2);text-align:center}
 .vdone.on{display:flex;animation:vdPop .5s cubic-bezier(.2,1.3,.4,1)}
 @keyframes vdPop{from{opacity:0;transform:translate(-50%,10px) scale(.9)}to{opacity:1;transform:translate(-50%,0) scale(1)}}
+/* 5 Nov 2026 (James's call: "I can't see the brief on screen"): what is made stays on the call's own screen, with Open */
+.vdoc{position:absolute;left:50%;top:calc(14px + env(safe-area-inset-top));transform:translateX(-50%);z-index:33;display:none;align-items:center;gap:10px;
+ padding:8px 8px 8px 10px;border-radius:16px;background:var(--card);border:1px solid var(--line);box-shadow:0 14px 34px rgba(20,40,90,.18);
+ color:var(--ink);text-decoration:none;max-width:calc(100% - 32px)}
+.vdoc.on{display:flex;animation:vsIn .35s ease}
+.vdoc .vdoc-pdf{width:34px;height:42px;border-radius:7px;background:var(--red);color:#fff;font-weight:800;font-size:10px;display:grid;place-items:center;flex:none}
+.vdoc b{font-size:14px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.vdoc .go{height:36px;padding:0 16px;border-radius:18px;background:var(--red);color:#fff;font-weight:700;font-size:13.5px;display:grid;place-items:center;flex:none}
 .vdone .tick{width:54px;height:54px;border-radius:50%;display:grid;place-items:center;background:#16a34a;color:#fff;font-size:28px}
 .vdone b{font-size:18px}.vdone span{color:var(--muted);font-size:13.5px}
 .opt.spot{box-shadow:0 0 0 3px #2f6bff,0 24px 60px rgba(47,107,255,.25);transition:box-shadow .4s}
@@ -857,6 +865,7 @@ body.branded .main.live-blur .vs-work #vs-bar,body.branded .main.live-blur .vs-w
   </div>
   <div class="vchoice" id="vchoice"><span id="vchoice-t">Like it?</span><button id="vc-change">✏️ Make changes</button><button class="pri" id="vc-final">✓ Love it - make the client pack</button></div>
   <div class="vdone" id="vdone"><div class="tick">✓</div><b id="vdone-t">Client pack ready</b><span id="vdone-s">Now let's start the internal brief</span></div>
+  <a class="vdoc" id="vdoc" target="_blank" rel="noopener"><span class="vdoc-pdf">PDF</span><b id="vdoc-t">Brief PDF</b><span class="go">Open</span></a>
   <div class="vo" id="vo" data-s="connecting" aria-live="polite">
    <div class="vo-glow"></div>
    <div class="vo-dock">
@@ -959,6 +968,9 @@ function lsWork(on,title,sub,secs){const w=$("#vs-work");if(!w)return;clearInter
  LS.timer=setInterval(()=>{bar.style.width=Math.min(94,(Date.now()-LS.t0)/1000/secs*100)+"%"},1000);
  LS.showing=false;$("#vchoice").classList.remove("on");lsYou("");lsBlur(true)}
 function lsDone(title,sub){const d=$("#vdone");if(!d)return;$("#vdone-t").textContent=title;$("#vdone-s").textContent=sub;d.classList.add("on");setTimeout(()=>d.classList.remove("on"),4500)}
+// 5 Nov 2026 (James's call): the brief PDF was in the chat 2 seconds after he asked, but the chat is blurred behind a
+// call - "I can't see the brief on screen". What's made now stays on the call's own screen, with Open, until the call ends.
+function lsDoc(x){const a=$("#vdoc");if(!a||!x.url)return;a.href=x.url;$("#vdoc-t").textContent=x.caption||(x.role==="sheet"?"Client sheet":"Brief PDF");a.classList.add("on")}
 function lsSaw(x){if(!rt)return;
  if((x.type==="text"&&["history","mood"].includes(x.role))||(x.type==="image"&&x.role==="ref")){lsWork(false);LS.showing=true;LS.past=true;lsBlur(false);return}
  if(x.type==="image"&&x.role==="option"&&x.kind!=="technical"){lsWork(false);LS.showing=true;lsBlur(false);LS.label=x.label||"A";
@@ -966,7 +978,7 @@ function lsSaw(x){if(!rt)return;
   setTimeout(()=>{const cs=[...document.querySelectorAll(".opt")],c=cs[cs.length-1];if(!c)return;
    document.querySelectorAll(".opt.spot").forEach(o=>o.classList.remove("spot"));c.classList.add("spot");c.scrollIntoView({behavior:"smooth",block:"center"})},150)}
  else if(x.type==="image"&&(x.kind==="technical"||x.role==="hd")){LS.showing=true;LS.past=true;lsBlur(false)}   // 3 Nov 2026: back to the stage when they talk again
- else if(x.type==="document"){lsWork(false);LS.showing=true;lsBlur(false);$("#vchoice").classList.remove("on");
+ else if(x.type==="document"){lsWork(false);LS.showing=true;lsBlur(false);$("#vchoice").classList.remove("on");lsDoc(x);
   if(x.role==="sheet")lsDone("Client pack ready","The render, its GA and the one-page client sheet are in the chat");
   else lsDone("Brief pack ready","The full SDI brief PDF is in the chat");
   setTimeout(()=>{LS.showing=false;if(rt&&!rt.rendering)lsBlur(true)},7000)}}
@@ -1237,7 +1249,7 @@ async function rtHeard(tx,itemId){
  voCap(tx,"you");
  if(/^\W*(please\s+)?(stop|cancel|hold on)(\s+(it|this|that|the (render|drawing|pack|ga)|now|please|making it))*\W*$/i.test(tx)){if(stopAll()){if(sid)fetch("/api/rt/log",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({session:sid,role:"user",text:tx})}).catch(()=>{});return}}
  // 2 Nov 2026: "show me the client pack / GA / render / brief" -> scroll to what is already made
- {const m=/\b(show|see|open|where)\b.*\b(client pack|client sheet|pack|pdf|brief pdf|ga|render|drawing)\b/i.exec(tx);if(m&&!/\b(past|previous|before|history)\b/i.test(tx)){const k=m[2].toLowerCase();const els=[...log.querySelectorAll(k==="render"?".opt":/ga|drawing/.test(k)?".card.ga":".doc")].filter(e=>/pdf|pack|sheet|ga/i.test(k)?/pdf|pack|sheet|GA/i.test(e.textContent):true);const el=els[els.length-1];if(el){LS.showing=true;LS.past=true;lsBlur(false);el.scrollIntoView({behavior:"smooth",block:"center"});el.classList.add("spot");setTimeout(()=>el.classList.remove("spot"),4000)}}}
+ {const m=/\b(show|see|open|where)\b.*\b(client pack|client sheet|pack|pdf|brief pdf|brief|document|doc|ga|render|drawing)\b/i.exec(tx);if(m&&!/\b(past|previous|before|history)\b/i.test(tx)){const k=m[2].toLowerCase();const els=[...log.querySelectorAll(k==="render"?".opt":/ga|drawing/.test(k)?".card.ga":".doc")].filter(e=>/pdf|pack|sheet|ga/i.test(k)?/pdf|pack|sheet|GA/i.test(e.textContent):true);const el=els[els.length-1];if(el){LS.showing=true;LS.past=true;lsBlur(false);el.scrollIntoView({behavior:"smooth",block:"center"});el.classList.add("spot");setTimeout(()=>el.classList.remove("spot"),4000)}}}
  if(FINISH.test(tx)&&tx.split(/\s+/).length<=8){rt.closing=true;
   if(sid)fetch("/api/rt/log",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({session:sid,role:"user",text:tx})}).catch(()=>{});
   rtSay({type:"conversation.item.create",item:{type:"message",role:"user",content:[{type:"input_text",text:"[Showroom: the AM is finishing. Say one short, warm goodbye line (everything is saved in the chat) - nothing else, no question.]"}]}});
@@ -1400,7 +1412,7 @@ let talkOn=false,lastAsk="",player=null,vad=null;
 function stopSpeaking(){if(player){player.pause();player=null}}
 function talkUI(on,st){$("#talkbar").classList.toggle("on",on);$("#talk").classList.toggle("on",talkOn);if(st)$("#talkst").textContent=st;
  const v=$("#vo");if(!v)return;v.classList.toggle("on",!!on);$(".main").classList.toggle("voice-on",!!on);if(on)setTimeout(scrollEnd,60);
- if(!on){voCap("","");orbLvl(0,"x");$(".main").classList.remove("live-blur");lsWork(false);$("#vchoice").classList.remove("on");return}
+ if(!on){voCap("","");orbLvl(0,"x");{const a=$("#vdoc");if(a)a.classList.remove("on")}$(".main").classList.remove("live-blur");lsWork(false);$("#vchoice").classList.remove("on");return}
  if(rt&&!LS.showing&&!$(".main").classList.contains("live-blur"))lsBlur(true);   // live on -> the chat behind blurs straight away
  v.dataset.live=rt?"1":"0";$("#vo-mode").textContent=rt?"● Live":"Talk mode";$("#vo-ptt").parentElement.style.display="none";$("#vo-orb").title=rt?"Very noisy? Hold the orb while you speak":"";
  if(st){const s=st.toLowerCase();v.dataset.s=/connect/.test(s)?"connecting":/think|working|got it/.test(s)?"thinking":/speak/.test(s)?"speaking":"listening";

@@ -2309,10 +2309,58 @@ def ref_pending(b):
     return bool(b.get("_ref_confirm") or b.get("_ref_ask") or (b.get("_ref_more") and not b.get("_ref_job")))
 
 
+# "based on the previous job we discussed", "the one we talked about", "that job" - pointing back at this chat
+BACK_REF = re.compile(r"\b((the|that) (previous|last|earlier|same|other) (job|one|unit|project|reference)\b.{0,20}\b(we|you|i)\b"
+                      r".{0,12}\b(discussed|talked|mentioned|said|picked|chose|agreed|went with)|"
+                      r"(the|that) (job|one|unit|project|reference) (we|you|i)('ve| have)? (discussed|talked about|mentioned|"
+                      r"said|picked|chose|agreed|went with)|(we|you|i) (discussed|talked about|mentioned) (it )?(earlier|before|"
+                      r"already|here|today|on this call|in this chat)|the job (from )?(earlier|before)|that (job|reference)|the same (job|one) as (before|earlier))", re.I)
+
+
+def earlier_job(b):
+    """The past job already named in this chat - followed, being checked, liked, or written into the brief - newest
+    choice first. Never one they turned down."""
+    no = set(b.get("_ref_declined") or [])
+    for v in (b.get("_ref_job"), (b.get("_ref_confirm") or {}).get("label"), b.get("liked_job"), b.get("repeat_of"),
+              b.get("references"), b.get("similar_projects")):
+        for n in re.findall(r"\b\d{4,6}\b", str(v or "")):
+            if n not in no:
+                return n
+    return None
+
+
+def _job_label(b, job):
+    for v in [(b.get("_ref_confirm") or {}).get("label")] + list(b.get("_ref_list") or []) + [b.get("liked_job")]:
+        if v and re.match(rf"\s*{job}\b", str(v)):
+            return re.sub(r"\s*-\s*the AM asked to follow it closely$", "", str(v))
+    return job
+
+
+def _follow_job(b, label, hint):
+    m_ = re.match(r"\s*(\d{3,6})", label)
+    if m_:
+        b["_ref_job"], b["design_route"], b["_ref_hint"] = m_.group(1), "past", hint
+        b["liked_job"] = f"{label} - the AM asked to follow it closely"
+        b["_ref_redraw"] = 1
+        b.pop("_ref_off", None)       # they chose one after all
+    for k_ in ("_ref_ask", "_ref_confirm", "_ref_more"):
+        b.pop(k_, None)
+
+
 def ref_lookup(b, text):
     """The past SDI job the AM points at, for the typed chat AND the live call (2 Nov 2026: the live call skipped it and
     drew straight away). Sets _ref_confirm / _ref_ask / _ref_more, or _ref_job once the AM has said yes - and lets it go
     when they move away from it (drop_ref)."""
+    # 5 Nov 2026 (James's call): "let's base it on the 10519 HRI DDA", then later "based on the previous job we
+    # discussed" - searched for by those words, not found, the job number asked for, and "I don't know - you need to
+    # remember" dropped it as a new design. Pointing back is the job already named here, said twice: it's followed.
+    if not re.search(r"\b\d{3,6}\b", text or ""):
+        back = BACK_REF.search(text or "") or (b.get("_ref_more") and _plain_no(text))
+        job_ = earlier_job(b) if back else None
+        if job_:
+            if b.get("_ref_job") != job_:
+                _follow_job(b, _job_label(b, job_), text)
+            return
     if not re.search(r"\b\d{3,6}\b", text or "") and not SAYS_YES.search(text or ""):   # 'yes - but something different'
         if (ref_pending(b) and DROP_REF.search(text or "")) or (b.get("_ref_job") and DROP_CHOSEN.search(text or "")):
             drop_ref(b)
@@ -2326,14 +2374,7 @@ def ref_lookup(b, text):
         return f"{o[0]} - " + re.sub(r"^\d+\s*-\s*", "", o[1] or "") + f" ({o[2][:7] if o[2] else 'date unknown'})"
 
     def _ref_follow(label, hint):
-        m_ = re.match(r"\s*(\d{3,6})", label)
-        if m_:
-            b["_ref_job"], b["design_route"], b["_ref_hint"] = m_.group(1), "past", hint
-            b["liked_job"] = f"{label} - the AM asked to follow it closely"
-            b["_ref_redraw"] = 1
-            b.pop("_ref_off", None)       # they chose one after all
-        for k_ in ("_ref_ask", "_ref_confirm"):
-            b.pop(k_, None)
+        _follow_job(b, label, hint)
     ref_done = False
     if b.get("_ref_confirm") and b.get("_ref_list") and not (text and SHOW_REF.search(text)):
         said_ = spoken_job(b, text) if re.search(r"\d", text or "") else None
@@ -4011,7 +4052,7 @@ def _last_am_line(sid):
 
 
 NAME_FIELDS = {"client", "customer_name", "account_manager", "project_name"}
-SHORT_OK = re.compile(r"^\s*(yes|yeah|yep|yup|no|nope|nah|sure|correct|right|exactly|ok(ay)?|both|either|neither|"
+SHORT_OK = re.compile(r"^\s*(yes|yeah|yep|yup|no|nope|nah|nein|sure|correct|right|exactly|ok(ay)?|both|either|neither|"
                       r"none|all|single|double|freestanding|[a-z]+ ?sided|\d[\d\s.,x×mm]*)\b", re.I)   # 29 Oct: "No, it doesn't" counts
 NUM_WORDS = {w: i for i, w in enumerate("zero one two three four five six seven eight nine ten eleven twelve thirteen fourteen "
                                         "fifteen sixteen seventeen eighteen nineteen twenty".split())}
@@ -4148,7 +4189,12 @@ RT_BUSY = {}   # chat id -> what Brief Lite is already making for a live call (s
 # 3 Nov 2026 (Muhammad): "what's the last job we did for them?" is a QUESTION - answered in words. The carousel opens
 # only when they ask to see / show / list past work.
 PAST_Q = re.compile(r"\b(show|see|list|pull up|bring up|open|display)\b.{0,40}\b(past|previous|before|history|done|made|"
-                    r"built|old|similar|other) ?(work|jobs?|units?|ones?|things?|projects?|stuff)?\b", re.I)
+                    r"built|old|similar|other) ?(work|jobs?|units?|ones?|things?|projects?|stuff)?\b"
+                    # 5 Nov 2026 (James's call): "can you check please the history of SDI?" wasn't asking - so the voice
+                    # read jobs out instead of showing them. Other ways of asking, about SDI's work only.
+                    r"|\b(check|look (at|through|up|into)|find|search|go through|dig out)\b.{0,40}\b(history|"
+                    r"(past|previous|old) (work|jobs?|projects?|units?)|(sdi|we)('ve| have|'s| has)? (done|made|built))\b"
+                    r"|\bwhat (have|has) (we|sdi) (done|made|built)\b", re.I)
 
 
 def _busy_until_done(sid, kind, jid):

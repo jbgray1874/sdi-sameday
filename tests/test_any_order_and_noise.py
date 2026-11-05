@@ -1510,6 +1510,88 @@ class TheVoiceHasTheSavedChatTests(unittest.TestCase):
             self.assertIn(where, PAGE)        # after the AM's line, the voice's line, and every tool's answer
 
 
+class JamesCallOn5NovTests(unittest.TestCase):
+    """James's test call, 5 Nov 2026 16:40-16:54 (chat a7dd1ded33), line by line as SameDay saved it - the answers it
+    refused, the past job it forgot, the history it wouldn't show and the PDF he couldn't see."""
+
+    def setUp(self):
+        self.client = L.app.test_client()
+        _, self.s = say(new_chat(), "Boots, Boots wants a counter unit for number seven serums.",
+                        {"client": "Boots", "unit_type": "counter unit"})
+
+    def record(self, said, updates):
+        L.log_msg(self.s["id"], "in", said)
+        r = self.client.post("/api/rt/tool", json={"session": self.s["id"], "name": "record_answers",
+                                                  "arguments": {"updates": updates}})
+        return json.loads(r.get_json()["output"]), L._session_by_id(self.s["id"])["brief"]
+
+    def test_the_answers_it_refused_are_saved_now(self):
+        year = datetime.now().year
+        for said, k, v in (("Ten kilos.", "shelf_load", "About 10 kg per position"),
+                           ("December the first.", "instore_date", f"1 December {year}"),
+                           ("Nein.", "lighting", "None"),
+                           ("Mm Yeah, two thousand pounds has to be done by middle of November", "technical_chargeable",
+                            "Yes - £2,000 budget, due mid November")):
+            with self.subTest(said=said):
+                out, b = self.record(said, {k: v})
+                self.assertNotIn("error", out)
+                self.assertEqual(b.get(k), v)
+
+    def test_a_name_it_misheard_is_still_refused(self):
+        out, b = self.record("John Dorsetts", {"customer_name": "John Griffiths"})
+        self.assertIn("never said 'griffiths'", out.get("error", ""))
+
+    def test_the_previous_job_we_discussed_is_the_one_named_earlier(self):
+        b = {"client": "Boots", "unit_type": "counter unit",
+             "_ref_confirm": {"label": "10519 - HRI DDA Counter Desk Conversion (2026-03)", "hint": "", "others": []},
+             "_ref_list": ["10519 - HRI DDA Counter Desk Conversion (2026-03)"]}
+        REF_LOOKUP(b, "Based on the previous job we discussed")
+        self.assertEqual(b.get("_ref_job"), "10519")
+        self.assertIn("HRI DDA Counter Desk", b.get("liked_job", ""))
+        self.assertFalse(b.get("_ref_more"))
+        self.assertEqual(b.get("design_route"), "past")
+
+    def test_i_dont_know_the_number_keeps_the_job_already_named(self):
+        b = {"client": "Boots", "unit_type": "counter unit", "_ref_more": 1,
+             "liked_job": "10519 HRI DDA counter desk - adapted to this brief"}
+        REF_LOOKUP(b, "I can't remember we discussed it here. We I don't, I don't know")
+        self.assertEqual(b.get("_ref_job"), "10519")                    # not dropped as "a new design"
+        self.assertFalse(b.get("_ref_off"))
+
+    def test_with_no_job_named_yet_pointing_back_is_not_made_up(self):
+        b = {"client": "Boots", "unit_type": "counter unit"}
+        self.assertIsNone(L.earlier_job(b))
+        self.assertIsNone(L.earlier_job({"liked_job": "10519 HRI DDA", "_ref_declined": ["10519"]}))   # turned down
+
+    def test_check_the_history_of_sdi_is_asking_to_see_past_work(self):
+        for said in ("Yeah, can you check please the history of SDI?", "what have we done before for Boots?",
+                     "can you look through our past jobs for counters"):
+            with self.subTest(said=said):
+                self.assertTrue(L.PAST_Q.search(said))
+        for said in ("can you check what I said before?", "show me the client pack"):
+            with self.subTest(said=said):
+                self.assertFalse(L.PAST_Q.search(said))
+
+    def test_the_voice_saves_silently_and_speaks_once(self):
+        self.assertIn('Saving is silent: call\n  record_answers straight away, saying nothing first', rt.VOICE_RULES)
+        self.assertIn('never call it a new design unless they say so', rt.VOICE_RULES)
+
+    @unittest.skipUnless(NODE, "node is not installed")
+    def test_the_pdf_stays_on_the_call_screen_with_open(self):
+        src = ("const els={};const $=s=>els[s]||(els[s]={href:'',textContent:'',cls:new Set(),classList:{add(c){this.o.add(c)},"
+               "remove(c){this.o.delete(c)}}});for(const k of ['#vdoc','#vdoc-t'])$(k).classList.o=$(k).cls;\n"
+               + page_fn("lsDoc") + "\n"
+               "lsDoc({type:'document',url:'/file/brief.pdf',caption:'Brief - Boots counter unit'});"
+               "console.log(JSON.stringify([els['#vdoc'].href,els['#vdoc-t'].textContent,[...els['#vdoc'].cls]]))")
+        r = subprocess.run([NODE, "-e", src], capture_output=True, text=True, timeout=30)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(json.loads(r.stdout), ["/file/brief.pdf", "Brief - Boots counter unit", ["on"]])
+        self.assertIn('else if(x.type==="document"){lsWork(false);LS.showing=true;lsBlur(false);$("#vchoice").classList.remove("on");lsDoc(x);', PAGE)
+        self.assertIn('<a class="vdoc" id="vdoc" target="_blank"', PAGE)
+        self.assertIn('if(!on){voCap("","");orbLvl(0,"x");{const a=$("#vdoc");if(a)a.classList.remove("on")}', PAGE)   # gone when the call ends
+        self.assertTrue(re.search(r"\\b\(show\|see\|open\|where\)\\b\.\*\\b\([^)]*\|brief\|document\|", PAGE))   # "I can't see the brief"
+
+
 @unittest.skipUnless(NODE, "node is not installed")
 class ALateResultStillLandsInTheChatTests(unittest.TestCase):
     """5 Nov 2026 (James): "the pdf was generated, I found it" - but it never appeared in the chat. After 5 minutes the
