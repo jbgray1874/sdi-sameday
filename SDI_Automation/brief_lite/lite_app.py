@@ -254,6 +254,85 @@ def daily_cap():
         return 3.0
 
 
+# ---------------------------------------------------------------- firm time limits (5 Nov 2026)
+# James: "one slow render holds everyone up - let's fix this urgently". A picture could wait 240 s and then be tried
+# again for another 240 s (the SDK retries a timeout), and the design director 150 s twice. Now each call has ONE time
+# limit, and is tried again only when it failed FAST (a dropped connection, a busy service) - a slow failure is never
+# repeated, which would double the wait. At most IMAGE_SLOTS pictures are drawn at once across the server.
+IMAGE_SECONDS = float(os.environ.get("LITE_IMAGE_SECONDS", "170"))
+CLAUDE_SECONDS = float(os.environ.get("LITE_CLAUDE_SECONDS", "150"))
+IMAGE_SLOTS = max(1, int(os.environ.get("LITE_IMAGE_SLOTS", "4")))
+_image_slots = threading.BoundedSemaphore(IMAGE_SLOTS)
+QUICK_FAIL_SECONDS = 20
+
+
+def _retryable(e):
+    """A failure worth one more try: the service was busy or the connection dropped. Never no credit, a refusal, the
+    day's budget or a timeout."""
+    m = str(e).lower()
+    if isinstance(e, BudgetStop) or any(w in m for w in ("insufficient_quota", "credit", "safety", "moderation", "timed out")):
+        return False
+    return type(e).__name__ in ("APIConnectionError", "InternalServerError", "RateLimitError", "OverloadedError") \
+        or getattr(e, "status_code", None) in (429, 500, 502, 503, 504, 529)
+
+
+def _quick_retry(call, what, before_retry=None):
+    t0 = time.time()
+    try:
+        return call()
+    except Exception as e:
+        if time.time() - t0 > QUICK_FAIL_SECONDS or not _retryable(e):
+            raise
+        print(f"{what}: quick failure ({type(e).__name__}) - one more try", flush=True)
+        if before_retry:
+            before_retry()
+        time.sleep(2)
+        return call()
+
+
+def _image_client():
+    from openai import OpenAI
+    return OpenAI(timeout=IMAGE_SECONDS, max_retries=0)
+
+
+def draw_image(edit, **kw):
+    """One picture from the image service, within IMAGE_SECONDS, at most IMAGE_SLOTS at once across the server."""
+    t0 = time.time()
+    with _image_slots:
+        if time.time() - t0 > 5:
+            print(f"image: waited {time.time() - t0:.0f}s for a free slot ({IMAGE_SLOTS} at once)", flush=True)
+        imgs = kw.get("image") if isinstance(kw.get("image"), list) else []
+
+        def rewind():      # a file half-read by the failed try is sent again from its start
+            for f in imgs:
+                if hasattr(f, "seek"):
+                    f.seek(0)
+        c = _image_client()
+        fn = c.images.edit if edit else c.images.generate
+        return _quick_retry(lambda: fn(**kw), "image", rewind)
+
+
+def claude_create(timeout=None, **kw):
+    """One Claude call within its time limit (CLAUDE_SECONDS unless given), tried again only after a fast failure."""
+    import anthropic
+    client = anthropic.Anthropic(timeout=timeout or CLAUDE_SECONDS, max_retries=0)
+    return _quick_retry(lambda: client.messages.create(**kw), "claude")
+
+
+def render_failed(why, what="the render"):
+    """What the AM is told when a picture wasn't made: plainly, and what to do next - never a raw error."""
+    w = str(why or "")
+    if w.startswith("stopped") or "budget" in w or "no OPENAI_API_KEY" in w or "refused" in w or "no credit" in w:
+        return f"I can't make {what} yet ({w})."
+    if re.search(r"timed? ?out|took too long|timeout", w, re.I):
+        reason = "the picture service took too long"
+    elif re.search(r"connect|network|unreachable", w, re.I):
+        reason = "the picture service couldn't be reached"
+    else:
+        reason = "the picture service had a problem"
+    return f"That didn't work - {reason}, so {what} wasn't made. Say \"make the render\" and I'll try again."
+
+
 def log_cost(sid, kind, cost):
     con = db()
     con.execute("INSERT INTO ai_calls VALUES (?,?,?,?)", (datetime.now().isoformat(timespec="seconds"), sid, kind, cost))
@@ -442,7 +521,7 @@ def think(s, text):
             + (f"WHAT SDI KNOWS ABOUT THIS CLIENT:\n{pn}\n" if (pn := profile_notes(s["brief"], text)) else "")
             + (f"QUESTIONS JUST ASKED (put the answer in these fields): {s['_asked']}\n" if s.get("_asked") else "")
             + f"VISUALS ALREADY MADE: {len(s['visuals'])}\n\nCONVERSATION:\n{history(s['id'])}\n\nNEW MESSAGE FROM AM: {text}")
-    resp = anthropic.Anthropic(timeout=150, max_retries=1).messages.create(model=CHEAP_MODEL, max_tokens=700, system=system, tools=[TOOL],
+    resp = claude_create(timeout=150, model=CHEAP_MODEL, max_tokens=700, system=system, tools=[TOOL],
                                                  tool_choice={"type": "tool", "name": "brief_turn"},
                                                  messages=[{"role": "user", "content": user}])
     log_cost(s["id"], "turn", usd(CHEAP_MODEL, resp.usage))
@@ -742,7 +821,7 @@ def check_render(path, b, said=""):
     h, w, d = hwd
     try:
         import anthropic
-        resp = anthropic.Anthropic(timeout=150, max_retries=1).messages.create(
+        resp = claude_create(timeout=60,    # a quick look at the finished picture - never minutes (5 Nov 2026)
             model=CHEAP_MODEL, max_tokens=1500, thinking={"type": "disabled"},   # a forced tool can't follow thinking
             tools=[tool], tool_choice={"type": "tool", "name": "render_check"},
             messages=[{"role": "user", "content": [
@@ -1070,7 +1149,6 @@ def make_visual(s, kind="render", change=None, base_image=None, refs=None, label
             if len(files) >= 8:
                 break
     try:
-        client = OpenAI(timeout=240, max_retries=1)
         prompt = visual_prompt(s["brief"], kind, change, refs=use, said=am_said(s["id"]))
         own = [p for p in convo.client_imgs(s, 2 if base_image else 6) if p not in logos]
         off = (1 if base_image else 0)                       # the images in the order they were attached
@@ -1135,9 +1213,9 @@ def make_visual(s, kind="render", change=None, base_image=None, refs=None, label
                 print("ref job images:", str(e)[:120], flush=True)
         files = as_pngs(files)   # 2 Nov 2026: an uploaded file the image model can't read ("unsupported mimetype") failed the render
         if files:
-            r = client.images.edit(model=IMAGE_MODEL, image=files, prompt=prompt, size="1536x1024", quality=quality)
+            r = draw_image(True, model=IMAGE_MODEL, image=files, prompt=prompt, size="1536x1024", quality=quality)
         else:
-            r = client.images.generate(model=IMAGE_MODEL, prompt=prompt, size="1536x1024", quality=quality)
+            r = draw_image(False, model=IMAGE_MODEL, prompt=prompt, size="1536x1024", quality=quality)
         data = base64.b64decode(r.data[0].b64_json)
     except Exception as e:
         msg = str(e)
@@ -1213,7 +1291,7 @@ def make_hd(s, v):
         imgs = [open(v["path"], "rb")]
         for r in moodboard.picks(s["id"])[0][:1]:                # the real product, so the labels come out right
             imgs.append(open(r["path"], "rb"))
-        r = OpenAI(timeout=150, max_retries=0).images.edit(model=IMAGE_MODEL, image=imgs, prompt=HD_PROMPT, size="1536x1024", quality="high")
+        r = draw_image(True, model=IMAGE_MODEL, image=imgs, prompt=HD_PROMPT, size="1536x1024", quality="high")
         data = base64.b64decode(r.data[0].b64_json)
         try:
             u, d = r.usage, r.usage.input_tokens_details
@@ -1303,7 +1381,7 @@ Keep every field except picture to 30 words or fewer - an AM reads this on a pho
     try:
         # effort low: the director took ~37 s before the picture could even start (27 Oct 2026)
         # 3 Nov 2026 (Muhammad): 'something completely new' gets the director's best thinking (medium, ~20 s more)
-        r = anthropic.Anthropic(timeout=150, max_retries=1).messages.create(
+        r = claude_create(timeout=150,
             model=DIRECTOR_MODEL, max_tokens=5000, output_config={"effort": "medium" if b.get("design_route") == "new" else "low"},
                                                   messages=[{"role": "user", "content": prompt}])
         log_cost(s["id"], "director", usd(DIRECTOR_MODEL, r.usage))
@@ -1360,7 +1438,7 @@ def fix_render(path, b, check):
     from openai import OpenAI
     try:
         with open(path, "rb") as f:
-            r = OpenAI(timeout=240, max_retries=1).images.edit(model=IMAGE_MODEL, image=[f], size="1536x1024", quality=CHANGE_QUALITY, prompt=(
+            r = draw_image(True, model=IMAGE_MODEL, image=[f], size="1536x1024", quality=CHANGE_QUALITY, prompt=(
                 "Keep this exact design, materials, colours, branding, camera and store. Only correct this: "
                 + (check.get("fix") or "; ".join(check.get("issues") or [])) + "\n" + scale_notes(b)))
         open(path, "wb").write(base64.b64decode(r.data[0].b64_json))
@@ -1462,7 +1540,7 @@ def make_ga_ai(s, base_visual, retry_note=""):
         with open(base_visual["path"], "rb") as f:
             imgs = [f] + [open(p, "rb") for p in theirs]
             try:
-                r = OpenAI(timeout=240, max_retries=1).images.edit(model=IMAGE_MODEL, image=imgs, prompt=prompt, size="1536x1024", quality="medium")
+                r = draw_image(True, model=IMAGE_MODEL, image=imgs, prompt=prompt, size="1536x1024", quality="medium")
             finally:
                 for x in imgs[1:]:
                     x.close()
@@ -1516,7 +1594,7 @@ def make_ga_text(s):
                                        f"of this retail display unit, designed from the brief ({what})")
     from openai import OpenAI
     try:
-        r = OpenAI(timeout=240, max_retries=1).images.generate(model=IMAGE_MODEL, prompt=prompt, size="1536x1024", quality="medium")
+        r = draw_image(False, model=IMAGE_MODEL, prompt=prompt, size="1536x1024", quality="medium")
         data = base64.b64decode(r.data[0].b64_json)
         try:
             u, d = r.usage, r.usage.input_tokens_details
@@ -1562,7 +1640,7 @@ def ga_read_sizes(path):
                 "input_schema": {"type": "object", "properties": {
                     "height": {"type": "number"}, "width": {"type": "number"}, "depth": {"type": "number"}},
                     "required": ["height", "width", "depth"]}}
-        resp = anthropic.Anthropic(timeout=60, max_retries=1).messages.create(
+        resp = claude_create(timeout=60,
             model=CHEAP_MODEL, max_tokens=400, thinking={"type": "disabled"},
             tools=[tool], tool_choice={"type": "tool", "name": "ga_sizes"},
             messages=[{"role": "user", "content": [
@@ -1613,7 +1691,7 @@ def ga_sizes_wrong(path, hwd):
                 "input_schema": {"type": "object", "properties": {
                     "height": {"type": "number"}, "width": {"type": "number"}, "depth": {"type": "number"}},
                     "required": ["height", "width", "depth"]}}
-        resp = anthropic.Anthropic(timeout=60, max_retries=1).messages.create(
+        resp = claude_create(timeout=60,
             model=CHEAP_MODEL, max_tokens=400, thinking={"type": "disabled"},
             tools=[tool], tool_choice={"type": "tool", "name": "ga_sizes"},
             messages=[{"role": "user", "content": [
@@ -1890,7 +1968,17 @@ START_UNIT = re.compile(r"\bwants?\s+(a|an|some|two|three|\d+)\b.{0,80}\b(units?
 STUDIO_Q = re.compile(r"\b(deadline|booked|booking|who'?s (on|doing|working)|due date|status of|in the diary|"
                       r"what'?s (missing|outstanding))\b|\bjob\s*\d{4,6}\b", re.I)
 CANCEL = re.compile(r"^\W*(cancel|stop|exit|quit|end)\W*$", re.I)
-_busy = threading.Lock()
+# 5 Nov 2026 (James: "one slow render holds everyone up"): this was ONE lock for the whole server - every typed message
+# and every render, from everyone, waited behind whatever was being drawn. Now a chat takes one turn at a time (two turns
+# must never change the same brief at once), different chats run side by side, and the pictures themselves share
+# IMAGE_SLOTS (draw_image).
+_chat_locks, _chat_locks_guard = {}, threading.Lock()
+
+
+def chat_lock(key):
+    """The lock for one chat (its id, or the person / WhatsApp number before it has one)."""
+    with _chat_locks_guard:
+        return _chat_locks.setdefault(str(key or "?"), threading.Lock())
 
 
 def wants(b):
@@ -2848,7 +2936,7 @@ def handle(number, name, text, image_path=None, voice=False, ch=None, new=False,
             if path:
                 ch.image(path, f"Option {label} - updated with the new details.", role="option", label=label, kind="render")
             else:
-                ch.text(f"I couldn't remake option {label} ({why}).")
+                ch.text(render_failed(why, f"option {label}"))
                 break
         save_session(s)
         return ch, s
@@ -2918,7 +3006,7 @@ def handle(number, name, text, image_path=None, voice=False, ch=None, new=False,
             if b.get("_flow"):
                 return convo.ask_final(s, ch, ack=f"Here's Option {new_label} - the earlier one is still there to pick with \"Use this\".")
         else:
-            ch.text(f"I couldn't make the new version ({why}).")
+            ch.text(render_failed(why, "the new version"))
         save_session(s)
         return ch, s
 
@@ -3036,7 +3124,7 @@ def handle(number, name, text, image_path=None, voice=False, ch=None, new=False,
         for i, label in enumerate(labels):
             path, why = make_visual(s, "render", refs=groups[i % 2][1], label=label)
             if not path:
-                ch.text("Stopped - nothing more is being made." if why.startswith("stopped") else f"I couldn't make option {label} ({why}).")
+                ch.text("Stopped - nothing more is being made." if why.startswith("stopped") else render_failed(why, f"option {label}"))
                 break
             made_now += 1
             follows = b.get("_ref_job") if b.get("design_route") != "new" else None
@@ -3159,13 +3247,13 @@ def handle(number, name, text, image_path=None, voice=False, ch=None, new=False,
         for x in ths:
             x.start()
         for x in ths:
-            x.join(600)
+            x.join(IMAGE_SECONDS + 240)     # 5 Nov 2026: was 10 minutes - each picture now has its own firm limit
         for i, label in enumerate("ABCDE"[:n]):
             rs, path, why = res.get(label, ([], None, "it took too long"))
             if not path:
                 ch.text("Renders are paused for a moment - the image service needs topping up (Muhammad's on it). Everything else "
                         "carries on: I'll keep the brief going, and say *make a render* again later." if "credit" in str(why)
-                        else f"I can't make the visual yet ({why}).")
+                        else render_failed(why, f"option {label}"))
                 break
             v = next(x for x in s["visuals"] if x.get("path") == path)
             made.append(v)
@@ -3434,7 +3522,7 @@ def api_wa():
         text = f"Option {m.group(1)} is the one - send me the client sheet"
 
     def run():
-        with _busy:
+        with chat_lock(number):
             try:
                 ch, _ = handle(number, js.get("name", ""), text, js.get("image_path"), js.get("voice", False), new=starting and not active)
                 ch.flush()
@@ -3464,11 +3552,11 @@ def _start_turn(who, name, text, image_path=None, new=False, t_override=None, lo
         t0 = time.time()
         try:
             if lock:
-                with _busy:
+                with chat_lock(sid or who):
                     waited = time.time() - t0
-                    if waited > 5:    # 4 Nov 2026 (Andy: "then it froze"): renders run one at a time - say when one waited
-                        print(f"turn {sid or who} {JOBS[jid].get('tool') or 'turn'}: waited {waited:.0f}s behind another "
-                              "render", flush=True)
+                    if waited > 5:    # only behind this chat's own last turn now (5 Nov 2026)
+                        print(f"turn {sid or who} {JOBS[jid].get('tool') or 'turn'}: waited {waited:.0f}s behind this "
+                              "chat's last turn", flush=True)
                     _, s = handle(who, name, text, image_path=image_path, ch=ch, new=new, t_override=t_override, sid=sid, project=project)
             else:   # live voice answers: no AI call, never wait behind a slow concept turn
                 _, s = handle(who, name, text, image_path=image_path, ch=ch, new=new, t_override=t_override, sid=sid, project=project)

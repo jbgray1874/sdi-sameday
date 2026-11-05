@@ -32,6 +32,29 @@ like about around approx approximately roughly mm cm m metre metres meter meters
 new client brief please would could should can will make made some one two three x by""".split())
 
 
+class _Jobs:
+    """The job index for whichever thread asks - one sqlite connection per thread. 5 Nov 2026: turns from different
+    chats now run side by side, and one connection shared between threads isn't safe."""
+
+    def __init__(self, path):
+        self.path, self.tl = path, threading.local()
+
+    def _c(self):
+        c = getattr(self.tl, "c", None)
+        if c is None:
+            c = self.tl.c = sqlite3.connect(self.path, check_same_thread=False, timeout=10)
+        return c
+
+    def execute(self, *a):
+        return self._c().execute(*a)
+
+    def close(self):
+        c = getattr(self.tl, "c", None)
+        if c is not None:
+            c.close()
+            self.tl.c = None
+
+
 # 4 Nov 2026 (James: "it keeps saying it can't see past jobs"). This used to open the picture index first, and the
 # server has no all_img_index.npz, so the whole past-work search failed - finding a job by its number or name too,
 # although the job index (projects.db) was there and the service could read W:. Now the job index loads on its own,
@@ -44,7 +67,7 @@ def _load():
             return _state
         if not os.path.exists(JOBS_DB):       # never let sqlite make an empty one in its place
             raise FileNotFoundError(f"no job index: {JOBS_DB} is missing")
-        con = sqlite3.connect(JOBS_DB, check_same_thread=False)
+        con = _Jobs(JOBS_DB)
         from collections import Counter
         df = Counter()
         for (txt,) in con.execute("SELECT name || ' ' || COALESCE(titles,'') FROM projects"):

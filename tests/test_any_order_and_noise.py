@@ -19,6 +19,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -991,6 +992,139 @@ class StillTrueTests(unittest.TestCase):
         for p in (SRC / "brief_lite").glob("*.py"):
             with self.subTest(file=p.name):
                 self.assertIsNone(re.search(r"sk-(ant-|proj-)?[A-Za-z0-9_\-]{24,}", p.read_text(encoding="utf-8", errors="ignore")))
+
+
+class RendersSideBySideTests(unittest.TestCase):
+    """5 November 2026 (James): "one slow render holds everyone up - let's fix this urgently". One lock covered the whole
+    server: every typed message and render, from everyone, waited behind whatever was drawing. A picture could wait
+    240 s and then be tried again for another 240 s."""
+
+    def run_turns(self, keys, hold=0.4):
+        """Turns for the given chats, each 'drawing' for `hold` seconds: when each started and finished."""
+        times, keep = {}, L.handle
+
+        def slow_handle(who, name, text, sid=None, **k):
+            t0 = time.time()
+            time.sleep(hold)
+            times.setdefault(sid, []).append((t0, time.time()))
+            return None, {"id": sid, "brief": {}}
+        L.handle = slow_handle
+        try:
+            jids = [L._start_turn("web:t", "T", "make the render", sid=k) for k in keys]
+            deadline = time.time() + 10
+            while not all(L.JOBS[j]["done"] for j in jids) and time.time() < deadline:
+                time.sleep(0.02)
+        finally:
+            L.handle = keep
+        return times
+
+    def test_different_chats_draw_at_the_same_time(self):
+        t = self.run_turns(["chat-andy", "chat-matt"])
+        (a0, a1), (m0, m1) = t["chat-andy"][0], t["chat-matt"][0]
+        self.assertLess(max(a0, m0), min(a1, m1))       # they overlapped - nobody waited for the other
+
+    def test_one_chat_still_takes_one_turn_at_a_time(self):
+        t = self.run_turns(["chat-same", "chat-same"])["chat-same"]
+        (s0, s1), (n0, n1) = sorted(t)
+        self.assertGreaterEqual(n0, s1 - 0.01)          # its brief is never changed by two turns at once
+
+    def test_pictures_share_a_few_slots(self):
+        import threading
+        now, most, guard = [0], [0], threading.Lock()
+
+        class Images:
+            def edit(self, **k):
+                with guard:
+                    now[0] += 1
+                    most[0] = max(most[0], now[0])
+                time.sleep(0.2)
+                with guard:
+                    now[0] -= 1
+                return "picture"
+            generate = edit
+
+        class Client:
+            images = Images()
+        keep = (L._image_client, L._image_slots)
+        L._image_client, L._image_slots = (lambda: Client()), threading.BoundedSemaphore(2)
+        try:
+            ths = [threading.Thread(target=L.draw_image, args=(True,), kwargs={"prompt": "x"}) for _ in range(5)]
+            for th in ths:
+                th.start()
+            for th in ths:
+                th.join(5)
+        finally:
+            L._image_client, L._image_slots = keep
+        self.assertEqual(most[0], 2)
+
+    def test_a_quick_failure_is_tried_once_more_a_slow_one_never(self):
+        class APIConnectionError(Exception):
+            pass
+        tries = []
+
+        def flaky():
+            tries.append(1)
+            if len(tries) == 1:
+                raise APIConnectionError("connection reset")
+            return "ok"
+        self.assertEqual(L._quick_retry(flaky, "test"), "ok")
+        self.assertEqual(len(tries), 2)
+        tries.clear()
+        keep = L.QUICK_FAIL_SECONDS
+        L.QUICK_FAIL_SECONDS = -1                           # every failure counts as slow
+        try:
+            with self.assertRaises(APIConnectionError):
+                L._quick_retry(flaky, "test")
+        finally:
+            L.QUICK_FAIL_SECONDS = keep
+        self.assertEqual(len(tries), 1)                     # never a doubled wait
+        for e in (Exception("insufficient_quota"), L.BudgetStop("cap"), Exception("Request timed out.")):
+            with self.subTest(e=str(e)):
+                self.assertFalse(L._retryable(e))
+
+    def test_no_call_waits_twice(self):
+        src = (WORK / "brief_lite" / "lite_app.py").read_text(encoding="utf-8")
+        self.assertNotRegex(src, r"\.images\.(edit|generate)\((?!\*\*)")      # every picture goes through draw_image
+        self.assertNotRegex(src, r"Anthropic\(timeout=\d+, max_retries=1\)")   # every Claude call through claude_create
+        self.assertIn("OpenAI(timeout=IMAGE_SECONDS, max_retries=0)", src)
+        self.assertNotIn("with _busy", src)
+        self.assertNotIn("x.join(600)", src)
+
+    def test_a_failed_render_says_so_plainly_and_what_to_say(self):
+        said = L.render_failed("the image model had a problem (Request timed out.)", "option A")
+        self.assertIn("took too long", said)
+        self.assertIn('"make the render"', said)
+        self.assertTrue(L.intent_wants_render({}, "make the render"))      # the words it suggests really do start one
+        self.assertNotIn("Request timed out", said)
+        self.assertIn("budget", L.render_failed("today's SDI Same Day Intelligence AI budget is used up"))
+
+    def test_the_job_index_is_safe_from_many_chats_at_once(self):
+        import threading
+        import lite_search as S
+        d = Path(tempfile.mkdtemp(prefix="threads-"))
+        _past_jobs_index(d)
+        keep = S.JOBS_DB
+        S._state.clear()
+        S.JOBS_DB = str(d / "projects.db")
+        errors = []
+
+        def ask():
+            try:
+                for _ in range(30):
+                    assert S.named_jobs("refer to job 12148") == ["12148"]
+            except Exception as e:      # noqa: BLE001 - any error is the failure being tested for
+                errors.append(repr(e))
+        try:
+            ths = [threading.Thread(target=ask) for _ in range(6)]
+            for th in ths:
+                th.start()
+            for th in ths:
+                th.join(20)
+        finally:
+            S._state.clear()
+            S.JOBS_DB = keep
+            shutil.rmtree(d, ignore_errors=True)
+        self.assertEqual(errors, [])
 
 
 if __name__ == "__main__":

@@ -246,8 +246,11 @@ def client_jobs(client):
     c = _norm(client)
     if len(c) < 2:
         return 0
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "projects.db")
+    if not os.path.exists(path):          # never let sqlite make an empty one
+        return 0
     try:
-        con = sqlite3.connect(os.path.join(os.path.dirname(os.path.abspath(__file__)), "projects.db"))
+        con = sqlite3.connect(path)
         n = 0
         for (brand,) in con.execute("SELECT brand FROM projects WHERE brand != '' GROUP BY brand"):
             nb = _norm(brand)
