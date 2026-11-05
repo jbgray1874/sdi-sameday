@@ -294,6 +294,21 @@ JOB_Q = [   # (field, question, when)
 ]
 
 
+# The client collects it from SDI. Answering the delivery questions, a word is enough ("collection", "ex works"); in
+# what they said generally it has to be about the unit - "a fragrance collection" or "click and collect" is not.
+COLLECT_ANSWER = re.compile(r"\b(collect(ion|ed|ing|s)?|ex[- ]?works|pick(ed|ing)?[- ]?(it |them )?up)\b", re.I)
+COLLECT_SAID = re.compile(r"\b(it'?s (a |for )?collection(?! of)|(client|customer|they|he|she)('ll| will| are| is|'re|'s)? "
+                          r"(be )?collect(ing|ed)?\b(?! (data|info|feedback|points?))|collect(ed|ing)? (it|them|the units?) "
+                          r"(from|at|ourselves|themselves)|collection (from|at) (sdi|us|our|the factory|site)|ex[- ]?works|"
+                          r"(picking|pick) (it|them) up from)", re.I)
+
+
+def collected(b):
+    answer = " ".join(str(b.get(k) or "") for k in ("warehousing", "delivery_restrictions", "delivery_packing"))
+    return bool(COLLECT_ANSWER.search(answer) and not re.search(r"\bclick (and|&|n) collect", answer, re.I)) or \
+        bool(COLLECT_SAID.search(_txt(b, "other_notes", "narrative", "_said")))
+
+
 def job_questions(b):
     return [(k, q.format(client=b.get("client") or "This client"), []) for k, q, when in JOB_Q if when(b) and not real(b.get(k))]
 
@@ -325,6 +340,11 @@ def adapt(s):
     if re.search(CARD, mats):
         auto["lighting"] = "None - card unit (assumed)"
         auto["installation"] = "Not needed - built by store staff (assumed)"
+    if collected(b):
+        # 5 Nov 2026 (James's call): "it's a collection" - and later it asked for delivery details. The client collects
+        # it from SDI: no delivery instructions or receiving-warehouse restrictions to ask about.
+        auto["warehousing"] = "Client collection from SDI"
+        auto["delivery_restrictions"] = "None - the client collects from SDI"
     rep = str(b.get("repeat_of") or "")
     if re.search(r"\brepeat\b|same", rep, re.I):
         job = (re.search(r"\b\d{3,6}\b", rep) or re.search(r"\b\d{3,6}\b", b.get("_same_before") or "") or [None])[0]

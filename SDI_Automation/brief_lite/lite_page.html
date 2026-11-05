@@ -13,7 +13,10 @@
  --shadow:0 1px 2px rgba(23,24,27,.04),0 6px 20px rgba(23,24,27,.06);--shadow2:0 10px 40px rgba(23,24,27,.14);--r:16px}
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--ink:#F2F1EE;--ink2:#CFCCC6;--muted:#9C978F;--paper:#111214;--card:#1A1B1E;
  --line:#2C2D31;--soft:#202125;--redsoft:#3A1A20;--greensoft:#15302A;--ambersoft:#33270F;--shadow:none;--shadow2:0 10px 40px rgba(0,0,0,.5)}}
-*{box-sizing:border-box}html,body{height:100%;margin:0}
+*{box-sizing:border-box}html,body{height:100%;margin:0;overscroll-behavior-y:none}
+/* 5 Nov 2026 (James's call): told to scroll up, a pull past the top of the chat reloaded the page on the phone and the
+   chat was gone - no pull-to-refresh here, and a reload opens the same chat again (lastChat) */
+#log{overscroll-behavior-y:contain}
 body{background:var(--paper);color:var(--ink);font:14.5px/1.5 Inter,system-ui,-apple-system,"Segoe UI",sans-serif;-webkit-font-smoothing:antialiased}
 button{font:inherit;cursor:pointer}a{color:inherit}
 .app{display:grid;grid-template-columns:268px minmax(0,1fr) 340px;height:100vh}
@@ -1091,7 +1094,7 @@ async function poll(turn,wait){let seen=0;
  for(;;){if(wait.dataset.stopped){wait.remove();busy=false;$("#send").disabled=false;vnReply=false;vnQueue=[];row("Stopped. Anything already being drawn finishes and appears under Images - nothing new is made.");return}let r;try{r=await fetch("/api/turn/"+turn).then(r=>r.json())}catch(e){await new Promise(z=>setTimeout(z,2000));continue}
   for(;seen<r.replies.length;seen++){wait.remove();render(r.replies[seen]);log.appendChild(wait);scrollEnd()}
   if(r.brief&&Object.keys(r.brief).length)showBrief(r.brief);
-  if(r.session)sid=r.session;
+  if(r.session){sid=r.session;rememberChat()}
   if(pendingSpaces&&sid){linkSpaces(pendingSpaces);pendingSpaces=null}
   if(r.done){wait.remove();break}
   const last=r.replies[r.replies.length-1]||{};
@@ -1114,7 +1117,7 @@ $("#send").onclick=()=>send();
 t.addEventListener("keydown",e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();send()}});
 t.addEventListener("input",()=>{t.style.height="auto";t.style.height=Math.min(180,t.scrollHeight)+"px"});
 function newBrief(){newChat(mine())}
-function newChat(pid){leavePage();if(rt)rtStop();if(pid)setProject(pid);fresh=true;step=0;sid=null;loadFiles();log.innerHTML="";gallery=[];refBox=optBox=null;
+function newChat(pid){leavePage();if(rt)rtStop();if(pid)setProject(pid);fresh=true;step=0;sid=null;rememberChat();loadFiles();log.innerHTML="";gallery=[];refBox=optBox=null;
  showBrief({});setStep(0);hero();loadProjects();$("#rail").classList.remove("open");t.focus()}
 $("#newb").onclick=newBrief;$("#newb2").onclick=newBrief;
 $("#fin").onclick=()=>send("Finish - give me the full brief PDF");
@@ -1147,7 +1150,7 @@ async function rtStart(){if(!project){toast("Pick your name first");newBrief();r
   if(key||cap){talkOn=false;$("#talk").classList.remove("on");{const h=$(".hero");if(h)h.remove()}
    row(cap?"⚠ Today's AI budget is used up, so live voice, renders and voice notes are paused until tomorrow. Typing still works.":"⚠ Live voice can't start: the OpenAI key has expired or is wrong, so renders and voice won't work either. Ask Muhammad to update it. Typing still works.");return true}
   toast("Using talk mode: I speak, you answer");return false}
- fresh=false;sid=j.session;if(j.brief)showBrief(j.brief);const h=$(".hero");if(h)h.remove();
+ fresh=false;sid=j.session;rememberChat();if(j.brief)showBrief(j.brief);const h=$(".hero");if(h)h.remove();
  const tr0=j.transcription||null;
  const pc=new RTCPeerConnection(),audio=new Audio();audio.autoplay=true;pc.ontrack=e=>{audio.srcObject=e.streams[0];watchOut(e.streams[0])};
  // 4 Nov 2026 (James: "the render didn't appear on the phone app"): a render takes a minute or two with the mic paused, the
@@ -1578,7 +1581,7 @@ function deleteChat(id,title){const m=document.createElement("div");m.className=
 function addProject(){adding=true;$("#rail").classList.add("open");loadProjects()}
 $("#addp").onclick=addProject;
 function leavePage(){const m=$(".main");if(m&&m.classList.contains("spaceon")){m.classList.remove("spaceon");spOpen=null;pvKind=null;clearTimeout(spTimer);navOn("")}}
-async function openSession(id){leavePage();if(rt)rtStop();const r=await fetch("/api/session/"+id).then(r=>r.json());sid=id;fresh=false;
+async function openSession(id){leavePage();if(rt)rtStop();const r=await fetch("/api/session/"+id).then(r=>r.json());sid=id;rememberChat();fresh=false;
  if(r.session.project&&r.session.project!==project)setProject(r.session.project);loadFiles();loadProjects();
  log.innerHTML="";gallery=[];refBox=optBox=null;step=0;showBrief(r.session.brief);
  for(const m of r.messages){if(m.dir==="in"){if(m.text)row(esc(m.text),true);continue}
@@ -1599,7 +1602,10 @@ if(matchMedia("(max-width:820px)").matches){t.placeholder="Tell me the brief…"
 $("#dclose").onclick=()=>$("#side").classList.remove("open");
 document.addEventListener("click",e=>{const sd=$("#side");if(sd.classList.contains("open")&&!e.target.closest("#side")&&!e.target.closest("#mbrief")&&innerWidth>820)sd.classList.remove("open")});
 setStep(0);showBrief({});status();setInterval(status,60000);
-loadProjects().then(()=>hero());
+// 5 Nov 2026 (James's call): the page reloaded mid-call and the chat was gone - the chat that was open comes back
+function rememberChat(){try{if(sid)localStorage.setItem("liteChat",JSON.stringify({id:sid,at:Date.now()}));else localStorage.removeItem("liteChat")}catch(e){}}
+function lastChat(){try{const c=JSON.parse(localStorage.getItem("liteChat")||"null");return c&&c.id&&Date.now()-c.at<3*3600e3?c.id:null}catch(e){return null}}
+loadProjects().then(()=>{const c=lastChat();if(c)openSession(c).catch(()=>{sid=null;rememberChat();hero()});else hero()});
 // ---------- installable app (PWA): Android/desktop get an Install button, iPhone uses Share -> Add to Home Screen
 if("serviceWorker" in navigator)navigator.serviceWorker.register("/sw.js").catch(()=>{});
 let installEv=null;window.addEventListener("beforeinstallprompt",e=>{e.preventDefault();installEv=e;$("#install").style.display="block"});

@@ -286,7 +286,7 @@ def instructions(s):
           "the day, or just 'Hi'.\n"
         + (f"Briefing: {name}.\n" if name else "")
         + "FIELDS (id: meaning):\n" + "\n".join(f"- {k}: {v[0]}" for k, v in FIELDS.items()) + "\n"
-        + f"BRIEF SO FAR: {json.dumps(known)[:2500]}\n"
+        + f"BRIEF SO FAR: {json.dumps(known_compact(known, 2500))}\n"
         + f"PACK: {convo.pack_label(b)}. FOCUS: {b.get('_focus') or 'the usual order'}. STAGE NOW: {st} - {NOW_DO[st]}\n"
         + f"NEXT QUESTIONS: {[q for _, q, _ in p[:6]]}\n"
         + (f"SDI MADE THIS BEFORE: {sb}\n" if sb else "")
@@ -441,8 +441,42 @@ def tool_intent(name, a):
     return "", {"updates": {}, "intent": "answer", "reply": ""}
 
 
-def tool_result(s, replies):
-    """What the voice model hears back: where the brief is and what to ask next - short, so it answers fast."""
+RESULT_MAX = 3500
+# Dropped first when a result is too long - what's on screen and recent changes matter less than what's known and next
+LESS_NEEDED = ("shown_on_screen", "recent_changes", "sdi_made_before", "suggested_next", "concepts_on_screen")
+
+
+def known_compact(known, room):
+    """Every answer the voice must never ask again, short enough to fit in `room` characters - each field is always
+    listed, long answers are shortened (5 Nov 2026: cut at a fixed length, the newest answers were the ones lost)."""
+    for cap in (200, 120, 80, 50, 30, 16):
+        out = {k: (v if len(str(v)) <= cap else str(v)[:cap].rstrip() + "...") for k, v in known.items()}
+        if len(json.dumps(out)) <= room:
+            return out
+    return {k: "(known)" for k in known}
+
+
+def fit(d, limit=RESULT_MAX):
+    """The result as JSON that is never cut off part-way (5 Nov 2026, James's call: 'it seems to forget what is said'.
+    The result was cut at 3,500 characters; late in a call the brief so far is long, the cut fell inside it, and the
+    newest answers and the next questions were lost - so it asked for delivery details after 'it's a collection')."""
+    out = json.dumps(d)
+    if len(out) <= limit:
+        return out
+    known = d.get("already_known_never_ask_again") or {}
+    d["already_known_never_ask_again"] = {}
+    for k in LESS_NEEDED:
+        if len(json.dumps(d)) + len(json.dumps(known)) <= limit:
+            break
+        d.pop(k, None)
+    d["already_known_never_ask_again"] = known_compact(known, max(400, limit - len(json.dumps(d))))
+    return json.dumps(d)
+
+
+def tool_result(s, replies, saved_now=None, not_saved=None):
+    """What the voice model hears back: where the brief is and what to ask next - short, so it answers fast.
+    saved_now / not_saved (record_answers): exactly which answers went in, and which weren't heard and must be asked
+    again - the rest WERE saved (5 Nov 2026: one unheard answer used to throw away the others)."""
     b = s["brief"]
     st = stage_now(s)
     p = convo.render_plan(b) if st == "render_q" else convo.plan(b)
@@ -450,7 +484,15 @@ def tool_result(s, replies):
     need = [k for k in need_for(b) if not convo.real(b.get(k))]
     shown = [r.get("text") or r.get("caption") for r in replies if r.get("role") not in ("ask", "choose_output")]
     asked = [r.get("text") for r in replies if r.get("role") in ("ask", "choose_output")]
-    return json.dumps({
+    head = {}
+    if saved_now is not None:
+        head["saved_now"] = saved_now
+    if not_saved:
+        head["not_saved"] = {k: v for k, v in not_saved.items() if k != "*"}
+        head["ask_again"] = ("Only these weren't heard clearly - say what you did get, then ask for just these again: "
+                             + ", ".join(head["not_saved"]))
+    return fit({
+        **head,
         "saved": True, "answered": f"{done} of {total}",
         "pack": convo.pack_label(b), "focus": b.get("_focus") or "", "stage": st, "now_do": NOW_DO[st],
         "render_in_progress": st == "rendering",
@@ -492,7 +534,7 @@ def tool_result(s, replies):
         "shown_on_screen": [x[:300] for x in shown if x][:6],
         "suggested_next": ("" if any(w in (asked[-1] if asked else "").lower() for w in ("which client", "who's the client", "who is the client")) and b.get("client")
                            else (asked[-1] if asked else ""))[:300],
-    })[:3500]
+    })
 
 
 def log_usage(sid, u):

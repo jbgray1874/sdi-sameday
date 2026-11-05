@@ -1352,5 +1352,123 @@ class TheNameIsWhoIsSignedInTests(unittest.TestCase):
         self.assertNotIn("newChat(project)", PAGE)                              # every "new chat" goes to mine()
 
 
+class NothingSaidIsLostTests(unittest.TestCase):
+    """5 Nov 2026 (James's call): "a couple of times it said it got my response then came back saying it didn't catch
+    it ... it forgot the budget number, forgot it was a collection, asked me later for delivery details ... a bit
+    confused for the date". One answer that didn't check out threw away every answer recorded with it; money, job
+    numbers and dates the way people say them didn't check out; and late in a call what the voice was told after each
+    answer was cut off part-way, the newest answers with it."""
+
+    def setUp(self):
+        self.client = L.app.test_client()
+        _, self.s = say(new_chat(), "Tesco want a gondola end", {"client": "Tesco", "unit_type": "gondola end"})
+
+    def record(self, said, updates):
+        L.log_msg(self.s["id"], "in", said)
+        r = self.client.post("/api/rt/tool", json={"session": self.s["id"], "name": "record_answers",
+                                                  "arguments": {"updates": updates}})
+        self.assertEqual(r.status_code, 200, r.data[:300])
+        return json.loads(r.get_json()["output"]), L._session_by_id(self.s["id"])["brief"]
+
+    def test_money_the_way_people_say_it(self):
+        for said, saved in (("the budget's about five grand", "£5,000"), ("five k", "£5000"),
+                            ("five thousand pounds", "£5,000"), ("twelve and a half thousand", "£12,500"),
+                            ("twelve thousand five hundred", "£12,500"), ("about 2.5k", "£2,500"),
+                            ("half a million across the estate", "£500,000"), ("a grand a unit", "£1,000 per unit")):
+            with self.subTest(said=said):
+                out, b = self.record(said, {"target_unit_cost": saved})
+                self.assertNotIn("error", out)
+                self.assertEqual(b.get("target_unit_cost"), saved)
+
+    def test_a_job_number_said_a_digit_at_a_time(self):
+        for said in ("it's like job one two one four eight", "twelve one four eight", "it's 12 148"):
+            with self.subTest(said=said):
+                out, b = self.record(said, {"similar_projects": "12148"})
+                self.assertNotIn("error", out)
+                self.assertEqual(b.get("similar_projects"), "12148")
+
+    def test_a_date_the_voice_works_out(self):
+        year = datetime.now().year
+        for said, saved in (("next Friday", f"Fri 13 Nov {year}"), ("end of January", f"31 Jan {year + 1}"),
+                            ("in about six weeks", f"17 Dec {year}")):
+            with self.subTest(said=said):
+                out, b = self.record(said, {"instore_date": saved})
+                self.assertNotIn("error", out)
+                self.assertEqual(b.get("instore_date"), saved)
+
+    def test_one_answer_not_heard_never_loses_the_others(self):
+        out, b = self.record("budget's five grand, and the client is collecting it",
+                             {"target_unit_cost": "£5,000", "warehousing": "Client collecting from SDI",
+                              "customer_name": "David Denzil"})
+        self.assertEqual(sorted(out["saved_now"]), ["target_unit_cost", "warehousing"])
+        self.assertEqual(list(out["not_saved"]), ["customer_name"])
+        self.assertIn("customer_name", out["ask_again"])
+        self.assertEqual((b.get("target_unit_cost"), b.get("warehousing")), ("£5,000", "Client collecting from SDI"))
+        self.assertFalse(b.get("customer_name"))
+
+    def test_still_never_a_number_or_a_date_that_was_not_said(self):
+        out, b = self.record("about five grand", {"target_unit_cost": "£7,000"})
+        self.assertIn("were not in what the AM said", out.get("error", ""))
+        self.assertFalse(b.get("target_unit_cost"))
+        out, b = self.record("hmm", {"instore_date": f"Fri 13 Nov {datetime.now().year}"})   # noise is not a date
+        self.assertIn("error", out)
+        self.assertFalse(b.get("instore_date"))
+
+    def test_a_collection_means_no_delivery_questions(self):
+        out, b = self.record("they're collecting it from us", {"warehousing": "Collection - the client collects"})
+        self.assertEqual(b.get("delivery_restrictions"), "None - the client collects from SDI")
+        self.assertNotIn("delivery_restrictions", [k for k, _, _ in convo.plan(b)])
+        self.assertNotIn("delivery instructions", json.dumps(out.get("next_questions") or []).lower())
+        self.assertTrue(convo.collected({"_said": "the client will collect them from the factory"}))
+        self.assertFalse(convo.collected({"narrative": "for their new fragrance collection"}))     # a product range
+        self.assertFalse(convo.collected({"warehousing": "Direct to store", "_said": "a click and collect point"}))
+
+    def test_late_in_a_call_the_voice_is_told_everything_known_whole(self):
+        s = L._session_by_id(self.s["id"])
+        for k in list(L.FIELDS)[:-3]:
+            s["brief"].setdefault(k, "a long answer about this part of the brief, " * 4)
+        res = rt.tool_result(s, [], saved_now=["target_unit_cost"], not_saved={})
+        d = json.loads(res)                                                  # whole JSON, never cut part-way
+        self.assertLessEqual(len(res), rt.RESULT_MAX)
+        known = {k for k, v in s["brief"].items() if not k.startswith("_") and convo.real(v)}
+        self.assertEqual(set(d["already_known_never_ask_again"]), known)     # every answer is still listed
+        for k in ("now_do", "next_questions", "stage", "saved_now"):
+            self.assertIn(k, d)
+
+    def test_the_log_says_what_was_saved_and_what_was_not(self):
+        import contextlib
+        import io
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            self.record("budget's five grand", {"target_unit_cost": "£5,000", "customer_name": "David Denzil"})
+        line = [x for x in buf.getvalue().splitlines() if x.startswith("rt tool")][-1]
+        self.assertIn("saved target_unit_cost", line)
+        self.assertIn("NOT saved customer_name", line)
+
+
+@unittest.skipUnless(NODE, "node is not installed")
+class TheChatSurvivesAReloadTests(unittest.TestCase):
+    """5 Nov 2026 (James's call): "when it asked me to scroll up I lost the chat altogether" - on the phone a pull past
+    the top of the chat reloads the page, and a reload always opened a fresh start screen."""
+
+    def test_no_pull_to_refresh(self):
+        self.assertIn("overscroll-behavior-y:none", PAGE)
+        self.assertIn("#log{overscroll-behavior-y:contain}", PAGE)
+
+    def test_a_reload_opens_the_chat_that_was_open(self):
+        src = ("let sid='abc123';const store={};const localStorage={setItem:(k,v)=>{store[k]=v},getItem:k=>store[k]??null,"
+               "removeItem:k=>{delete store[k]}};\n" + page_fn("rememberChat") + "\n" + page_fn("lastChat") + "\n"
+               "const out=[];rememberChat();out.push(lastChat());"
+               "store.liteChat=JSON.stringify({id:'abc123',at:Date.now()-4*3600e3});out.push(lastChat());"   # hours ago: no
+               "sid=null;rememberChat();out.push(lastChat(),store.liteChat===undefined);console.log(JSON.stringify(out))")
+        r = subprocess.run([NODE, "-e", src], capture_output=True, text=True, timeout=30)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(json.loads(r.stdout), ["abc123", None, None, True])
+        self.assertIn("const c=lastChat();if(c)openSession(c)", PAGE)
+        for where in ("if(r.session){sid=r.session;rememberChat()}", "sid=j.session;rememberChat();", "sid=id;rememberChat();",
+                      "step=0;sid=null;rememberChat();"):                 # every place the open chat changes
+            self.assertIn(where, PAGE)
+
+
 if __name__ == "__main__":
     unittest.main()

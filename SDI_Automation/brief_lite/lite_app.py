@@ -3792,10 +3792,15 @@ def api_rt_tool():
             return jsonify({"slow": False, "output": json.dumps({"error": "One more first: ask the AM 'Is there anything else "
                             "you'd like to add to the brief - anything I haven't asked?' Record what they say with "
                             "record_answers (other_notes), then call finish_brief with now=true."})})
+    not_saved = {}
     if js.get("name") == "record_answers":
-        bad = _answer_not_heard(s, args.get("updates") or {})
-        if bad:
-            return jsonify({"slow": False, "output": json.dumps({"error": bad})})
+        ups = dict(t.get("updates") or {})
+        not_saved = _answers_not_heard(s, ups)
+        kept = {k: v for k, v in ups.items() if k not in not_saved}
+        if "*" in not_saved or (not_saved and not kept and not t.get("not_known")):
+            return jsonify({"slow": False, "output": json.dumps({"error": "Not saved: " + " | ".join(
+                (f"{k}: {why}" if k != "*" else why) for k, why in not_saved.items())})})
+        t["updates"] = kept     # what they did say is saved; only what they didn't is asked again
     if js.get("name") == "set_pack":
         last_ = _last_am_line(s["id"])
         said_ = convo.pack_from(last_, asked=True) or convo.pack_change(last_)
@@ -3872,7 +3877,9 @@ def api_rt_tool():
             break
         time.sleep(0.1)
     s = _session_by_id(s["id"]) or s
-    out_ = {"turn": jid, "slow": False, "output": rt.tool_result(s, JOBS[jid]["ch"].out)}
+    out_ = {"turn": jid, "slow": False, "output": rt.tool_result(
+        s, JOBS[jid]["ch"].out, saved_now=list(t.get("updates") or {}) if js.get("name") == "record_answers" else None,
+        not_saved=not_saved)}
     _told_direction(s)
     tr = rt.transcription(s, RT_LIVE.get(s["id"], True))
     if rt.hint_text(tr) not in RT_HINT.get(s["id"], []):     # 4 Nov 2026: the transcriber hears this brief's new names too
@@ -3961,7 +3968,11 @@ def log_tool(sid, name, resp):
     try:
         out = json.loads((resp.get_json(silent=True) or {}).get("output") or "{}")
         what = out.get("error") or out.get("note") or ("started" if out.get("started") else f"ok, stage {out.get('stage')}")
-        print(f"rt tool {sid} {name}: {re.sub(chr(10), ' ', str(what))[:240]}", flush=True)
+        if out.get("saved_now") is not None:      # 5 Nov 2026: which answers went in, and which were asked again
+            what = f"{what}; saved {', '.join(out['saved_now']) or 'nothing'}"
+        if out.get("not_saved"):
+            what = f"{what}; NOT saved " + " | ".join(f"{k}: {v}" for k, v in out["not_saved"].items())
+        print(f"rt tool {sid} {name}: {re.sub(chr(10), ' ', str(what))[:400]}", flush=True)
     except Exception:
         pass
     return resp
@@ -4001,9 +4012,49 @@ def _digits(text):
                   lambda m: str(NUM_WORDS[m.group(1)]), t)
 
 
-def _answer_not_heard(s, updates):
-    """28 Oct 2026: the voice saved what it thought it heard ('David Denzil', noise read as an answer) and moved on.
-    Before record_answers saves anything, the AM's own words must back it up - otherwise ask again, never guess."""
+_MULT = {"k": 1000, "grand": 1000, "thousand": 1000, "m": 10 ** 6, "mil": 10 ** 6, "million": 10 ** 6}
+DATE_SAID = re.compile(r"\b((mon|tue|tues|wed|thu|thur|thurs|fri|sat|sun)(day)?|(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|"
+                       r"nov|dec)[a-z]*|today|tomorrow|week|weeks|fortnight|month|months|year|end of|start of|beginning of|"
+                       r"mid|asap|christmas|xmas|easter|q[1-4]|\d{1,2}(st|nd|rd|th)|the \d{1,2}|\d{1,2}[/.-]\d{1,2})\b", re.I)
+
+
+def _date_field(k):
+    return k.endswith(("_date", "_due")) or k in ("leadtime", "deadline")
+
+
+def _heard_numbers(heard):
+    """Every number the AM can be taken to have said (`heard` has been through _digits): as said, x10 and x1000 (2 m,
+    120 cm), and - 5 Nov 2026 (James's call: the budget was refused as never said) - money and job numbers the way
+    people say them: '5 grand', '5k', 'five thousand', '12 and a half thousand', '5,000', and digits said one at a time
+    ('1 2 1 4 8', '12 148' = 12148)."""
+    t = re.sub(r"(?<=\d),(?=\d{3}\b)", "", heard.lower())
+    t = re.sub(r"\bhalf an? (million|thousand|grand)\b", r"0.5 \1", t)
+    t = re.sub(r"\ban? (grand|thousand|million)\b", r"1 \1", t)
+    out = set(re.findall(r"\d+", t))
+    vals = [float(x) for x in re.findall(r"\d+(?:\.\d+)?", t)]
+    for v in vals:
+        out |= {str(int(round(v))) if v == int(v) else str(v), str(int(round(v * 10))), str(int(round(v * 1000)))}
+    for m in re.finditer(r"(\d+(?:\.\d+)?)(\s*and a half)?\s*(k|grand|thousand|m|mil|million)\b", t):
+        out.add(str(int(round((float(m.group(1)) + (0.5 if m.group(2) else 0)) * _MULT[m.group(3)]))))
+    for m in re.finditer(r"(\d+)\s*(?:k|grand|thousand)\s*(?:and\s+)?(\d{1,3})\b", t):   # "12 thousand 500"
+        out.add(str(int(m.group(1)) * 1000 + int(m.group(2))))
+    ns = [int(x) for x in re.findall(r"\d+", t)][:12]   # "6 a shelf, 5 shelves" -> 30 in total is said too
+    out |= {str(a * b) for a in ns for b in ns} | {str(a + b) for a in ns for b in ns}
+    out |= {str(-(-int(x) // RATE_GBP)) for x in list(out) if x.isdigit()} | {str(RATE_GBP)}   # a budget as hours at £75/h
+    for run in re.findall(r"\d+(?:[\s\-.:/]+\d+)+", t):     # a job number said a digit or two at a time
+        parts = re.split(r"[\s\-.:/]+", run)
+        out |= {"".join(parts[i:j]) for i in range(len(parts)) for j in range(i + 2, len(parts) + 1)}
+    return out
+
+
+def _answers_not_heard(s, updates):
+    """Each answer whose words the AM never said, with why: {field: reason}. {"*": reason} when nothing clear was heard.
+
+    28 Oct 2026: the voice saved what it thought it heard ('David Denzil', noise read as an answer) and moved on.
+    Before record_answers saves anything, the AM's own words must back it up - otherwise ask again, never guess.
+    5 Nov 2026 (James's call): one answer that didn't check out threw away every answer sent with it - the budget, the
+    date and "it's a collection" were lost together, and the voice said it hadn't caught it. Each answer is judged on
+    its own now, and the ones that check out are saved."""
     import difflib
     for _ in range(20):        # the AM's words are logged by the page a moment after the tool call can arrive
         con = db()
@@ -4014,40 +4065,52 @@ def _answer_not_heard(s, updates):
             break
         time.sleep(0.1)
     else:
-        return None            # their words never arrived (typed brief, old page) - don't block on a guess
+        return {}              # their words never arrived (typed brief, old page) - don't block on a guess
     con = db()
-    rows = con.execute("SELECT text FROM messages WHERE session=? AND dir='in' AND text IS NOT NULL ORDER BY at DESC LIMIT 2",
+    # the last few things they said: an answer given over two or three breaths, or two answers recorded together
+    rows = con.execute("SELECT text FROM messages WHERE session=? AND dir='in' AND text IS NOT NULL ORDER BY at DESC LIMIT 4",
                        (s["id"],)).fetchall()
     con.close()
     heard = _digits(" ".join((r["text"] or "") for r in rows))
     last = (rows[0]["text"] if rows else "") or ""
     words = re.findall(r"[a-z0-9]+", heard)
     if not words:
-        return "Nothing clear was heard from the AM. Don't save anything - say you didn't catch it and ask again."
+        return {"*": "Nothing clear was heard from the AM. Don't save anything - say you didn't catch it and ask again."}
     like = lambda w: any(w == h or (len(w) > 3 and difflib.SequenceMatcher(None, w, h).ratio() >= 0.8) for h in words)
+    said_n = _heard_numbers(heard)
+    said_date = bool(DATE_SAID.search(_digits(" ".join((r["text"] or "") for r in rows[:2]))))   # just now, not earlier
+    this_year = date.today().year
+    bad = {}
     for k, v in updates.items():
         if not isinstance(v, str) or not v.strip():
             continue
         vw = [w for w in re.findall(r"[a-z0-9]+", v.lower()) if len(w) > 2 and w not in ("mm", "the", "and", "for", "with")]
         if k == "client" and re.match(r"\s*sdi\b", v, re.I):
-            return ("Not saved: SDI Displays is us, never the client. If that was the answer to another question (like "
-                    "which pack), it wasn't a clear answer - ask that question again.")
+            bad[k] = ("SDI Displays is us, never the client. If that was the answer to another question (like which pack), "
+                      "it wasn't a clear answer - ask that question again.")
+            continue
         if k in NAME_FIELDS:
             odd = [w for w in vw if not like(w)]
             if odd:
-                return (f"Not saved: '{v}' for {k} - the AM never said '{' '.join(odd)}' (heard: \"{last[:80]}\"). Use the name "
-                        "EXACTLY as heard, nothing added. If unsure, ask them to say or spell it again.")
+                bad[k] = (f"'{v}' - the AM never said '{' '.join(odd)}' (heard: \"{last[:80]}\"). Use the name EXACTLY as "
+                          "heard, nothing added. If unsure, ask them to say or spell it again.")
             continue
-        nums_v = set(re.findall(r"\d+", v))
-        said_n = set(re.findall(r"\d+", heard)) | {str(int(float(x) * m)) for x in re.findall(r"\d+(?:\.\d+)?", heard) for m in (10, 1000)}
-        ns = [int(x) for x in re.findall(r"\d+", heard)][:12]   # "6 a shelf, 5 shelves" -> 30 in total is said too
-        said_n |= {str(a * b) for a in ns for b in ns} | {str(a + b) for a in ns for b in ns}
+        nums_v = set(re.findall(r"\d+(?:\.\d+)?", re.sub(r"(?<=\d),(?=\d{3}\b)", "", v)))
+        nums_v = {x[:-2] if x.endswith(".0") else x for x in nums_v}
+        if _date_field(k) and said_date:
+            # "next Friday" -> "Fri 13 Nov 2026": the day and the year are the voice working the date out, not a guess
+            nums_v -= {str(d) for d in range(1, 32)} | {str(this_year), str(this_year + 1), str(this_year + 2)}
         if nums_v - said_n:   # every number saved must have been said (2 m -> 2000 mm, 120 cm -> 1200 mm are fine)
-            return (f"Not saved: the numbers in '{v}' were not in what the AM said (\"{last[:80]}\"). Ask again - never guess numbers.")
-        if vw and not any(like(w) for w in vw) and len(last.split()) <= 3 and not SHORT_OK.match(last):
-            return (f"Not saved: the AM's last words \"{last[:80]}\" don't answer it - probably noise or half-heard. Say you "
-                    "didn't quite catch that and ask the SAME question again. Do not move on.")
-    return None
+            bad[k] = (f"the numbers in '{v}' were not in what the AM said (\"{last[:80]}\"). Ask again for this one - "
+                      "never guess numbers.")
+            continue
+        alpha = [w for w in vw if not w.isdigit()]
+        if _date_field(k) and said_date:
+            continue
+        if alpha and not any(like(w) for w in alpha) and len(last.split()) <= 3 and not SHORT_OK.match(_digits(last)):
+            bad[k] = (f"the AM's last words \"{last[:80]}\" don't answer it - probably noise or half-heard. Say you didn't "
+                      "quite catch that and ask the SAME question again. Do not move on.")
+    return bad
 
 
 def _am_answered_pack(sid):
