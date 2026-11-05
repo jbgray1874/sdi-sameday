@@ -4837,7 +4837,9 @@ def logo():
 @app.route("/file")
 def file():
     p = os.path.abspath(request.args.get("p", ""))
-    ok = p.startswith(os.path.abspath(OUT)) or p.startswith(os.path.join(BASE, "all_img_thumbs"))
+    import lite_search      # the thumbnails of past work: on K: (5 Nov 2026), or on this server
+    ok = p.startswith(os.path.abspath(OUT)) or any(p.lower().startswith(os.path.abspath(d).lower() + os.sep)
+                                                   for d in lite_search.THUMB_DIRS)
     if not ok or not os.path.exists(p):
         abort(404)
     return send_file(p)

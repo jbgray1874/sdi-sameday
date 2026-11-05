@@ -20,6 +20,12 @@ JOBS_DB = os.path.join(HERE, "projects.db")              # every job on W:, its 
 ESTIMATES_DB = os.path.join(HERE, "knowledge.db")         # the estimates on K:
 PICTURES = os.path.join(BASE, "all_img_index.npz")       # CLIP vectors of W:'s pictures, for look-alike matching
 WALK_SECONDS = float(os.environ.get("LITE_WALK_SECONDS", "8"))     # longest a look through one job's W: folder may take
+# 5 Nov 2026 (James: "use the index from the mounted K: - we can see it from the server anyway"): the 269,000 small
+# pictures of past work (14.7 GB) stay on K:, where Muhammad put them, and are read from there as needed - not copied
+# onto the server's own disk. The first of these that holds a given picture is used.
+THUMB_DIRS = [d for d in (os.environ.get("LITE_THUMBS_DIR", ""),
+                          r"\\sdi-dc01\shareddata$\Shared\IT\AI & Automation\Design\SDI Same Day Intelligence\index-for-server\all_img_thumbs",
+                          os.path.join(BASE, "all_img_thumbs")) if d]
 _lock = threading.Lock()
 _state = {}
 _pic_lock = threading.Lock()
@@ -600,13 +606,30 @@ def word_hits(bw, k=80):
     return out[:k]
 
 
+def thumb(p):
+    """A thumbnail's path as it is here: the index stores where it was made (C:\\SDI_Automation\\all_img_thumbs\\...
+    on Muhammad's laptop); the same file is looked for in THUMB_DIRS. Unchanged when none holds it."""
+    if not p:
+        return p
+    parts = re.split(r"[\\/]all_img_thumbs[\\/]", str(p), maxsplit=1)
+    rest = parts[1] if len(parts) == 2 else (None if os.path.isabs(str(p)) else str(p))
+    if rest is None:
+        return p
+    rest = re.sub(r"[\\/]+", lambda m: os.sep, rest)       # stored with either kind of slash
+    for d in THUMB_DIRS:
+        q = os.path.join(d, rest)
+        if os.path.exists(q):
+            return q
+    return p
+
+
 def first_render(job):
     """One picture of the job to judge it by: its first render (or creative visual) - id, src on W:, local thumbnail."""
     first = first_unit_images(job, 1)
     if not first:
         return None
     r = _load()["con"].execute("SELECT img_id, src, thumb, name FROM project_images WHERE img_id=?", (first[0][0],)).fetchone()
-    return {"id": r[0], "src": r[1], "thumb": r[2], "name": r[3]} if r else None
+    return {"id": r[0], "src": r[1], "thumb": thumb(r[2]), "name": r[3]} if r else None
 
 
 def by_look(ranked, pin, mine, brief_text, look, k=12):
@@ -727,7 +750,7 @@ def search(brief_text, client="", n=6, pin=(), look=None):
         for i, sim in per_job[j]["imgs"]:
             row = s["con"].execute("SELECT thumb, src, name, kind FROM project_images WHERE img_id=?", (i,)).fetchone()
             if row:
-                imgs.append({"id": i, "thumb": row[0], "src": row[1], "name": row[2], "kind": row[3], "sim": round(sim, 3)})
+                imgs.append({"id": i, "thumb": thumb(row[0]), "src": row[1], "name": row[2], "kind": row[3], "sim": round(sim, 3)})
         p.update(score=round(per_job[j]["score"], 3), images=imgs, estimates=est.get(j, [])[:3], look=looks.get(j))
         out.append(p)
     return out

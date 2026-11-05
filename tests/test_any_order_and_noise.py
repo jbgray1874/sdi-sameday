@@ -1111,6 +1111,44 @@ class LookAlikeWithoutThePictureIndexTests(unittest.TestCase):
         self.assertIn("look=lambda text, items: judge_look_alike(s, text, items)", src)
 
 
+class ThumbnailsReadFromKTests(unittest.TestCase):
+    """5 November 2026 (James): "we need to use the index from the mounted K: - we can see it from the server anyway".
+    269,000 thumbnails (14.7 GB) were being copied onto the production server's C:. They stay on K: and are read
+    from there as needed."""
+
+    def setUp(self):
+        import lite_search
+        self.S, self.keep = lite_search, list(lite_search.THUMB_DIRS)
+        self.k = Path(tempfile.mkdtemp(prefix="k-thumbs-"))
+        (self.k / "ab").mkdir()
+        (self.k / "ab" / "123.jpg").write_bytes(b"\xff\xd8 a thumbnail")
+        self.S.THUMB_DIRS[:] = [str(Path(tempfile.mkdtemp(prefix="not-here-"))), str(self.k)]
+
+    def tearDown(self):
+        self.S.THUMB_DIRS[:] = self.keep
+        shutil.rmtree(self.k, ignore_errors=True)
+
+    def test_the_path_stored_on_muhammad_s_laptop_is_found_on_k(self):
+        for stored in (r"C:\SDI_Automation\all_img_thumbs\ab\123.jpg", "C:/SDI_Automation/all_img_thumbs/ab/123.jpg"):
+            with self.subTest(stored=stored):
+                self.assertEqual(Path(self.S.thumb(stored)), self.k / "ab" / "123.jpg")
+        self.assertEqual(self.S.thumb(r"C:\SDI_Automation\all_img_thumbs\zz\none.jpg"),
+                         r"C:\SDI_Automation\all_img_thumbs\zz\none.jpg")       # not there: left as it was
+
+    def test_the_page_may_show_them_and_nothing_else(self):
+        c = L.app.test_client()
+        self.assertEqual(c.get("/file", query_string={"p": str(self.k / "ab" / "123.jpg")}).status_code, 200)
+        outside = Path(tempfile.mkdtemp(prefix="outside-")) / "secret.txt"
+        outside.write_text("no")
+        self.assertEqual(c.get("/file", query_string={"p": str(outside)}).status_code, 404)
+
+    def test_k_is_looked_at_before_the_server_s_own_disk(self):
+        src = (WORK / "brief_lite" / "lite_search.py").read_text(encoding="utf-8")
+        self.assertLess(src.index("index-for-server\\all_img_thumbs"), src.index('os.path.join(BASE, "all_img_thumbs")'))
+        self.assertIn('"thumb": thumb(row[0])', src)
+        self.assertIn('"thumb": thumb(r[2])', src)
+
+
 class RendersSideBySideTests(unittest.TestCase):
     """5 November 2026 (James): "one slow render holds everyone up - let's fix this urgently". One lock covered the whole
     server: every typed message and render, from everyone, waited behind whatever was drawing. A picture could wait
