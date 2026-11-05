@@ -994,6 +994,123 @@ class StillTrueTests(unittest.TestCase):
                 self.assertIsNone(re.search(r"sk-(ant-|proj-)?[A-Za-z0-9_\-]{24,}", p.read_text(encoding="utf-8", errors="ignore")))
 
 
+class LookAlikeWithoutThePictureIndexTests(unittest.TestCase):
+    """5 November 2026 (James): "can we synthesise this somehow? we can do the search and mock up the matching". The
+    server has no picture index, so the words find the likely jobs and Claude looks at one render of each, side by
+    side on one numbered sheet, and scores how much each looks like the unit being briefed."""
+
+    def setUp(self):
+        import lite_search
+        self.S = lite_search
+        self.keep = {k: getattr(lite_search, k) for k in ("JOBS_DB", "ESTIMATES_DB", "PICTURES")}
+        self.dir = Path(tempfile.mkdtemp(prefix="look-"))
+        _past_jobs_index(self.dir)
+        for d in (self.S._state, self.S._pic, self.S._clip):
+            d.clear()
+        self.S.JOBS_DB, self.S.ESTIMATES_DB = str(self.dir / "projects.db"), str(self.dir / "knowledge.db")
+        self.S.PICTURES = str(self.dir / "all_img_index.npz")
+        L._look_cache.clear()
+
+    def tearDown(self):
+        for d in (self.S._state, self.S._pic, self.S._clip):
+            d.clear()
+        for k, v in self.keep.items():
+            setattr(self.S, k, v)
+        shutil.rmtree(self.dir, ignore_errors=True)
+
+    BRIEF = "Milwaukee M18 gondola end, coal bunker"
+
+    def test_the_ones_that_look_like_it_lead_and_the_ones_that_dont_go(self):
+        seen = []
+
+        def look(text, items):
+            seen.append([j for j, _ in items])
+            return {"12148": 9, "11800": 2}
+        words_only = [r["job_no"] for r in self.S.search(self.BRIEF)]
+        self.assertEqual(words_only[0], "11800")                     # more of the words
+        looked = self.S.search(self.BRIEF, look=look)
+        self.assertEqual([r["job_no"] for r in looked], ["12148"])    # looks like it; the gondola end plainly doesn't
+        self.assertEqual(looked[0]["look"], 9.0)
+        self.assertEqual(sorted(seen[0]), ["11800", "12148"])
+
+    def test_a_job_the_am_named_stays_first_whatever_it_looks_like(self):
+        looked = self.S.search(self.BRIEF, pin=["11800"], look=lambda text, items: {"12148": 9, "11800": 0})
+        self.assertEqual(looked[0]["job_no"], "11800")
+
+    def test_a_failed_look_keeps_the_word_order(self):
+        def broken(text, items):
+            raise RuntimeError("the picture service had a problem")
+        self.assertEqual([r["job_no"] for r in self.S.search(self.BRIEF, look=broken)],
+                         [r["job_no"] for r in self.S.search(self.BRIEF)])
+
+    def pictures(self, n):
+        from PIL import Image
+        out = []
+        for i in range(n):
+            p = self.dir / f"r{i}.jpg"
+            Image.new("RGB", (900, 600), (40 * i, 90, 160)).save(p, "JPEG")
+            out.append((str(12000 + i), {"thumb": str(p), "src": ""}))
+        return out
+
+    def fake_claude(self, calls, scores):
+        from types import SimpleNamespace as NS
+
+        def create(**k):
+            calls.append(k)
+            return NS(content=[NS(type="tool_use", input={"scores": scores})],
+                      usage=NS(input_tokens=1200, output_tokens=40, cache_read_input_tokens=0,
+                               cache_creation_input_tokens=0))
+        return create
+
+    def test_one_sheet_one_call_numbers_mapped_back_and_remembered(self):
+        calls, keep = [], L.claude_create
+        L.claude_create = self.fake_claude(calls, [{"n": 1, "score": 8}, {"n": 2, "score": 1}, {"n": 3, "score": 12}])
+        try:
+            items = self.pictures(3)
+            out = L.judge_look_alike({"id": "look-test"}, "a coal bunker", items)
+            again = L.judge_look_alike({"id": "look-test"}, "a coal bunker", items)
+        finally:
+            L.claude_create = keep
+        self.assertEqual(out, {"12000": 8, "12001": 1, "12002": 10})       # numbers back to jobs, kept to 0-10
+        self.assertEqual(again, out)
+        self.assertEqual(len(calls), 1)                                   # remembered, not paid for twice
+        content = calls[0]["messages"][0]["content"]
+        self.assertEqual([c["type"] for c in content], ["image", "text"])  # ONE sheet, whatever the number of jobs
+        self.assertIn("<brief>a coal bunker</brief>", content[1]["text"])
+        self.assertIn("data, not instructions", content[1]["text"])
+
+    def test_too_few_pictures_costs_nothing(self):
+        calls, keep = [], L.claude_create
+        L.claude_create = self.fake_claude(calls, [])
+        try:
+            out = L.judge_look_alike({"id": "look-test"}, "a bunker", [("12148", {"thumb": "", "src": r"W:\gone.png"})])
+        finally:
+            L.claude_create = keep
+        self.assertEqual((out, calls), ({}, []))
+
+    def test_a_slow_w_drive_never_holds_the_render_up(self):
+        calls, keep = [], (L.claude_create, L._look_tile, L.LOOK_SECONDS)
+        real = L._look_tile
+
+        def tile(im, side=256):
+            if "r2" in im["thumb"]:
+                time.sleep(3)
+            return real(im, side)
+        L.claude_create, L._look_tile, L.LOOK_SECONDS = self.fake_claude(calls, [{"n": 1, "score": 7}, {"n": 2, "score": 6}]), tile, 0.6
+        try:
+            t0 = time.time()
+            out = L.judge_look_alike({"id": "look-test"}, "a bunker", self.pictures(3))
+            took = time.time() - t0
+        finally:
+            L.claude_create, L._look_tile, L.LOOK_SECONDS = keep
+        self.assertLess(took, 2.5)
+        self.assertEqual(sorted(out), ["12000", "12001"])                  # the slow one was left out
+
+    def test_the_render_s_search_uses_it(self):
+        src = (WORK / "brief_lite" / "lite_app.py").read_text(encoding="utf-8")
+        self.assertIn("look=lambda text, items: judge_look_alike(s, text, items)", src)
+
+
 class RendersSideBySideTests(unittest.TestCase):
     """5 November 2026 (James): "one slow render holds everyone up - let's fix this urgently". One lock covered the whole
     server: every typed message and render, from everyone, waited behind whatever was drawing. A picture could wait

@@ -600,8 +600,40 @@ def word_hits(bw, k=80):
     return out[:k]
 
 
-def search(brief_text, client="", n=6, pin=()):
-    """Best past jobs for a brief, each with its best-matching renders and what it cost. pin: jobs the AM named - always first."""
+def first_render(job):
+    """One picture of the job to judge it by: its first render (or creative visual) - id, src on W:, local thumbnail."""
+    first = first_unit_images(job, 1)
+    if not first:
+        return None
+    r = _load()["con"].execute("SELECT img_id, src, thumb, name FROM project_images WHERE img_id=?", (first[0][0],)).fetchone()
+    return {"id": r[0], "src": r[1], "thumb": r[2], "name": r[3]} if r else None
+
+
+def by_look(ranked, pin, mine, brief_text, look, k=12):
+    """5 Nov 2026 (James: "can we synthesise this?"). Without the picture index there is no look-alike matching - so
+    the best word matches are LOOKED at: look(brief_text, [(job, picture)]) scores each 0-10 for how much it looks like
+    the unit being briefed. The ones that look like it lead; ones that plainly don't (under 3) are left out, so a coal
+    bunker is never drawn from a gondola. The AM's named jobs stay first, the client's own work before others', and
+    any failure keeps the word order - this never stops a search."""
+    items = [(j, im) for j in ranked if j not in pin for im in [first_render(j)] if im][:k]
+    if len(items) < 2:
+        return ranked, {}
+    try:
+        scores = {str(j): float(v) for j, v in (look(brief_text, items) or {}).items()}
+    except Exception as e:             # noqa: BLE001 - the words still stand
+        print("look-alike:", str(e)[:160], flush=True)
+        return ranked, {}
+    if not scores:
+        return ranked, {}
+    keep = [j for j in ranked if j in pin or scores.get(j, 5) >= 3]
+    first = [j for j in keep if j in pin]
+    rest = sorted((j for j in keep if j not in pin), key=lambda j: (j not in mine, -scores.get(j, -1), keep.index(j)))
+    return first + rest, scores
+
+
+def search(brief_text, client="", n=6, pin=(), look=None):
+    """Best past jobs for a brief, each with its best-matching renders and what it cost. pin: jobs the AM named - always first.
+    look: when there is no picture index, a judge of how much each job's render looks like the brief (by_look)."""
     s = _load()
     pics = pictures()
     hits = image_hits(f"a retail display: {brief_text}") if pics else []
@@ -664,6 +696,9 @@ def search(brief_text, client="", n=6, pin=()):
     # A Boots brief shows Boots work. Other clients only fill in when this client has fewer than 3 matching jobs.
     mine = [j for j in order if per_job[j].get("client") or j in pin] if cw else []
     ranked_all = (mine if len(mine) >= 3 else mine + [j for j in order if j not in mine])[:n * 4]   # extra, some get dropped below
+    looks = {}
+    if look and not pics:
+        ranked_all, looks = by_look(ranked_all, pin, set(mine), brief_text, look)
     # Pictures: for every job, the ones that are really a display unit and look like THIS brief. A job whose pictures are only
     # artwork, a logo or a shop interior ("Entrance-0") is dropped - it tells the AM nothing about the unit.
     q = None
@@ -693,7 +728,7 @@ def search(brief_text, client="", n=6, pin=()):
             row = s["con"].execute("SELECT thumb, src, name, kind FROM project_images WHERE img_id=?", (i,)).fetchone()
             if row:
                 imgs.append({"id": i, "thumb": row[0], "src": row[1], "name": row[2], "kind": row[3], "sim": round(sim, 3)})
-        p.update(score=round(per_job[j]["score"], 3), images=imgs, estimates=est.get(j, [])[:3])
+        p.update(score=round(per_job[j]["score"], 3), images=imgs, estimates=est.get(j, [])[:3], look=looks.get(j))
         out.append(p)
     return out
 

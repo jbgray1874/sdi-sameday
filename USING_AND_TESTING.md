@@ -29,7 +29,7 @@ These are the only differences:
 
 ### Not working on the server yet (the same on every way in)
 
-- **The picture index.** `all_img_index.npz` was not in the K: folder, so look-alike picture matching is off on the server. Past jobs are still found by number, name, drawing titles, client and kind of unit. Copy it from Muhammad's laptop (`C:\SDI_Automation\`) to the server's `C:\SDI_Automation\`, with `brief_lite\projects.db` from the same day, then restart SDISameDay.
+- **The picture index.** `all_img_index.npz` was not in the K: folder, so the picture-by-picture matching Muhammad's laptop does is off on the server. Since 5 November the server does it another way: the brief's words find the likely past jobs, and Claude looks at one render of each, side by side on one numbered sheet, and scores how much each looks like the unit being briefed. The ones that look like it lead, and ones that plainly don't are left out of the render's references. It costs a fraction of a penny per render and adds a few seconds. Copy it from Muhammad's laptop (`C:\SDI_Automation\`) to the server's `C:\SDI_Automation\`, with `brief_lite\projects.db` from the same day, then restart SDISameDay.
 
 W:, S: and K: themselves are fine: SameDay maps them for itself at start, and `Update-SameDay.ps1` says whether it can read each one. It does not search the drives file by file during a call. It searches index files made from them: `projects.db` (the jobs on W:), `knowledge.db` (the estimates on K:) and the picture index. `Update-SameDay.ps1` and `Check-SameDay-Call.ps1` both say how many past jobs it can find, whether the estimates are there, and whether picture matching is on.
 
