@@ -3710,6 +3710,7 @@ def api_rt_session():
     if not s["brief"].get("briefing_date"):
         s["brief"]["briefing_date"] = f"{date.today():%a %d %b %Y}"
         save_session(s)
+    s["caller"] = signed_in_user() or ""     # who to greet - this call only, never saved (realtime_parts.first_name)
     model = rt.model_for(_project_name(project), js.get("demo"))
 
     def ask(live):

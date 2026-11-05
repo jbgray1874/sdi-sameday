@@ -1282,5 +1282,75 @@ class RendersSideBySideTests(unittest.TestCase):
         self.assertEqual(errors, [])
 
 
+class TheNameIsWhoIsSignedInTests(unittest.TestCase):
+    """5 Nov 2026 (James, testing): "why does it get the name wrong? it thinks I'm Andy". The page remembered the last
+    person picked in that browser - opening one of Andy's chats to look at it picks Andy - and the voice greeted whoever
+    owned the space. Signed in through SDI Apps or the phone app, it is the person signed in."""
+
+    def start_call(self, headers=None):
+        import requests
+
+        class R:
+            status_code, ok, text = 200, True, ""
+
+            def json(self):
+                return {"value": "ek_test"}
+        said = []
+
+        def fake_post(url, **kw):
+            said.append(kw["json"]["session"]["instructions"])
+            return R()
+        real, key = requests.post, os.environ.get("OPENAI_API_KEY")
+        requests.post, os.environ["OPENAI_API_KEY"] = fake_post, "test"
+        try:
+            j = L.app.test_client().post("/api/rt/session", json={"project": "p_andy", "new": True},
+                                         headers=headers or {}).get_json()
+        finally:
+            requests.post = real
+            if key is None:
+                os.environ.pop("OPENAI_API_KEY", None)
+            else:
+                os.environ["OPENAI_API_KEY"] = key
+        return said[0], j["session"]
+
+    def test_the_voice_greets_the_person_signed_in_not_the_owner_of_the_space(self):
+        said, _ = self.start_call({"X-SDI-User": "james.gray@wearesdi.com"})     # what SDI Intelligence passes on
+        self.assertIn("Briefing: James.", said)
+        self.assertIn("by first name, James", said)
+        self.assertNotIn("Briefing: Andy", said)
+
+    def test_not_signed_in_it_is_still_the_name_picked(self):
+        said, _ = self.start_call()
+        self.assertIn("Briefing: Andy.", said)
+
+    def test_who_was_on_the_call_is_never_saved_over_whose_brief_it_is(self):
+        _, sid = self.start_call({"X-SDI-User": "james.gray@wearesdi.com"})
+        con = L.db()
+        r = con.execute("SELECT name, project FROM sessions WHERE id=?", (sid,)).fetchone()
+        con.close()
+        self.assertEqual((r["name"], r["project"]), ("Andy Baxter", "p_andy"))
+        self.assertNotIn("caller", L._session_by_id(sid))
+
+    @unittest.skipUnless(NODE, "node is not installed")
+    def test_the_page_opens_in_your_own_space(self):
+        def where(me, sid="null"):
+            src = ("let sid=%s,project='p_andy',projects=[],adding=false,myProject=null;const more={};let openP=new Set();"
+                   "const store={liteProject:'p_andy'};const localStorage={setItem:(k,v)=>{store[k]=v},getItem:k=>store[k]};"
+                   "const window={},document={querySelectorAll:()=>[]},$=s=>s==='#hist'?{}:null,esc=s=>s;"
+                   "const PROJ=[{id:'p_andy',name:'Andy Baxter',chats:[]},{id:'p_jg',name:'James Gray',chats:[]}];"
+                   "const fetch=async u=>({json:async()=>u==='/api/me'?%s:PROJ});\n" % (sid, json.dumps(me))
+                   + "\n".join(page_fn(n) for n in ("pcolor", "initials", "curProj", "setProject", "crumb", "mine"))
+                   + "\nasync " + page_fn("loadProjects")
+                   + "\nloadProjects().then(()=>console.log(JSON.stringify([project,mine(),store.liteProject])))")
+            r = subprocess.run([NODE, "-e", src], capture_output=True, text=True, timeout=30)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            return json.loads(r.stdout)
+        signed_in = {"user": "James Gray", "project": "p_jg"}
+        self.assertEqual(where(signed_in), ["p_jg", "p_jg", "p_jg"])            # Andy was remembered; James is signed in
+        self.assertEqual(where(signed_in, sid="'abc123'"), ["p_andy", "p_jg", "p_andy"])   # a chat open: left as it is,
+        self.assertEqual(where({"user": None}), ["p_andy", "p_andy", "p_andy"])  # but a new chat is James's own
+        self.assertNotIn("newChat(project)", PAGE)                              # every "new chat" goes to mine()
+
+
 if __name__ == "__main__":
     unittest.main()

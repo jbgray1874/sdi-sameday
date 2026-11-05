@@ -1113,7 +1113,7 @@ window.send=send;
 $("#send").onclick=()=>send();
 t.addEventListener("keydown",e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();send()}});
 t.addEventListener("input",()=>{t.style.height="auto";t.style.height=Math.min(180,t.scrollHeight)+"px"});
-function newBrief(){newChat(project)}
+function newBrief(){newChat(mine())}
 function newChat(pid){leavePage();if(rt)rtStop();if(pid)setProject(pid);fresh=true;step=0;sid=null;loadFiles();log.innerHTML="";gallery=[];refBox=optBox=null;
  showBrief({});setStep(0);hero();loadProjects();$("#rail").classList.remove("open");t.focus()}
 $("#newb").onclick=newBrief;$("#newb2").onclick=newBrief;
@@ -1510,13 +1510,15 @@ function hero(){const d=document.createElement("div");d.className="hero";
   <div class="people">${projects.map(p=>`<button class="pp" data-p="${p.id}"><span class="pav" style="background:${pcolor(p.name)}">${initials(p.name)}</span><b>${esc(p.name)}</b><small>${p.chats.length} brief${p.chats.length===1?"":"s"}</small></button>`).join("")}
   <button class="pp add" id="ppadd"><span class="pav">＋</span><b>Someone else</b><small>add your name</small></button></div>`;
   log.appendChild(d);d.querySelectorAll(".pp[data-p]").forEach(b=>b.onclick=()=>newChat(b.dataset.p));d.querySelector("#ppadd").onclick=addProject;return}
- const me=(curProj()||{name:""}).name.split(" ")[0];
+ const me=(projects.find(p=>p.id===myProject)||curProj()||{name:""}).name.split(" ")[0];
  d.innerHTML=`<h1>${me?`Hi ${esc(me)} - what`:"What"} does the client want?</h1><p>Describe the brief like you would to a colleague. I'll find what SDI has built before, show what it cost, and make concepts at the exact size - checked before you see them.</p>
  <div class="ex">${EX.map(([i,h,p],n)=>`<button class="exb" data-n="${n}"><b>${i} ${h}</b><span>${esc(p.slice(0,118))}…</span></button>`).join("")}</div>
  <div class="how"><span>📚 SDI history first</span><span>📏 Exact sizes, physics checked</span><span>🅰🅱 Two directions</span><span>📐 GA of the one you pick</span><span>📄 Client sheet + full pack</span></div>`;
  log.appendChild(d);d.querySelectorAll(".exb").forEach(b=>b.onclick=()=>{t.value=EX[+b.dataset.n][2];t.dispatchEvent(new Event("input"));t.focus()})}
 // ---------- projects, like ChatGPT: a space per person, chats (briefs) inside, + for a new one
-let project=null,projects=[],adding=false;const more={};let openP=new Set();
+let project=null,projects=[],adding=false,myProject=null;const more={};let openP=new Set();
+// A new chat is the signed-in person's own; the + beside someone else's name is still there for briefing in their space.
+function mine(){return myProject||project}
 try{project=localStorage.getItem("liteProject")||null;openP=new Set(JSON.parse(localStorage.getItem("liteOpen")||"[]"))}catch(e){}
 function pcolor(n){const c=["#C8102E","#2457C5","#1E8E5A","#B26A00","#7A3FB8","#0F7C8C"];let h=0;for(const ch of n)h=(h*31+ch.charCodeAt(0))>>>0;return c[h%c.length]}
 function initials(n){return n.trim().split(/\s+/).map(w=>w[0]||"").join("").slice(0,2).toUpperCase()}
@@ -1527,9 +1529,12 @@ function crumb(){const c=$("#crumb");if(!c)return;const p=curProj();if(!p){c.inn
 const loadHist=()=>loadProjects();
 async function loadProjects(){projects=await fetch("/api/projects").then(r=>r.json()).catch(()=>projects);
  if(project&&!curProj())setProject(null);
- // opened through SDI Apps (Microsoft sign-in): straight into their own project, no "who's briefing?"
- if(!project&&!window._meAsked){window._meAsked=1;const me=await fetch("/api/me").then(r=>r.json()).catch(()=>({}));
-  if(me&&me.project){projects=await fetch("/api/projects").then(r=>r.json()).catch(()=>projects);setProject(me.project)}}
+ // Opened through SDI Apps or the phone app (Microsoft sign-in): straight into the signed-in person's own project, no
+ // "who's briefing?" - even when this browser last had someone else picked (5 Nov 2026, James: "it thinks I'm Andy":
+ // opening one of Andy's chats to look at it had left Andy picked, and the next new chat went into Andy's space).
+ if(!window._meAsked){window._meAsked=1;const me=await fetch("/api/me").then(r=>r.json()).catch(()=>({}));
+  if(me&&me.project){myProject=me.project;if(!projects.some(p=>p.id===me.project))projects=await fetch("/api/projects").then(r=>r.json()).catch(()=>projects);
+   if(!sid&&project!==me.project)setProject(me.project)}}
  $("#hist").innerHTML=(adding?`<div class="pnew"><input id="pname" placeholder="Name, e.g. Kayleigh" maxlength="60"></div>`:"")+projects.map(p=>{
   const chats=p.chats.filter(c=>c.title!=="New brief"||c.n_visuals||c.id===sid),shown=more[p.id]?chats:chats.slice(0,6),isOpen=p.id===project||openP.has(p.id);
   return `<div class="proj ${isOpen?"open":""} ${p.id===project?"cur":""}" data-p="${p.id}">
@@ -1569,7 +1574,7 @@ function deleteChat(id,title){const m=document.createElement("div");m.className=
   <div class="acts"><button class="btn" data-a="no">Cancel</button><button class="btn danger" data-a="yes">Delete</button></div></div>`;
  document.body.appendChild(m);m.onclick=e=>{if(e.target===m)m.remove()};m.querySelector('[data-a=no]').onclick=()=>m.remove();
  m.querySelector('[data-a=yes]').onclick=async()=>{m.remove();const r=await fetch(`/api/chat/${id}/delete`,{method:"POST"}).then(r=>r.json()).catch(()=>({}));
-  if(!r.deleted){toast("Couldn't delete that chat");return}toast("Chat deleted");if(id===sid)newChat(project);else loadProjects()};m.querySelector('[data-a=yes]').focus()}
+  if(!r.deleted){toast("Couldn't delete that chat");return}toast("Chat deleted");if(id===sid)newChat(mine());else loadProjects()};m.querySelector('[data-a=yes]').focus()}
 function addProject(){adding=true;$("#rail").classList.add("open");loadProjects()}
 $("#addp").onclick=addProject;
 function leavePage(){const m=$(".main");if(m&&m.classList.contains("spaceon")){m.classList.remove("spaceon");spOpen=null;pvKind=null;clearTimeout(spTimer);navOn("")}}
@@ -1604,7 +1609,7 @@ $("#install").onclick=async()=>{if(!installEv)return;installEv.prompt();await in
 var spacesList=[],spOpen=null,spAdding=false,pendingSpaces=null,spTimer=null,spTab="chats",pvView="list",pvKind=null,pvFilter="all",openSp=new Set();
 const ago=t=>{if(!t)return"";const s=(Date.now()-new Date(t).getTime())/1000;return s<60?"just now":s<3600?Math.round(s/60)+"m":s<86400?Math.round(s/3600)+"h":Math.round(s/86400)+"d"};
 function navOn(v){document.querySelectorAll(".sn").forEach(a=>a.classList.toggle("on",a.dataset.v===v))}
-document.querySelectorAll(".sn[data-v]").forEach(a=>a.onclick=e=>{e.preventDefault();const v=a.dataset.v;if(v==="home"){closePage();newChat(project);return}showLibrary(v)});
+document.querySelectorAll(".sn[data-v]").forEach(a=>a.onclick=e=>{e.preventDefault();const v=a.dataset.v;if(v==="home"){closePage();newChat(mine());return}showLibrary(v)});
 function closePage(){spOpen=null;pvKind=null;clearTimeout(spTimer);$(".main").classList.remove("spaceon");navOn("");loadSpaces()}
 const closeSpace=closePage;
 function openPage(){$(".main").classList.add("spaceon");$("#rail").classList.remove("open");clearTimeout(spTimer)}
@@ -1646,7 +1651,7 @@ async function showSpace(id,keep,src){spOpen=id;pvKind=null;navOn("");openPage()
   $("#sptitle").onchange=e=>fetch("/api/spaces/"+id,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name:e.target.value})}).then(loadSpaces);
   const q=$("#spq"),go=$("#spgo2");q.oninput=()=>{q.style.height="auto";q.style.height=Math.min(180,q.scrollHeight)+"px";go.disabled=!q.value.trim()};
   const start=()=>{const txt=q.value.trim();if(!txt)return;if(!project){toast("Pick your name first");closePage();return}
-   const go2=()=>{closePage();newChat(project);pendingSpaces=[id];log.classList.add("chat-in");setTimeout(()=>log.classList.remove("chat-in"),400);send(txt)};
+   const go2=()=>{closePage();newChat(mine());pendingSpaces=[id];log.classList.add("chat-in");setTimeout(()=>log.classList.remove("chat-in"),400);send(txt)};
    const c=v.querySelector(".sp-comp");if(calm()||!c){go2();return}
    const r=c.getBoundingClientRect(),dy=Math.max(0,innerHeight-r.bottom-28);
    v.querySelectorAll(".sp-head,.sp-tabs,#spbody").forEach(el=>el.animate([{opacity:1},{opacity:0}],{duration:200,fill:"forwards"}));
@@ -1694,7 +1699,7 @@ async function showLibrary(kind){pvKind=kind;spOpen=null;pvFilter="all";navOn(ki
  {const w=v.querySelector(".pv-wrap");w.classList.add("pv-enter");setTimeout(()=>w.classList.remove("pv-enter"),900);v.scrollTop=0}
  $("#pvnew").onclick=()=>{const m=document.createElement("div");m.className="cmenu";const r=$("#pvnew").getBoundingClientRect();
   m.innerHTML=`<button data-a="chat">💬&nbsp; New chat</button><button data-a="space">🖼&nbsp; New Space</button>`;m.style.top=(r.bottom+4)+"px";m.style.left=Math.max(8,r.right-180)+"px";document.body.appendChild(m);
-  m.querySelector('[data-a=chat]').onclick=()=>{m.remove();closePage();newChat(project)};m.querySelector('[data-a=space]').onclick=()=>{m.remove();closePage();spAdding=true;loadSpaces()}};
+  m.querySelector('[data-a=chat]').onclick=()=>{m.remove();closePage();newChat(mine())};m.querySelector('[data-a=space]').onclick=()=>{m.remove();closePage();spAdding=true;loadSpaces()}};
  const items=await fetch("/api/library?kind="+kind).then(r=>r.json()).catch(()=>[]);
  const draw=()=>{const q=($("#pvq").value||"").toLowerCase(),sn=Object.fromEntries(spacesList.map(p=>[p.id,p.name]));
   const its=items.filter(i=>(pvFilter==="all"||i.label===pvFilter)&&(!q||(i.title+" "+i.label+" "+i.caption).toLowerCase().includes(q)));

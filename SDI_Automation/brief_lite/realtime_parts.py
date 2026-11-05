@@ -152,9 +152,11 @@ TOOLS = [
 
 
 def first_name(s):
-    """Who's on the call - the project they picked (4 Nov 2026: 'greet Andy by name')."""
+    """Who's on the call (4 Nov 2026: 'greet Andy by name'): the person signed in through SDI Apps or the phone app,
+    else the project they picked. 5 Nov 2026 (James: "it thinks I'm Andy"): the chat was in Andy's space, so the
+    project's name was the wrong person - the one signed in is who is talking."""
     try:
-        who = G["who_of"](s) if "who_of" in G else (s.get("name") or "")
+        who = s.get("caller") or (G["who_of"](s) if "who_of" in G else (s.get("name") or ""))
     except Exception:
         who = s.get("name") or ""
     w = (who or "").strip().split()
