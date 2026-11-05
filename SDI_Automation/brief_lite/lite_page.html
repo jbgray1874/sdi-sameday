@@ -1243,7 +1243,7 @@ async function rtHeard(tx,itemId){
   rtSay({type:"conversation.item.create",item:{type:"message",role:"user",content:[{type:"input_text",text:"[Showroom: the AM is finishing. Say one short, warm goodbye line (everything is saved in the chat) - nothing else, no question.]"}]}});
   rtSay({type:"response.create"});return}
  // answer fast: don't wait for the server longer than ~0.35s; if it starts a render later, it's still shown and announced
- let j={},late=false;const lp=sid?fetch("/api/rt/log",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({session:sid,role:"user",text:tx})}).then(r=>r.json()).catch(()=>({})):Promise.resolve({});
+ let j={},late=false;const lp=sid?fetch("/api/rt/log",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({session:sid,role:"user",text:tx})}).then(r=>r.json()).catch(()=>({})):Promise.resolve({});rtContext(3500);
  j=await Promise.race([lp,new Promise(r=>setTimeout(()=>{late=true;r({})},350))]);
  if(j.ignored)return;
  if(j.turn){const what=j.kind==="show_ref"?"putting that past job's drawing / pictures on screen now - when it's there, ask if that's the one to follow":j.kind==="show_past"?"putting SDI's past work for this client on screen now":"making the concept render now (anything it has to assume is marked)";
@@ -1262,7 +1262,16 @@ async function rtHeard(tx,itemId){
    rtSay({type:"conversation.item.create",item:{type:"message",role:"user",content:[{type:"input_text",text:"[Showroom: that is taking far longer than usual and NOTHING is on screen yet. Tell the AM honestly in one line that it's still going and will appear in the chat if it finishes, then carry on with what now_do says. Never say it is ready.]"}]}});rtSay({type:"response.create"});return}
   const d=await fetch("/api/rt/done/"+j.turn).then(r=>r.json()).catch(()=>null);
   if(d&&d.done){rtSay({type:"conversation.item.create",item:{type:"message",role:"user",content:[{type:"input_text",text:(d.drawn===false?"[Showroom: the job finished but NOTHING new was drawn. Result: "+d.output+" ] Do NOT say it is ready or on screen.]":"[Showroom: that's on screen now. Result: "+d.output+" ] Tell the AM in one short sentence, then do exactly what now_do says.]")}]}});rtSay({type:"response.create"})}}}
-function rtLog(role,text){fetch("/api/rt/log",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({session:sid,role,text})}).catch(()=>{});
+// 5 Nov 2026 (James: "it needs to be saved as we go and the chat needs to have it readily available"): each line is
+// saved on the server as it is said; after every line and answer the voice is handed that saved record - the brief so
+// far and the chat so far - so nothing said drops out of what it knows in a long call. One update for a burst of lines.
+function rtContext(wait){if(!rt||!sid)return;const at=Date.now()+(wait||0);
+ if(rt.ctxT){if(rt.ctxAt<=at){rt.ctxMore=Math.max(rt.ctxMore||0,at);return}clearTimeout(rt.ctxT)}   // the soonest one goes; a later one after it
+ rt.ctxAt=at;rt.ctxT=setTimeout(async()=>{const r0=rt;if(!r0||!sid)return;r0.ctxT=null;
+  const j=await fetch("/api/rt/context/"+sid+"?v="+encodeURIComponent(r0.ctxV||"")).then(r=>r.json()).catch(()=>null);
+  if(rt!==r0)return;if(j&&!j.same&&j.instructions){r0.ctxV=j.v;rtSay({type:"session.update",session:{type:"realtime",instructions:j.instructions}})}
+  if(r0.ctxMore){const m=r0.ctxMore;r0.ctxMore=0;rtContext(Math.max(0,m-Date.now()))}},wait||0)}
+function rtLog(role,text){fetch("/api/rt/log",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({session:sid,role,text})}).catch(()=>{});rtContext(3500);
  if(role==="user")setTimeout(async()=>{const r=await fetch("/api/session/"+sid).then(r=>r.json()).catch(()=>null);if(r&&r.session)showBrief(r.session.brief)},4000)}
 function rtSay(o){if(rt&&rt.paused&&o.type==="response.create")return;   // paused: it notes things, but says nothing until Continue
  // 4 Nov 2026 (James: "doesn't talk over"): six things start the voice speaking on their own - a render finishing, a
@@ -1348,7 +1357,7 @@ async function rtTool(call_id,name,args){
  let j;try{j=await fetch("/api/rt/tool",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({session:sid,name,arguments:args})}).then(r=>r.json())}catch(e){j={output:JSON.stringify({error:String(e)})}}
  if(j.transcription&&j.transcription.prompt&&rt){rt.hints=[...(rt.hints||[]),((j.transcription.prompt||"")+" "+(j.transcription.keywords||[]).join(", ")).trim()].slice(-3);rt.tr=j.transcription;   // the brief named more: the transcriber listens for it too
   rtSay({type:"session.update",session:{type:"realtime",audio:{input:{transcription:j.transcription}}}})}
- rtSay({type:"conversation.item.create",item:{type:"function_call_output",call_id,output:j.output||"{}"}});
+ rtSay({type:"conversation.item.create",item:{type:"function_call_output",call_id,output:j.output||"{}"}});rtContext(600);
  // 27 Oct 2026: the voice asked "which pack?" and called a tool in the same breath, then asked it AGAIN when the tool
  // answered. If that reply already said something, the tool's answer is noted silently - no second reply.
  if(rt.inResp)rt.pendingCreate=true;else if(!rt.spoke)rtSay({type:"response.create"});

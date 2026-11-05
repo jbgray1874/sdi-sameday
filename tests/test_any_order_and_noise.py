@@ -1446,6 +1446,68 @@ class NothingSaidIsLostTests(unittest.TestCase):
         self.assertIn("NOT saved customer_name", line)
 
 
+class TheVoiceHasTheSavedChatTests(unittest.TestCase):
+    """5 Nov 2026 (James): "where are we storing the chat as it goes along? it needs to be saved as we go and the chat
+    needs to have it readily available". Every line is saved in lite.db as it's said; the voice now gets that saved
+    record - the brief so far and the chat so far - after every answer, not only when the call starts."""
+
+    def setUp(self):
+        self.c = L.app.test_client()
+        _, self.s = say(new_chat(), "Tesco want a gondola end", {"client": "Tesco", "unit_type": "gondola end"})
+        self.sid = self.s["id"]
+
+    def context(self, v=""):
+        r = self.c.get(f"/api/rt/context/{self.sid}?v={v}")
+        self.assertEqual(r.status_code, 200)
+        return r.get_json()
+
+    def test_what_was_said_and_saved_is_handed_to_the_voice(self):
+        L.log_msg(self.sid, "out", "What's the budget per unit?")
+        L.log_msg(self.sid, "in", "about forty pounds a unit, and the client is collecting them")
+        s = L._session_by_id(self.sid)
+        s["brief"]["target_unit_cost"] = "£40 per unit"
+        L.save_session(s)
+        j = self.context()
+        text = j["instructions"]
+        self.assertIn('"target_unit_cost": "\\u00a340 per unit"', text)                 # the brief so far
+        self.assertIn("AM: about forty pounds a unit, and the client is collecting them", text)   # the chat so far
+        self.assertIn("as saved on the server line by line", text)
+        self.assertIn("# Now", text)                                                  # carries on - no greeting
+        self.assertNotIn("# Start", text)
+        self.assertEqual(self.context(j["v"]), {"same": True, "v": j["v"]})          # nothing new, nothing sent
+        L.log_msg(self.sid, "in", "and it needs to be in store by the 20th")
+        self.assertIn("by the 20th", self.context(j["v"])["instructions"])
+
+    def test_a_long_call_keeps_the_newest_of_it(self):
+        for i in range(120):
+            L.log_msg(self.sid, "in" if i % 2 else "out", f"line {i} " + "words " * 12)
+        said = rt.saved_conversation(self.sid)
+        self.assertLessEqual(len(said), rt.SAVED_CHARS)
+        self.assertIn("line 119 ", said)
+        self.assertNotIn("line 3 ", said)
+
+    def test_the_start_of_a_call_still_greets(self):
+        s = L._session_by_id(self.sid)
+        self.assertIn("# Start", rt.instructions(s))
+        self.assertNotIn("# Now", rt.instructions(s))
+
+    @unittest.skipUnless(NODE, "node is not installed")
+    def test_the_page_sends_it_on_time_however_often_lines_come(self):
+        src = ("let rt={},sid='s1';const sent=[];let calls=0;"
+               "const fetch=async u=>{calls++;return {json:async()=>(calls===3?{same:true}:{v:'v'+calls,instructions:'I'+calls})}};"
+               "function rtSay(m){sent.push(m.session.instructions)}\n" + page_fn("rtContext") + "\n"
+               "rtContext(80);rtContext(20);rtContext(150);"            # the soonest goes, then one more after it
+               "setTimeout(()=>rtContext(0),300);"                       # unchanged on the server: nothing sent
+               "setTimeout(()=>console.log(JSON.stringify({calls,sent})),600)")
+        r = subprocess.run([NODE, "-e", src], capture_output=True, text=True, timeout=30)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(json.loads(r.stdout), {"calls": 3, "sent": ["I1", "I2"]})
+        for where in ('role:"user",text:tx})}).then(r=>r.json()).catch(()=>({})):Promise.resolve({});rtContext(3500);',
+                      'body:JSON.stringify({session:sid,role,text})}).catch(()=>{});rtContext(3500);',
+                      'output:j.output||"{}"}});rtContext(600);'):
+            self.assertIn(where, PAGE)        # after the AM's line, the voice's line, and every tool's answer
+
+
 @unittest.skipUnless(NODE, "node is not installed")
 class TheChatSurvivesAReloadTests(unittest.TestCase):
     """5 Nov 2026 (James's call): "when it asked me to scroll up I lost the chat altogether" - on the phone a pull past

@@ -3888,6 +3888,23 @@ def api_rt_tool():
     return jsonify(out_)
 
 
+@app.route("/api/rt/context/<sid>")
+def api_rt_context(sid):
+    """The voice's instructions rebuilt from what is saved now - the brief so far and the chat so far - for the page to
+    hand to the live call after every answer (5 Nov 2026, James: "it needs to be saved as we go and the chat needs to
+    have it readily available"). `v` is what the page already has: unchanged, nothing is sent back."""
+    s = _session_by_id(sid)
+    if not s:
+        return jsonify({"error": "no such brief"}), 404
+    s["caller"] = signed_in_user() or ""
+    text = rt.instructions(s, mid_call=True)
+    import hashlib
+    v = hashlib.sha1(re.sub(r"it's \d\d:\d\d, ", "", text).encode("utf-8")).hexdigest()[:16]   # not every minute
+    if request.args.get("v") == v:
+        return jsonify({"same": True, "v": v})
+    return jsonify({"v": v, "instructions": text})
+
+
 @app.route("/api/rt/done/<jid>")
 def api_rt_done(jid):
     """A slow tool finished: what the voice model should be told now (e.g. 'options A and B are on screen')."""

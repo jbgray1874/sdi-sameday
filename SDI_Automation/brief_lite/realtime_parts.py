@@ -268,7 +268,27 @@ the SDI internal brief PDF - in a call that feels like talking to a sharp collea
 """
 
 
-def instructions(s):
+SAVED_CHARS = 5000     # the newest of the saved conversation the voice is given (about 1,200 tokens)
+
+
+def saved_conversation(sid, max_chars=SAVED_CHARS):
+    """The chat as SameDay saved it, line by line as it was said (lite.db, messages) - the newest lines that fit."""
+    lines = history(sid, 80).split("\n")
+    out, used = [], 0
+    for line in reversed([x for x in lines if x.strip()]):
+        if used + len(line) > max_chars:
+            break
+        out.append(line)
+        used += len(line) + 1
+    return "\n".join(reversed(out))
+
+
+def instructions(s, mid_call=False):
+    """What the voice works from. At the start of a call, and again after every answer (mid_call): 5 Nov 2026 (James:
+    "it needs to be saved as we go and the chat needs to have it readily available"). Every line is saved on the server
+    as it's said, but the voice only had what was known when the call started - and in a long call the start of the call
+    drops out of its own memory. Handed the saved brief and the saved conversation after every answer, nothing said
+    slips out of what it knows."""
     b = s["brief"]
     st0 = convo.stage(s)
     p = convo.render_plan(b) if st0 == "render_q" else convo.plan(b) if st0 == "internal_q" else []
@@ -276,7 +296,7 @@ def instructions(s):
     sb = b.get("_same_before") or ""
     now = datetime.now()
     part = "morning" if now.hour < 12 else "afternoon" if now.hour < 17 else "evening"
-    convo_text = history(s["id"], 24)
+    convo_text = saved_conversation(s["id"])
     name = first_name(s)
     st = stage_now(s)
     return (
@@ -291,15 +311,20 @@ def instructions(s):
         + f"NEXT QUESTIONS: {[q for _, q, _ in p[:6]]}\n"
         + (f"SDI MADE THIS BEFORE: {sb}\n" if sb else "")
         + (f"THEIR FILES: {convo.files_context(s, 1500)}\n" if convo.all_files(s) else "")
-        + (f"CONVERSATION SO FAR in this chat (typed and earlier calls) - continue it, never start again:\n{convo_text}\n"
-           if convo_text else "")
-        + "\n# Start\n"
+        + ((f"THIS CHAT SO FAR, as saved on the server line by line as it was said (this call included) - the record of "
+            f"everything said, even what has dropped out of your own memory of the call. Never ask again for anything in "
+            f"it or in BRIEF SO FAR:\n{convo_text}\n") if mid_call and convo_text else
+           (f"CONVERSATION SO FAR in this chat (typed and earlier calls) - continue it, never start again:\n{convo_text}\n"
+            if convo_text else ""))
+        + ("\n# Now\nThe call is under way: carry straight on from the last thing said - no greeting, no recap. "
+           "BRIEF SO FAR is what's saved; anything the AM said that isn't in it yet, record with record_answers."
+           if mid_call else "\n# Start\n"
         + (f"A short, warm greeting{(' by first name, ' + name) if name else ''}, right for the time of day, then ask what "
            f"the client is after - like a colleague who's glad to hear from them ('Hi {name or 'there'}, good to hear from "
            "you - what's the client after?')." if not known.get("client") and not convo_text else
            "This is the same brief you were already working on: don't greet them as new, and don't ask again for "
            "anything in BRIEF SO FAR or the conversation. Say in one short line where you got to, then ask the next "
-           "question."))
+           "question.")))
 
 
 # 4 Nov 2026: gpt-4o-transcribe has a successor for live audio, gpt-live-transcribe (OpenAI, 29 July 2026): fewer errors on
