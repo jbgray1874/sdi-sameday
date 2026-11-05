@@ -1259,7 +1259,7 @@ async function rtHeard(tx,itemId){
   const drawing=j.kind!=="show_past"&&j.kind!=="show_ref";let fin=false;if(drawing)setTimeout(()=>{if(!fin)rtRendering(true)},4000);
   try{await pollQuiet(j.turn,w,drawing?300000:120000)}finally{fin=true;if(drawing)rtRendering(false)}if(w.dataset.stopped){rtStopped();return}
   if(w.dataset.late){lsWork(false);toast("This is taking much longer than usual - it will appear in the chat if it finishes");
-   rtSay({type:"conversation.item.create",item:{type:"message",role:"user",content:[{type:"input_text",text:"[Showroom: that is taking far longer than usual and NOTHING is on screen yet. Tell the AM honestly in one line that it's still going and will appear in the chat if it finishes, then carry on with what now_do says. Never say it is ready.]"}]}});rtSay({type:"response.create"});return}
+   rtSay({type:"conversation.item.create",item:{type:"message",role:"user",content:[{type:"input_text",text:"[Showroom: that is taking far longer than usual and NOTHING is on screen yet. Tell the AM honestly in one line that it's still going and will appear in the chat if it finishes, then carry on with what now_do says. Never say it is ready.]"}]}});rtSay({type:"response.create"});lateFinish(j.turn,+w.dataset.seen||0);return}
   const d=await fetch("/api/rt/done/"+j.turn).then(r=>r.json()).catch(()=>null);
   if(d&&d.done){rtSay({type:"conversation.item.create",item:{type:"message",role:"user",content:[{type:"input_text",text:(d.drawn===false?"[Showroom: the job finished but NOTHING new was drawn. Result: "+d.output+" ] Do NOT say it is ready or on screen.]":"[Showroom: that's on screen now. Result: "+d.output+" ] Tell the AM in one short sentence, then do exactly what now_do says.]")}]}});rtSay({type:"response.create"})}}}
 // 5 Nov 2026 (James: "it needs to be saved as we go and the chat needs to have it readily available"): each line is
@@ -1373,12 +1373,23 @@ async function rtTool(call_id,name,args){
   // 4 Nov 2026 (Andy: "then it froze"): it never stopped waiting, so the mic stayed off. After 5 minutes the call
   // carries on and the voice says so honestly; if it does finish, it is in the chat.
   if(w.dataset.late){lsWork(false);toast("This is taking much longer than usual - it will appear in the chat if it finishes");
-   rtSay({type:"conversation.item.create",item:{type:"message",role:"user",content:[{type:"input_text",text:"[Showroom: that is taking far longer than usual and NOTHING is on screen yet. Tell the AM honestly in one line that it's still going and will appear in the chat if it finishes, then carry on with what now_do says. Never say it is ready.]"}]}});rtSay({type:"response.create"});return}
+   rtSay({type:"conversation.item.create",item:{type:"message",role:"user",content:[{type:"input_text",text:"[Showroom: that is taking far longer than usual and NOTHING is on screen yet. Tell the AM honestly in one line that it's still going and will appear in the chat if it finishes, then carry on with what now_do says. Never say it is ready.]"}]}});rtSay({type:"response.create"});lateFinish(j.turn,+w.dataset.seen||0);return}
   const d=await fetch("/api/rt/done/"+j.turn).then(r=>r.json()).catch(()=>null);
   if(d&&d.done){if(d.drawn===false){lsWork(false);lsBlur(true)}rtSay({type:"conversation.item.create",item:{type:"message",role:"user",content:[{type:"input_text",text:(d.drawn===false?"[Showroom: that finished but NOTHING new was drawn - nothing is on screen. Result: "+d.output+" ] Do NOT say it is ready.]":"[Showroom: that's finished and on screen now. Result: "+d.output+" ] Tell the AM in one short sentence, then do exactly what now_do says.]")}]}});rtSay({type:"response.create"})}}}
+// 5 Nov 2026 (James's call): the brief PDF was made, but after 5 minutes the page had stopped looking - though it had
+// said "it will appear in the chat if it finishes" - so it never did. Now it keeps looking, quietly, and puts it in the
+// chat when it lands (only in the chat it was asked for), and the voice is told it's there.
+async function lateFinish(turn,seen){const sid0=sid,t0=Date.now();
+ while(Date.now()-t0<30*60e3){await new Promise(z=>setTimeout(z,4000));if(sid!==sid0)return;
+  let r;try{r=await fetch("/api/turn/"+turn).then(r=>r.json())}catch(e){continue}
+  for(;seen<r.replies.length;seen++){const x=r.replies[seen];if(["ask","choose_output"].includes(x.role)||(x.type==="text"&&!x.role))continue;render(x);scrollEnd()}
+  if(r.brief&&Object.keys(r.brief).length)showBrief(r.brief);
+  if(r.done){loadFiles();toast("It's finished - it's in the chat now");
+   if(rt)rtSay({type:"conversation.item.create",item:{type:"message",role:"user",content:[{type:"input_text",text:"[Showroom: what was taking a long time has finished and is in the chat now. Tell the AM in one short line when there's a natural pause.]"}]}});
+   return}}}
 async function pollQuiet(turn,wait,maxMs){let seen=0;const t0=Date.now();   // like poll(), but the voice does the asking, so question cards stay hidden
  for(;;){if(wait.dataset.stopped){wait.remove();break}   // Stop on a live call: don't sit waiting for the picture
-  if(maxMs&&Date.now()-t0>maxMs){wait.dataset.late="1";wait.remove();break}
+  if(maxMs&&Date.now()-t0>maxMs){wait.dataset.late="1";wait.dataset.seen=seen;wait.remove();break}
   let r;try{r=await fetch("/api/turn/"+turn).then(r=>r.json())}catch(e){await new Promise(z=>setTimeout(z,2000));continue}
   for(;seen<r.replies.length;seen++){const x=r.replies[seen];if(["ask","choose_output"].includes(x.role)||(x.type==="text"&&!x.role))continue;wait.remove();render(x);log.appendChild(wait);scrollEnd()}
   if(r.brief&&Object.keys(r.brief).length)showBrief(r.brief);

@@ -926,7 +926,9 @@ class LettingGoOfAPastJobTests(unittest.TestCase):
         self.brief(liked_job="something new, not the old one")
         keep = L.ref_lookup
         looked = []
-        L.ref_lookup = lambda b, text: looked.append(text)
+        # only a lookup of THIS liked job counts: a background turn left running by an earlier test can call ref_lookup
+        # while it is swapped out here (5 Nov 2026: one run in three failed on another test's call)
+        L.ref_lookup = lambda b, text: looked.append(text) if "something new" in (text or "") else None
         try:
             self.client.post("/api/rt/tool", json={"session": self.s["id"], "name": "make_concepts",
                              "arguments": {"output": "3D render", "design_route": "mix"}})
@@ -1506,6 +1508,36 @@ class TheVoiceHasTheSavedChatTests(unittest.TestCase):
                       'body:JSON.stringify({session:sid,role,text})}).catch(()=>{});rtContext(3500);',
                       'output:j.output||"{}"}});rtContext(600);'):
             self.assertIn(where, PAGE)        # after the AM's line, the voice's line, and every tool's answer
+
+
+@unittest.skipUnless(NODE, "node is not installed")
+class ALateResultStillLandsInTheChatTests(unittest.TestCase):
+    """5 Nov 2026 (James): "the pdf was generated, I found it" - but it never appeared in the chat. After 5 minutes the
+    page stopped looking, though it had said "it will appear in the chat if it finishes"."""
+
+    def run_late(self, switch_chat=False):
+        src = ("let sid='c1',rt={};const rendered=[],said=[],toasts=[];let n=0;"
+               "const setTimeout=f=>Promise.resolve().then(f);"                      # no real waiting in the test
+               "function render(x){rendered.push(x.caption)}function scrollEnd(){}function showBrief(){}function loadFiles(){}"
+               "function toast(t){toasts.push(t)}function rtSay(m){said.push(m.item.content[0].text)}"
+               "const fetch=async u=>{n++;" + ("if(n===1)sid='c2';" if switch_chat else "") +
+               "return {json:async()=>(n<3?{replies:[{type:'text',role:'history',caption:'shown before'}],done:false}:"
+               "{replies:[{type:'text',role:'history',caption:'shown before'},{type:'document',caption:'Brief PDF'}],done:true})}};\n"
+               + "async " + page_fn("lateFinish") + "\n"
+               "lateFinish('t1',1).then(()=>console.log(JSON.stringify({rendered,toasts:toasts.length,said:said.length})))")
+        r = subprocess.run([NODE, "-e", src], capture_output=True, text=True, timeout=30)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return json.loads(r.stdout)
+
+    def test_it_keeps_looking_and_puts_it_in_the_chat(self):
+        self.assertEqual(self.run_late(), {"rendered": ["Brief PDF"], "toasts": 1, "said": 1})   # once, and said
+
+    def test_never_into_another_chat(self):
+        self.assertEqual(self.run_late(switch_chat=True), {"rendered": [], "toasts": 0, "said": 0})
+
+    def test_both_waits_hand_over_to_it(self):
+        self.assertEqual(PAGE.count("lateFinish(j.turn,+w.dataset.seen||0);return}"), 2)
+        self.assertIn('wait.dataset.late="1";wait.dataset.seen=seen;', PAGE)
 
 
 @unittest.skipUnless(NODE, "node is not installed")
