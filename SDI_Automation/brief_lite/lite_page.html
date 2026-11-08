@@ -1775,12 +1775,18 @@ function setProject(p){project=p||null;if(p)openP.add(p);try{localStorage.setIte
 function crumb(){const c=$("#crumb");if(!c)return;const p=curProj();if(!p){c.innerHTML=`<span class="ct2">Choose who's briefing</span>`;return}
  const ch=sid&&p.chats.find(x=>x.id===sid);c.innerHTML=`<b>${esc(p.name)}</b><span class="sep"> / </span><span class="ct2">${esc(ch?ch.title:"New chat")}</span>`}
 const loadHist=()=>loadProjects();
+// 8 Nov 2026 (James, on the office address: "it needs to read the person who is logged in ... bit embarrassing if it
+// gets the wrong person"). Nobody signed in, on another computer: the same page on the published https address, where
+// Microsoft 365 says who is briefing - never a name this browser remembered. Never to the address it is already on.
+function goSignIn(u){try{const to=new URL(u,location.href);if(to.origin===location.origin)return false;
+ location.replace(to.origin+to.pathname+location.search+location.hash);return true}catch(e){return false}}
 async function loadProjects(){projects=await fetch("/api/projects").then(r=>r.json()).catch(()=>projects);
  if(project&&!curProj())setProject(null);
  // Opened through SDI Apps or the phone app (Microsoft sign-in): straight into the signed-in person's own project, no
  // "who's briefing?" - even when this browser last had someone else picked (5 Nov 2026, James: "it thinks I'm Andy":
  // opening one of Andy's chats to look at it had left Andy picked, and the next new chat went into Andy's space).
  if(!window._meAsked){window._meAsked=1;const me=await fetch("/api/me").then(r=>r.json()).catch(()=>({}));
+  if(me&&!me.user&&me.signin&&goSignIn(me.signin))return new Promise(()=>{});   // on its way to sign-in: draw nothing
   if(me&&me.project){myProject=me.project;if(!projects.some(p=>p.id===me.project))projects=await fetch("/api/projects").then(r=>r.json()).catch(()=>projects);
    if(!sid&&project!==me.project)setProject(me.project)}}
  $("#hist").innerHTML=(adding?`<div class="pnew"><input id="pname" placeholder="Name, e.g. Kayleigh" maxlength="60"></div>`:"")+projects.map(p=>{

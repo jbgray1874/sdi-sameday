@@ -4417,7 +4417,7 @@ def api_me():
     """Who the portal says this is, and their project (made the first time they come)."""
     name = signed_in_user()
     if not name:
-        return jsonify({"user": None})
+        return jsonify({"user": None, "signin": signin_here()})
     con = db()
     r = con.execute("SELECT id FROM projects WHERE lower(name)=lower(?)", (name,)).fetchone()
     pid = r["id"] if r else "p_" + uuid.uuid4().hex[:8]
@@ -5166,14 +5166,27 @@ def _remote():
 SIGNIN_URL_DEFAULT = "https://sdiintelligence-sdidisplays.msappproxy.net/sameday/"
 
 
+def signin_url():
+    return os.environ.get("LITE_SIGNIN_URL", SIGNIN_URL_DEFAULT).strip()
+
+
+def signin_here():
+    """Where the page goes when nobody is signed in (/api/me): the published https address, for a page opened on
+    another computer - straight here, or carried by SDI Intelligence's office address. None on this machine itself.
+    The page never goes to the address it is already on, so the https address itself can never loop."""
+    url = signin_url()
+    return url if url and (_remote() or _prefix()) else None
+
+
 @app.before_request
 def access_gate():
     if not _remote():
         return None
-    signin = os.environ.get("LITE_SIGNIN_URL", SIGNIN_URL_DEFAULT).strip()
+    signin = signin_url()
     if signin and request.method in ("GET", "HEAD") and request.path == "/":
         from flask import redirect
-        return redirect(signin, 302)
+        q = request.query_string.decode("latin-1")
+        return redirect(signin + ("?" + q if q else ""), 302)
     if not ACCESS_CODE:
         return None
     if request.path in ("/unlock", "/logo.png", "/sw.js", "/api/version") or request.path.startswith("/pwa/"):

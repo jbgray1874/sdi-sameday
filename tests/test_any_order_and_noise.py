@@ -21,9 +21,10 @@ import sys
 import tempfile
 import time
 import unittest
+import urllib.parse
 from pathlib import Path
 
-REPO = Path(__file__).resolve().parent.parent
+REPO =Path(__file__).resolve().parent.parent
 SRC = REPO / "SDI_Automation"
 WORK = Path(tempfile.mkdtemp(prefix="sameday-test-"))
 shutil.copytree(SRC / "brief_lite", WORK / "brief_lite",
@@ -423,6 +424,8 @@ class CarriedToThePhoneTests(unittest.TestCase):
         r = self.c.get("/", environ_base={"REMOTE_ADDR": "10.0.0.20"})
         self.assertEqual((r.status_code, r.headers["Location"]), (302, L.SIGNIN_URL_DEFAULT))
         self.assertEqual(L.SIGNIN_URL_DEFAULT, "https://sdiintelligence-sdidisplays.msappproxy.net/sameday/")
+        r = self.c.get("/?s=abc", environ_base={"REMOTE_ADDR": "10.0.0.20"})            # the chat it was opened at
+        self.assertEqual(r.headers["Location"], L.SIGNIN_URL_DEFAULT + "?s=abc")
         self.assertEqual(self.c.get("/api/version", environ_base={"REMOTE_ADDR": "10.0.0.20"}).status_code, 200)
         self.assertEqual(self.c.get("/").status_code, 200)                         # on the server itself
         self.assertEqual(self.c.get("/", headers=self.P).status_code, 200)         # carried by SDI Intelligence
@@ -1367,6 +1370,42 @@ class TheNameIsWhoIsSignedInTests(unittest.TestCase):
         self.assertEqual(where(signed_in, sid="'abc123'"), ["p_andy", "p_jg", "p_andy"])   # a chat open: left as it is,
         self.assertEqual(where({"user": None}), ["p_andy", "p_andy", "p_andy"])  # but a new chat is James's own
         self.assertNotIn("newChat(project)", PAGE)                              # every "new chat" goes to mine()
+
+    def test_nobody_signed_in_on_another_computer_is_told_where_to_sign_in(self):
+        """8 Nov 2026 (James, on the office address: "stillandy... it needs to read the person who is logged in").
+        Carried by SDI Intelligence's office address nobody is signed in; the page is told the https address."""
+        c, carried = L.app.test_client(), {"X-Forwarded-Prefix": "/sameday"}
+        self.assertEqual(c.get("/api/me", headers=carried).get_json(), {"user": None, "signin": L.SIGNIN_URL_DEFAULT})
+        self.assertIsNone(c.get("/api/me").get_json()["signin"])                  # on the server itself: pick a name
+        me = c.get("/api/me", headers=dict(carried, **{"X-SDI-User": "james.gray@wearesdi.com"})).get_json()
+        self.assertEqual((me["user"], "signin" in me), ("James Gray", False))     # signed in: who it is
+        os.environ["LITE_SIGNIN_URL"] = ""
+        try:
+            self.assertIsNone(c.get("/api/me", headers=carried).get_json()["signin"])   # switched off
+        finally:
+            os.environ.pop("LITE_SIGNIN_URL", None)
+
+    @unittest.skipUnless(NODE, "node is not installed")
+    def test_the_page_goes_to_sign_in_and_never_greets_a_remembered_name(self):
+        def opened(at, me):
+            u = urllib.parse.urlsplit(at)
+            src = ("let sid=null,project='p_andy',projects=[],adding=false,myProject=null;const more={};let openP=new Set();"
+                   "const store={liteProject:'p_andy'};const localStorage={setItem:(k,v)=>{store[k]=v},getItem:k=>store[k]};"
+                   "const window={},document={querySelectorAll:()=>[]},$=s=>s==='#hist'?{}:null,esc=s=>s;"
+                   "const location={href:%s,origin:%s,search:%s,hash:'',replace:u=>console.log(JSON.stringify(['went',u]))};"
+                   "const fetch=async u=>({json:async()=>u==='/api/me'?%s:[{id:'p_andy',name:'Andy Baxter',chats:[]}]});\n"
+                   % (json.dumps(at), json.dumps(u.scheme + "://" + u.netloc), json.dumps("?" + u.query if u.query else ""),
+                      json.dumps(me))
+                   + "\n".join(page_fn(n) for n in ("pcolor", "initials", "curProj", "setProject", "crumb", "mine", "goSignIn"))
+                   + "\nasync " + page_fn("loadProjects")
+                   + "\nloadProjects().then(()=>console.log(JSON.stringify(['stayed',project])))")
+            r = subprocess.run([NODE, "-e", src], capture_output=True, text=True, timeout=30)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            return json.loads(r.stdout)
+        nobody = {"user": None, "signin": L.SIGNIN_URL_DEFAULT}
+        self.assertEqual(opened("http://10.0.0.5:8071/sameday/?s=abc", nobody), ["went", L.SIGNIN_URL_DEFAULT + "?s=abc"])
+        self.assertEqual(opened(L.SIGNIN_URL_DEFAULT, nobody), ["stayed", "p_andy"])        # never loops
+        self.assertEqual(opened("http://localhost:5020/", {"user": None, "signin": None}), ["stayed", "p_andy"])
 
 
 class NothingSaidIsLostTests(unittest.TestCase):

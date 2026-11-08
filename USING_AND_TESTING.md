@@ -41,9 +41,9 @@ W:, S: and K: themselves are fine: SameDay maps them for itself at start, and `U
 1. **Open it** and type the team access code once. The browser remembers it for 90 days.
 2. **Pick your name** (or add it). Your briefs stay under your name, and you can go back to any of them later.
    Signed in through the app portal or the phone, it opens in your own name without asking. **+ New chat** always starts in
-   your own space, and the voice greets whoever is signed in, even inside someone else's chat. On the office `http://`
-   address nobody is signed in, so the browser remembers the last name picked there. Opening another person's chat
-   picks their name, so pick yours again afterwards.
+   your own space, and the voice greets whoever is signed in, even inside someone else's chat. Opened on the office
+   `http://` address, where nobody is signed in, it goes to the same page on the https address, so Microsoft 365 says
+   who you are. Only on the server itself does it ask you to pick a name.
 3. **Type or talk:**
    - **Typing:** describe the brief in the box and press the **red arrow** (Send). Each message gets one short reply and one question. Tap a suggested answer, or type your own.
    - **Talking:** press **Talk live** (the grey button with the sound bars) and just talk, as you would on a call.

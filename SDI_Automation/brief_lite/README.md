@@ -27,6 +27,7 @@ It serves a single page (`lite_page.html`) at `/`. Everything else is under `/ap
 | `OPENAI_API_KEY` | Renders (gpt-image), voice (Realtime), GA images |
 | `ANTHROPIC_API_KEY` | Chat, brief checks, render checks, moodboard (Claude) |
 | `LITE_ACCESS_CODE` | Team code a user types if they are not signed in |
+| `LITE_SIGNIN_URL` | Where a page opened on another computer goes to sign in (default: the App Proxy address). Empty turns it off |
 | `LITE_TRUST_FROM` | Comma-separated IPs of the App Proxy connector. Sign-in headers are trusted only from these IPs. |
 | `LITE_USER_HEADERS` | Optional. Header names that carry the signed-in user. The default covers the Entra App Proxy header-SSO names. |
 | `LITE_CHAT_MODEL`, `LITE_IMAGE_MODEL`, `LITE_IMAGE_QUALITY`, `LITE_RT_*` | Optional model overrides. The defaults are in `lite_config.py` and `realtime_parts.py`. |
