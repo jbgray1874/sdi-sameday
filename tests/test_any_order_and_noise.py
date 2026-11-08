@@ -1253,7 +1253,7 @@ class RendersSideBySideTests(unittest.TestCase):
         self.assertIn('"make the render"', said)
         self.assertTrue(L.intent_wants_render({}, "make the render"))      # the words it suggests really do start one
         self.assertNotIn("Request timed out", said)
-        self.assertIn("budget", L.render_failed("today's SDI Same Day Intelligence AI budget is used up"))
+        self.assertIn("budget", L.render_failed("today's SDI Live AI budget is used up"))
 
     def test_the_job_index_is_safe_from_many_chats_at_once(self):
         import threading

@@ -1,5 +1,5 @@
 <!doctype html><html lang="en-GB"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>Studio review - SDI Same Day Intelligence</title><link rel="icon" href="/pwa/mark.png?v=4">
+<title>Studio review - SDI Live</title><link rel="icon" href="/pwa/mark.png?v=5">
 <style>
 :root{--ink:#17181B;--ink2:#3B3D42;--muted:#6E6A64;--paper:#F5F3EF;--card:#fff;--line:#E7E2DA;--soft:#FAF8F5;--red:#C8102E;--green:#1E8E5A;--amber:#B26A00}
 @media (prefers-color-scheme:dark){:root{--ink:#F2F1EE;--ink2:#CFCCC6;--muted:#9C978F;--paper:#111214;--card:#1A1B1E;--line:#2C2D31;--soft:#202125}}
@@ -29,7 +29,7 @@ textarea{min-height:80px;resize:vertical}
 .send{width:100%;height:52px;border:0;border-radius:14px;background:var(--red);color:#fff;font-weight:800;font-size:16px;margin-top:6px}
 .done{text-align:center;padding:40px 16px}.done b{display:block;font-size:22px;margin:10px 0 4px}
 </style></head><body><div class="wrap" id="app">
-<header><img src="/pwa/mark.png?v=4" alt=""><div><b>Studio review</b><small id="sub">SDI Same Day Intelligence · wearesdi</small></div></header>
+<header><img src="/pwa/mark.png?v=5" alt=""><div><b>Studio review</b><small id="sub">SDI Live · wearesdi</small></div></header>
 <div class="card"><h2>The brief</h2><div class="brief" id="brief"></div></div>
 <div class="card"><h2>The concept - tap the picture to pin a comment</h2><div class="tabs" id="tabs"></div>
  <div class="stage" id="stage"><img id="img" alt="Concept"></div><p class="hint">Tap any spot to add a note there - "this joint", "too thin", "won't fit the bottles".</p><ol class="pins" id="pins"></ol></div>
@@ -72,7 +72,7 @@ $("#send").onclick=async()=>{const who=$("#who").value.trim();if(!who){alert("Ad
  try{localStorage.setItem("srWho",who)}catch(e){}
  const v=D.visuals[cur];const r=await fetch(`/api/review/${T}`,{method:"POST",headers:{"Content-Type":"application/json"},
   body:JSON.stringify({who,verdict,chips:[...chips],text:$("#txt").value.trim(),label:v.label,kind:v.kind,pins:pins.map(p=>({on:D.visuals[p.v].name,x:+p.x.toFixed(3),y:+p.y.toFixed(3),note:p.note}))})}).then(r=>r.json()).catch(()=>({}));
- $("#app").innerHTML=r.ok?`<div class="done"><img src="/pwa/mark.png?v=4" width="64" alt=""><b>Thanks, ${esc(who)} ✓</b>${esc(D.asked_by||"The AM")} will see this in the chat, and the studio's Craft Memory learns from it - with your name on it.</div>`:
+ $("#app").innerHTML=r.ok?`<div class="done"><img src="/pwa/mark.png?v=5" width="64" alt=""><b>Thanks, ${esc(who)} ✓</b>${esc(D.asked_by||"The AM")} will see this in the chat, and the studio's Craft Memory learns from it - with your name on it.</div>`:
   `<div class="done"><b>That didn't send</b>Please try again.</div>`};
 load();
 </script></body></html>

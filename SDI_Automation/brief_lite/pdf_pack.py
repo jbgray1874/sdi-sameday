@@ -378,7 +378,7 @@ def val(brief, key):
 def _safe_output(out_dir, name):
     destination = Path(out_dir).resolve()
     if destination.drive.upper() != "C:" or str(destination).startswith("\\\\"):
-        raise ValueError("SDI Same Day Intelligence exports must be saved locally on C:.")
+        raise ValueError("SDI Live exports must be saved locally on C:.")
     destination.mkdir(parents=True, exist_ok=True)
     return str(destination / name)
 

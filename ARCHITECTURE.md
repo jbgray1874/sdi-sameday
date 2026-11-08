@@ -1,4 +1,7 @@
-# SDI Same Day Intelligence: how it works
+# SDI Live (SameDay): how it works
+
+> **SDI Live** (8 November 2026): this tool is now called SDI Live wherever people see it - the page, the phone app and its icon, the app portal tile and the emails. *SameDay* stays its internal name: the `SDISameDay` service, `C:\SDI_Automation`, this repository, the `/sameday/` address the phone app and App Proxy use, and K:'s `SDI Same Day Intelligence` folder where the picture index lands.
+
 
 This guide covers the whole app: how a brief goes from the account manager's voice to a render, a GA drawing and two PDFs, where each file fits, and which AI does which job. It is written for whoever deploys and looks after the app (James). In the code the app lives in `brief_lite\` and is sometimes called Brief Lite.
 

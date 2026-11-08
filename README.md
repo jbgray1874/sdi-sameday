@@ -1,4 +1,7 @@
-# SDI Same Day
+# SDI Live (internally: SameDay)
+
+> **SDI Live** (8 November 2026): this tool is now called SDI Live wherever people see it - the page, the phone app and its icon, the app portal tile and the emails. *SameDay* stays its internal name: the `SDISameDay` service, `C:\SDI_Automation`, this repository, the `/sameday/` address the phone app and App Proxy use, and K:'s `SDI Same Day Intelligence` folder where the picture index lands.
+
 
 Same Day is SDI's tool for the account manager (AM). During or straight after a client call, the AM talks or types the brief. The tool:
 

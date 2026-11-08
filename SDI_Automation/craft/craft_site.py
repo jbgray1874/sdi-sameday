@@ -1,7 +1,7 @@
 """
 craft_site.py - SDI Craft: the studio's know-how, learnt from the tools, on its own site (port 5030).
 
-Muhammad, 14 Oct 2026: the feedback and learning shouldn't sit on the tools' own pages. Each tool (SDI Same Day Intelligence, SDI Debrief Intelligence,
+Muhammad, 14 Oct 2026: the feedback and learning shouldn't sit on the tools' own pages. Each tool (SDI Live, SDI Debrief Intelligence,
 SDI Recall) only CAPTURES - quietly, as people work - into craft\\craft.db. This site is where it's read: one tab per tool,
 plus what's come out of meetings, and the exports that later train the tools to be better.
 
@@ -22,7 +22,7 @@ import craft  # noqa: E402
 PORT = int(os.environ.get("CRAFT_PORT", "5030"))
 TOOLS = {   # id -> (name, mark, where the tool itself lives, what it's for)
     "all":      ("All tools", "/m/sdi.png", None, "everything the tools have learnt, together"),
-    "showroom": ("SDI Same Day Intelligence", "/m/showroom.png", "http://{host}:5020", "AMs: which concept is picked, what's changed, and why"),
+    "showroom": ("SDI Live", "/m/showroom.png", "http://{host}:5020", "AMs: which concept is picked, what's changed, and why"),
     "flow":     ("SDI Debrief Intelligence", "/m/flow.svg", "https://{host}:5443", "the studio: who's booked on what, what people ask, craft notes"),
     "library":  ("SDI Recall", "/m/sdi.png", "http://{host}:5000", "designers: what they search for, open and reuse - and what's missing"),
     "meeting":  ("Meetings", "/m/sdi.png", None, "insights from meeting notes - read by Claude, with who said them"),

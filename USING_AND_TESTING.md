@@ -1,4 +1,7 @@
-# SDI SameDay: using it, testing it, updating it
+# SDI Live (SameDay): using it, testing it, updating it
+
+> **SDI Live** (8 November 2026): this tool is now called SDI Live wherever people see it - the page, the phone app and its icon, the app portal tile and the emails. *SameDay* stays its internal name: the `SDISameDay` service, `C:\SDI_Automation`, this repository, the `/sameday/` address the phone app and App Proxy use, and K:'s `SDI Same Day Intelligence` folder where the picture index lands.
+
 
 This guide is for whoever uses, tests or looks after SameDay. `ARCHITECTURE.md` explains how the code works.
 

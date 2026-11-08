@@ -213,7 +213,7 @@ def budget_gate(kind):
     """The one hard limit (Muhammad, 13 Oct 2026: 'whatever happens, no credits past the limit'). Every paid call - Claude,
     OpenAI images, Grok, live voice - comes through here first, so a feature written later can't forget it."""
     if spent_today() + EST.get(kind, 0.05) > daily_cap():
-        raise BudgetStop("Today's SDI Same Day Intelligence AI budget is used up")
+        raise BudgetStop("Today's SDI Live AI budget is used up")
 
 
 def _guard_sdks():
@@ -484,7 +484,7 @@ def past_work_notes(s, text="", limit=4):
 def think(s, text):
     """One cheap Haiku call per message: what did they tell us, and what do we ask next."""
     if spent_today() >= daily_cap():
-        return {"updates": {}, "intent": "brief", "reply": "I've hit today's AI budget for SDI Same Day Intelligence - ask Muhammad to raise the cap and I'll carry on."}
+        return {"updates": {}, "intent": "brief", "reply": "I've hit today's AI budget for SDI Live - ask Muhammad to raise the cap and I'll carry on."}
     import anthropic
     missing_need = [k for k in NEED if not s["brief"].get(k)]
     missing_rest = [k for k in FIELDS if k not in NEED and not s["brief"].get(k)]
@@ -1201,7 +1201,7 @@ def make_visual(s, kind="render", change=None, base_image=None, refs=None, label
     quality = CHANGE_QUALITY if base_image else IMAGE_QUALITY   # first concept at the best quality; small changes cheaper
     cost = IMAGE_COST.get(quality, 0.063)
     if spent_today() + cost > daily_cap():
-        return None, "today's SDI Same Day Intelligence AI budget is used up"
+        return None, "today's SDI Live AI budget is used up"
     from openai import OpenAI
     files = []
     if base_image and os.path.exists(base_image):                 # a change: start from the last concept
@@ -1618,7 +1618,7 @@ def make_ga_ai(s, base_visual, retry_note=""):
         return None, "no OPENAI_API_KEY in .env"
     cost = IMAGE_COST["medium"]                      # medium: small text in the callouts stays crisp; ~7p
     if spent_today() + cost > daily_cap():
-        return None, "today's SDI Same Day Intelligence AI budget is used up"
+        return None, "today's SDI Live AI budget is used up"
     from openai import OpenAI
     try:
         # the AM's own GA drawing (an uploaded PDF, page 1) goes in too, so the GA follows SDI's real drawing style and parts
@@ -1691,7 +1691,7 @@ def make_ga_text(s):
         return None, "no OPENAI_API_KEY in .env"
     cost = IMAGE_COST["medium"]
     if spent_today() + cost > daily_cap():
-        return None, "today's SDI Same Day Intelligence AI budget is used up"
+        return None, "today's SDI Live AI budget is used up"
     what = "; ".join(f"{k.replace('_', ' ')}: {b[k]}" for k in ("unit_type", "placement", "materials", "colours_graphics",
                                                                "products_held", "lighting", "fixing", "other_notes") if b.get(k))
     prompt = ga_prompt(b, hwd).replace("of the display unit shown in this image - the SAME unit, with every feature it has",
@@ -2491,7 +2491,7 @@ def handle(number, name, text, image_path=None, voice=False, ch=None, new=False,
     if text and b.get("client") and convo.stage(s) == "pack" and re.fullmatch(r"\W*(boots?|booth|bose|bowth|bolts?|bullets?|bowl|bot|boat|both)\W*(please|pack|packs)?\W*", text, re.I):
         text = "both"
     if DANGER.search(text or ""):   # never even passed to the AI: Brief Lite only reads the drives
-        ch.text("I can't do that - SDI Same Day Intelligence only reads SDI's W: and K: drives to find past work, it can never delete, move "
+        ch.text("I can't do that - SDI Live only reads SDI's W: and K: drives to find past work, it can never delete, move "
                 "or change anything on them. Back to the brief whenever you're ready.")
         return ch, s
     m = re.fullmatch(r"lite:opt:(.+)", text)          # a tapped option is just their answer
@@ -2539,7 +2539,7 @@ def handle(number, name, text, image_path=None, voice=False, ch=None, new=False,
     if first:
         prefix = f"New brief started {date.today():%A %d %B}. "
         if ch.number:
-            t["reply"] = (t.get("reply") or "") + "\n\n_🎨 SDI Same Day Intelligence - type *menu* for SDI Debrief Intelligence (studio jobs), *stop* to close this brief._"
+            t["reply"] = (t.get("reply") or "") + "\n\n_🎨 SDI Live - type *menu* for SDI Debrief Intelligence (studio jobs), *stop* to close this brief._"
     # A different client than the open brief means a new brief - never carry Boots' unit over into a Lindt enquiry
     upd = t.get("updates") or {}
     # 28 Oct 2026: "SDI Displays" (a misheard pack answer) was saved as the client - then "Tesco" counted as a new client
@@ -3672,7 +3672,7 @@ def api_wa():
                 ch, _ = handle(number, js.get("name", ""), text, js.get("image_path"), js.get("voice", False), new=starting and not active)
                 ch.flush()
             except Exception as e:
-                Channel("err", number).text(f"Sorry - SDI Same Day Intelligence hit a problem ({str(e)[:120]}).")
+                Channel("err", number).text(f"Sorry - SDI Live hit a problem ({str(e)[:120]}).")
     threading.Thread(target=run, daemon=True).start()
     return jsonify({"taken": True})
 
@@ -3711,7 +3711,7 @@ def _start_turn(who, name, text, image_path=None, new=False, t_override=None, lo
                 print(f"turn {s['id']} {JOBS[jid].get('tool') or 'turn'}: took {took:.0f}s", flush=True)
         except Exception as e:
             JOBS[jid]["error"] = str(e)[:300]
-            ch.out.append({"type": "text", "text": "Today's AI budget for SDI Same Day Intelligence is used up, so I've stopped - nothing more will be "
+            ch.out.append({"type": "text", "text": "Today's AI budget for SDI Live is used up, so I've stopped - nothing more will be "
                            "spent today. Ask Muhammad to raise the limit if you need more." if isinstance(e, BudgetStop) else
                            f"Sorry - something went wrong ({str(e)[:150]})."})
         finally:
@@ -3741,7 +3741,7 @@ def api_rt_session():
     try:
         budget_gate("voice")
     except BudgetStop:
-        return jsonify({"error": "Today's SDI Same Day Intelligence AI budget is used up"}), 429
+        return jsonify({"error": "Today's SDI Live AI budget is used up"}), 429
     if not os.environ.get("OPENAI_API_KEY"):
         return jsonify({"error": "no OPENAI_API_KEY"}), 500
     project = _project_id(js.get("project"))
@@ -5175,13 +5175,13 @@ def access_gate():
 
 
 UNLOCK_PAGE = """<!doctype html><html lang="en-GB"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<link rel="manifest" href="/pwa/manifest.webmanifest"><meta name="theme-color" content="#C8102E"><link rel="apple-touch-icon" href="/pwa/icon-180.png?v=4">
-<title>SDI Same Day Intelligence</title><style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:#F5F3EF;font:16px/1.5 system-ui,sans-serif;color:#17181B}
+<link rel="manifest" href="/pwa/manifest.webmanifest"><meta name="theme-color" content="#E1E1D5"><link rel="apple-touch-icon" href="/pwa/icon-180.png?v=5">
+<title>SDI Live</title><style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:#F5F3EF;font:16px/1.5 system-ui,sans-serif;color:#17181B}
 form{background:#fff;border-radius:20px;padding:28px 24px;width:min(360px,88vw);box-shadow:0 10px 40px rgba(0,0,0,.08);text-align:center}
 img{width:min(220px,60vw);height:auto;display:block;margin:0 auto 6px}h1{font-size:20px;margin:12px 0 4px}p{color:#6E6A64;margin:0 0 18px;font-size:14px}
 input{width:100%;box-sizing:border-box;height:48px;border:1.5px solid #E7E2DA;border-radius:12px;padding:0 14px;font-size:18px;text-align:center;letter-spacing:.2em}
 button{width:100%;height:48px;margin-top:12px;border:0;border-radius:12px;background:#C8102E;color:#fff;font-weight:700;font-size:16px}.m{color:#C8102E;font-size:13px;margin-top:10px}</style></head>
-<body><form method="post" action="/unlock"><img src="/pwa/lockup.png?v=4" alt="SDI Same Day Intelligence - wearesdi"><p>Enter the team access code</p>
+<body><form method="post" action="/unlock"><img src="/pwa/lockup.png?v=5" alt="SDI Live - wearesdi"><p>Enter the team access code</p>
 <input name="code" type="password" inputmode="text" autocomplete="current-password" autofocus><button>Open</button><div class="m">{msg}</div></form></body></html>"""
 
 
@@ -5211,7 +5211,7 @@ def page():
 def warm():
     import lite_search
     try:      # 4 Nov 2026: the job index first - past jobs no longer wait for (or fail with) the picture index
-        print(f"SDI Same Day Intelligence: past-work search ready - {lite_search._load()['n_jobs']} jobs", flush=True)
+        print(f"SDI Live: past-work search ready - {lite_search._load()['n_jobs']} jobs", flush=True)
     except Exception as e:
         print("! past-work search not ready:", e, flush=True)
     try:
@@ -5229,7 +5229,7 @@ spaces.bind(spent_today=spent_today, daily_cap=daily_cap, log_cost=log_cost,
             clip=lambda: __import__("lite_search").clip_model())
 sys.path.insert(0, os.path.join(BASE, "craft"))
 import craft, craft_web       # Craft Memory: the studio's know-how, captured as people work (Tracy, KTP, 14 Oct 2026)
-craft_web.add(app, "showroom", "SDI Same Day Intelligence", "/pwa/mark.png?v=4")
+craft_web.add(app, "showroom", "SDI Live", "/pwa/mark.png?v=5")
 CLIP = lambda: __import__("lite_search").clip_model()
 
 
@@ -5250,10 +5250,10 @@ if __name__ == "__main__":
     try:
         probe.bind(("0.0.0.0", PORT)); probe.close()
     except OSError:
-        print(f"Port {PORT} already in use - SDI Same Day Intelligence is already running.")
+        print(f"Port {PORT} already in use - SDI Live is already running.")
         sys.exit(0)
     map_drives()                  # before the past-work search loads: its paths are W:\..., S:\..., K:\...
     threading.Thread(target=warm, daemon=True).start()
     from waitress import serve
-    print(f"SDI Same Day Intelligence on http://localhost:{PORT}")
+    print(f"SDI Live on http://localhost:{PORT}")
     serve(app, host="0.0.0.0", port=PORT, threads=8)

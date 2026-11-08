@@ -69,7 +69,7 @@ async function load(){const d=await fetch("api/craft/summary").then(r=>r.json())
  $("#kpis").innerHTML=[[d.decisions,"decisions captured"],[wp+"%","with a reason"],[d.rules.length,"studio rules so far"],[pct===null?"–":pct+"%","picks predicted right"+(acc.scored?` (${acc.scored})`:"")]]
   .map(([b,s])=>`<div class="k"><b>${b}</b><span>${s}</span></div>`).join("");
  $("#rules").innerHTML=d.rules.length?d.rules.map(r=>`<div class="rule"><span class="n">${r.n}×</span><div><b>${esc(r.rule)}</b><small>${esc(r.where||"all briefs")}${r.who.length?" · from "+esc(r.who.join(", ")):""}</small></div></div>`).join(""):
-  `<p class="empty">No rules yet. They appear as people pick options and say why - in SDI Same Day Intelligence, a tap under the chosen option; in a live call, just saying it.</p>`;
+  `<p class="empty">No rules yet. They appear as people pick options and say why - in SDI Live, a tap under the chosen option; in a live call, just saying it.</p>`;
  $("#recent").innerHTML=d.recent.length?d.recent.map(e=>{const k=KIND[e.kind]||["•",e.kind];const c=e.context||{};
   return `<div class="ev"><span class="ic">${k[0]}</span><div><b>${esc(e.who||"Someone")}</b> ${k[1]}${e.summary?`: ${esc(String(e.summary).slice(0,120))}`:""}
   <small> · ${esc([c.client,c.category,c.unit].filter(Boolean).join(" · "))} · ${esc(e.tool)} · ${ago(e.at)} ago</small>

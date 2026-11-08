@@ -1,4 +1,4 @@
-"""The Craft Memory page and its API, added to a Flask app with one line: craft_web.add(app, "showroom", "SDI Same Day Intelligence", "/pwa/mark.png")."""
+"""The Craft Memory page and its API, added to a Flask app with one line: craft_web.add(app, "showroom", "SDI Live", "/pwa/mark.png")."""
 import csv, io, json, os
 
 from flask import Response, jsonify, request

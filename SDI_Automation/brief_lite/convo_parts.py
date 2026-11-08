@@ -680,7 +680,7 @@ def converse(s, text, fast=False):
     it answers like a sharp colleague; fast=True (lines heard on a live call, read in the background) runs on Haiku 5.5."""
     b = s["brief"]
     if spent_today() >= daily_cap():
-        return {"updates": {}, "intent": "answer", "reply": "I've hit today's AI budget for SDI Same Day Intelligence - ask Muhammad to raise the cap and I'll carry on.", "ask_field": "", "ask": ""}
+        return {"updates": {}, "intent": "answer", "reply": "I've hit today's AI budget for SDI Live - ask Muhammad to raise the cap and I'll carry on.", "ask_field": "", "ask": ""}
     import anthropic
     st = stage(s)
     p = render_plan(b) if st == "render_q" else plan(b)
@@ -711,7 +711,7 @@ def converse(s, text, fast=False):
         "whole size. Only record size when you have all three; if you have one or two, ask for the missing one by name.\n"
         "- If the unit type names a material ('card counter unit', 'steel wall bay'), record that as materials too.\n"
         "- Renders NEVER wait for template questions. Never tell the AM a render needs a project name, their name, a contact, a "
-        "date or anything else first - if they ask for a render, SDI Same Day Intelligence makes it straight away and the questions carry on after.\n"
+        "date or anything else first - if they ask for a render, SDI Live makes it straight away and the questions carry on after.\n"
         "- The app makes the pictures, not you. NEVER say a render is being made, coming, nearly ready or on its way unless "
         "RENDER below says 'being made right now'. If they ask where it is and none is being made, use intent want_visuals.\n"
         "- PACK and STAGE below say where the brief is: the client pack (render, GA, client sheet) asks only what the picture "
