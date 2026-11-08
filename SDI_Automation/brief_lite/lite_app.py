@@ -5159,9 +5159,22 @@ def _remote():
     return bool(request.headers.get("CF-Connecting-IP")) or ip not in (_LOCAL | _TRUSTED)
 
 
+# 8 Nov 2026 (James, on the office address: "why does it think I'm Andy ... it needs to read the person who is logged
+# in ... it's governed by my MS 365 business tenancy"). Opened straight from another computer, nobody is signed in, so
+# the page goes to the published https address, where Microsoft 365 says who is briefing (and Talk live gets the
+# microphone). Empty turns it off: the team code page as before.
+SIGNIN_URL_DEFAULT = "https://sdiintelligence-sdidisplays.msappproxy.net/sameday/"
+
+
 @app.before_request
 def access_gate():
-    if not ACCESS_CODE or not _remote():
+    if not _remote():
+        return None
+    signin = os.environ.get("LITE_SIGNIN_URL", SIGNIN_URL_DEFAULT).strip()
+    if signin and request.method in ("GET", "HEAD") and request.path == "/":
+        from flask import redirect
+        return redirect(signin, 302)
+    if not ACCESS_CODE:
         return None
     if request.path in ("/unlock", "/logo.png", "/sw.js", "/api/version") or request.path.startswith("/pwa/"):
         return None

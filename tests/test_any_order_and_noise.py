@@ -409,8 +409,23 @@ class CarriedToThePhoneTests(unittest.TestCase):
     def test_carried_there_is_no_team_code_because_microsoft_sign_in_was_asked(self):
         carried = self.c.get("/", headers=self.P).get_data(as_text=True)       # from this machine: SDI Intelligence
         self.assertNotIn("Enter the team access code", carried)
-        elsewhere = self.c.get("/", environ_base={"REMOTE_ADDR": "10.0.0.20"}).get_data(as_text=True)
+        os.environ["LITE_SIGNIN_URL"] = ""                                   # the redirect off (see below)
+        try:
+            elsewhere = self.c.get("/", environ_base={"REMOTE_ADDR": "10.0.0.20"}).get_data(as_text=True)
+        finally:
+            os.environ.pop("LITE_SIGNIN_URL", None)
         self.assertIn("Enter the team access code", elsewhere)              # anyone else still needs it
+
+    def test_opened_from_another_computer_it_goes_to_microsoft_sign_in(self):
+        """8 Nov 2026 (James, on the office address: "why does it think I'm Andy ... it needs to read the person who is
+        logged in"). Nobody is signed in on the office address, so the page goes to the https address, where Microsoft
+        365 says who it is. The laptop scripts' checks and this machine are as before."""
+        r = self.c.get("/", environ_base={"REMOTE_ADDR": "10.0.0.20"})
+        self.assertEqual((r.status_code, r.headers["Location"]), (302, L.SIGNIN_URL_DEFAULT))
+        self.assertEqual(L.SIGNIN_URL_DEFAULT, "https://sdiintelligence-sdidisplays.msappproxy.net/sameday/")
+        self.assertEqual(self.c.get("/api/version", environ_base={"REMOTE_ADDR": "10.0.0.20"}).status_code, 200)
+        self.assertEqual(self.c.get("/").status_code, 200)                         # on the server itself
+        self.assertEqual(self.c.get("/", headers=self.P).status_code, 200)         # carried by SDI Intelligence
 
     @unittest.skipUnless(NODE, "node is not installed")
     def test_the_page_script_puts_the_prefix_in_front_of_every_address(self):
