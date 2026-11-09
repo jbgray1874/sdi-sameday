@@ -1762,7 +1762,10 @@ function hero(){const d=document.createElement("div");d.className="hero";
  d.innerHTML=`${art}<div class="eyebrow">${part}${me?`, ${esc(me)}`:""}</div><h1>${me?`Hi ${esc(me)}.<br>`:""}What does the client want?</h1><p>Describe the brief like you would to a colleague. I'll find what SDI has built before, show what it cost, and make concepts at the exact size - checked before you see them.</p>
  <div class="ex">${EX.map(([i,h,p],n)=>`<button class="exb" data-n="${n}"><span class="exn">0${n+1}</span><b>${h}</b><span class="exd">${esc(p.slice(0,118))}…</span><i class="go" aria-hidden="true"></i></button>`).join("")}</div>
  <div class="how"><span><b>1.</b> SDI history first.</span><span><b>2.</b> Exact sizes, physics checked.</span><span><b>3.</b> Two directions.</span><span><b>4.</b> GA of the one you pick.</span><span><b>5.</b> Client sheet + full pack.</span></div>`;
- log.appendChild(d);d.querySelectorAll(".exb").forEach(b=>b.onclick=()=>{t.value=EX[+b.dataset.n][2];t.dispatchEvent(new Event("input"));t.focus()})}
+ // An example card puts its brief in the box, ready to send or change. It said nothing about it, so a click looked
+ // like it did nothing (9 Nov 2026); now the box is brought into view and it says so.
+ log.appendChild(d);d.querySelectorAll(".exb").forEach(b=>b.onclick=()=>{t.value=EX[+b.dataset.n][2];t.dispatchEvent(new Event("input"));
+  try{t.scrollIntoView({block:"nearest",behavior:"smooth"})}catch(e){}t.focus();toast("Example brief added below. Press the arrow to start it, or change it first.")})}
 // ---------- projects, like ChatGPT: a space per person, chats (briefs) inside, + for a new one
 let project=null,projects=[],adding=false,myProject=null;const more={};let openP=new Set();
 // A new chat is the signed-in person's own; the + beside someone else's name is still there for briefing in their space.
@@ -1797,13 +1800,13 @@ async function loadProjects(){projects=await fetch("/api/projects").then(r=>r.js
    <div class="pchats">${shown.map(c=>`<a class="ci ${c.id===sid?"on":""}" href="#" data-s="${c.id}" title="${esc(c.title)}">${c.channel==="whatsapp"?'<span class="wa"></span>':""}<span class="ct">${esc(c.title)}</span><button class="cdots" title="Options" aria-label="Chat options">⋯</button></a>`).join("")||'<div class="cempty">No chats yet - press ＋</div>'}
    ${chats.length>shown.length?`<button class="cmore" data-p="${p.id}">Show ${chats.length-shown.length} more</button>`:""}</div></div>`}).join("");
  document.querySelectorAll(".proj").forEach(el=>{const pid=el.dataset.p;
+  // 9 Nov 2026 (James, "if I click on one of the jobs, it doesn't do anything"): a person's name only opens or closes
+  // their chats. It used to start a new chat in their space, so a look at Andy's chats left you briefing as Andy.
+  // The + beside a name is the way to start one there.
   el.querySelector(".ph").onclick=e=>{if(e.target.closest(".padd"))return;
-   if(pid!==project){newChat(pid);return}
    if(openP.has(pid)||el.classList.contains("open")){openP.delete(pid);el.classList.remove("open")}else{openP.add(pid);el.classList.add("open")}
    try{localStorage.setItem("liteOpen",JSON.stringify([...openP]))}catch(e){}};
   el.querySelector(".padd").onclick=()=>newChat(pid)});
- document.querySelectorAll(".ci").forEach(a=>a.onclick=e=>{e.preventDefault();if(e.target.closest(".cdots")){chatMenu(a,e.target.closest(".cdots"));return}
-  if(a.querySelector("input"))return;openSession(a.dataset.s)});
  document.querySelectorAll(".cmore").forEach(b=>b.onclick=()=>{more[b.dataset.p]=1;loadProjects()});
  const inp=$("#pname");if(inp){inp.focus();inp.onkeydown=async e=>{if(e.key==="Escape"){adding=false;loadProjects()}
   if(e.key==="Enter"&&inp.value.trim()){const r=await fetch("/api/projects",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name:inp.value.trim()})}).then(r=>r.json());
@@ -1832,7 +1835,24 @@ function deleteChat(id,title){const m=document.createElement("div");m.className=
 function addProject(){adding=true;$("#rail").classList.add("open");loadProjects()}
 $("#addp").onclick=addProject;
 function leavePage(){const m=$(".main");if(m&&m.classList.contains("spaceon")){m.classList.remove("spaceon");spOpen=null;pvKind=null;clearTimeout(spTimer);navOn("")}}
-async function openSession(id){leavePage();if(rt)rtStop();const r=await fetch("/api/session/"+id).then(r=>r.json());sid=id;rememberChat();fresh=false;
+// A chat in the side list opens however the list was last drawn: one listener on the list itself, so nothing that goes
+// wrong while drawing it can leave the chats unclickable (9 Nov 2026).
+$("#hist").addEventListener("click",e=>{const a=e.target.closest(".ci");if(!a)return;e.preventDefault();
+ if(e.target.closest(".cdots")){chatMenu(a,e.target.closest(".cdots"));return}
+ if(a.querySelector("input"))return;openSession(a.dataset.s)});
+// What went wrong on the page goes to SDI Live's own log, so it can be found afterwards (Check-SameDay-Call.ps1).
+function reportProblem(what){try{fetch("/api/page-problem",{method:"POST",headers:{"Content-Type":"application/json"},
+ body:JSON.stringify({what:String(what).slice(0,400),chat:sid||""})}).catch(()=>{})}catch(e){}}
+async function openSession(id){
+ // 9 Nov 2026: a chat that would not open used to do nothing at all. Now it says why, and the reason is logged.
+ let r;
+ try{const res=await fetch("/api/session/"+id);
+  if(!res.ok)throw new Error(res.status===404?"it isn't there any more":"the server answered "+res.status);
+  r=await res.json();if(!r||!r.session)throw new Error("the server sent no chat")}
+ catch(e){toast("Couldn't open that chat: "+(e.message||e)+". Try again in a moment.");reportProblem("open chat "+id+": "+(e.message||e));return}
+ try{await showSession(id,r)}
+ catch(e){toast("Part of that chat couldn't be shown. It's been noted.");reportProblem("show chat "+id+": "+(e&&e.stack||e))}}
+async function showSession(id,r){leavePage();if(rt)rtStop();sid=id;rememberChat();fresh=false;
  if(r.session.project&&r.session.project!==project)setProject(r.session.project);loadFiles();loadProjects();
  log.innerHTML="";gallery=[];refBox=optBox=null;step=0;showBrief(r.session.brief);
  for(const m of r.messages){if(m.dir==="in"){if(m.text)row(esc(m.text),true);continue}

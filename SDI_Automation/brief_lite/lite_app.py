@@ -4412,6 +4412,19 @@ def brandlogo(fn):
     return send_file(p, max_age=3600)
 
 
+@app.route("/api/page-problem", methods=["POST"])
+def api_page_problem():
+    """9 Nov 2026 (James: "if I click on one of the jobs, it doesn't do anything"): what went wrong on the page, in
+    this log, so Check-SameDay-Call.ps1 shows it. One line, kept short, never a key: the page sends only its own
+    error text and the chat's id."""
+    js = request.get_json(silent=True) or {}
+    what = re.sub(r"\s+", " ", str(js.get("what") or ""))[:400]
+    chat = re.sub(r"[^A-Za-z0-9_-]", "", str(js.get("chat") or ""))[:40]
+    who = signed_in_user() or "not signed in"
+    print(f"[page] {datetime.now():%H:%M:%S} {who} chat={chat or '-'} {what}", flush=True)
+    return jsonify({"ok": True})
+
+
 @app.route("/api/me")
 def api_me():
     """Who the portal says this is, and their project (made the first time they come)."""

@@ -1408,6 +1408,54 @@ class TheNameIsWhoIsSignedInTests(unittest.TestCase):
         self.assertEqual(opened("http://localhost:5020/", {"user": None, "signin": None}), ["stayed", "p_andy"])
 
 
+class AChatAlwaysOpensOrSaysWhyTests(unittest.TestCase):
+    """9 Nov 2026 (James, on the https address: "if I click on one of the jobs, it doesn't do anything"). A chat that
+    would not open did nothing at all, with no word why; and clicking a person's name started a new chat in their space,
+    which is how he came to be in "Andy Baxter / New chat"."""
+
+    def test_a_persons_name_only_opens_their_chats(self):
+        handler = PAGE.split('el.querySelector(".ph").onclick=', 1)[1].split("};", 1)[0]
+        self.assertNotIn("newChat", handler)
+        self.assertIn('el.querySelector(".padd").onclick=()=>newChat(pid)', PAGE)   # the + is the way to start one there
+
+    def test_the_list_opens_a_chat_however_it_was_drawn(self):
+        self.assertIn('$("#hist").addEventListener("click"', PAGE)
+        self.assertNotIn('document.querySelectorAll(".ci").forEach', PAGE)
+
+    @unittest.skipUnless(NODE, "node is not installed")
+    def test_a_chat_that_will_not_open_says_why_and_is_logged(self):
+        def open_with(status, body):
+            src = ("let sid=null,said=[],sent=[];const toast=m=>said.push(m);"
+                   "const fetch=async(u,o)=>{if(u==='/api/page-problem'){sent.push(JSON.parse(o.body));return{}}"
+                   "return {ok:%s,status:%d,json:async()=>%s}};"
+                   "async function showSession(){said.push('shown')}\n" % ("true" if status == 200 else "false", status, body)
+                   + page_fn("reportProblem") + "\nasync " + page_fn("openSession")
+                   + "\nopenSession('abc').then(()=>console.log(JSON.stringify([said,sent])))")
+            r = subprocess.run([NODE, "-e", src], capture_output=True, text=True, timeout=30)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            return json.loads(r.stdout)
+        said, sent = open_with(500, "({})")
+        self.assertIn("Couldn't open that chat: the server answered 500", said[0])
+        self.assertEqual(sent[0]["what"], "open chat abc: the server answered 500")
+        said, _ = open_with(404, "({})")
+        self.assertIn("it isn't there any more", said[0])
+        said, sent = open_with(200, "({session:{project:'p_andy'},messages:[],files:[]})")
+        self.assertEqual((said, sent), (["shown"], []))
+
+    def test_the_problem_is_written_to_the_log_short_and_plain(self):
+        import contextlib
+        import io
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            r = L.app.test_client().post("/api/page-problem", json={"what": "open chat x:\n the server answered 500",
+                                                                    "chat": "abc<script>"})
+        self.assertEqual(r.get_json(), {"ok": True})
+        line = out.getvalue()
+        self.assertIn("[page]", line)
+        self.assertIn("chat=abcscript open chat x: the server answered 500", line)
+        self.assertEqual(line.count("\n"), 1)
+
+
 class NothingSaidIsLostTests(unittest.TestCase):
     """5 Nov 2026 (James's call): "a couple of times it said it got my response then came back saying it didn't catch
     it ... it forgot the budget number, forgot it was a collection, asked me later for delivery details ... a bit
