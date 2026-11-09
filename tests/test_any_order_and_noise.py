@@ -1463,6 +1463,31 @@ class AChatAlwaysOpensOrSaysWhyTests(unittest.TestCase):
         spend, cap, said, _ = status_with("({search_ready:true,openai_key:true,whatsapp:false,spent_today:1.5,cap:20})")
         self.assertEqual((spend, cap, said), ("$1.50", "$20", []))
 
+    @unittest.skipUnless(NODE, "node is not installed")
+    def test_a_sign_in_that_ran_out_signs_in_again_by_itself(self):
+        """9 Nov 2026: /sameday/api/status said "Signed out - open SDI Live again from the app portal." SDI
+        Intelligence's sign-in lasts 10 hours; the page kept running and every request was refused. The first refusal
+        reloads the page (which signs in again, silently); a second within two minutes says so, with a button."""
+        src = ("const store={},said=[],added=[];let reloads=0,now=1e9;"
+               "const sessionStorage={getItem:k=>store[k]||null,setItem:(k,v)=>{store[k]=v},removeItem:k=>{delete store[k]}};"
+               "const location={reload:()=>{reloads++}};const toast=m=>said.push(m);const setTimeout=f=>f();"
+               "const Date={now:()=>now};"
+               "const document={getElementById:()=>added.length?{}:null,createElement:()=>({style:{},setAttribute(){},"
+               "querySelector:()=>({}),set innerHTML(v){this.html=v}}),body:{appendChild:e=>added.push(e)}};"
+               "const window={fetch:async u=>({status:u==='/api/status'?401:200})};\n"
+               + page_fn("signedOut") + "\n" + page_fn("watchSignIn")
+               + "\nwatchSignIn();(async()=>{await window.fetch('/api/status');const first=reloads;"
+               "now+=30000;await window.fetch('/api/status');await window.fetch('/api/projects');"
+               "now+=200000;await window.fetch('/api/status');"
+               "console.log(JSON.stringify([first,reloads,added.length,said]))})()")
+        r = subprocess.run([NODE, "-e", src], capture_output=True, text=True, timeout=30)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        first, reloads, banners, said = json.loads(r.stdout)
+        self.assertEqual(first, 1)            # the first refusal: reload, which signs in again
+        self.assertEqual(banners, 1)          # again within two minutes: one message with a button, no reload loop
+        self.assertEqual(reloads, 2)          # after two minutes it may try once more
+        self.assertEqual(said, ["Signing you in again…", "Signing you in again…"])
+
     def test_the_problem_is_written_to_the_log_short_and_plain(self):
         import contextlib
         import io

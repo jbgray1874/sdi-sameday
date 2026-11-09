@@ -1133,6 +1133,28 @@ const esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&g
 let who;try{who=localStorage.getItem("liteWho")||("u"+Math.random().toString(36).slice(2,9));localStorage.setItem("liteWho",who)}catch(e){who="u"+Math.random().toString(36).slice(2,9)}
 let fresh=false,busy=false,step=0,gallery=[],optBox=null,refBox=null,brief={},sid=null;
 function toast(m,ms){const e=$("#toast");e.textContent=m;e.classList.add("on");clearTimeout(e._t);e._t=setTimeout(()=>e.classList.remove("on"),ms||2200)}
+// 9 Nov 2026 (James: "AI spend today $NaN ... I still can't open previous packs"; /api/status said "Signed out").
+// SDI Intelligence's sign-in lasts 10 hours (SDI_SESSION_HOURS). A page left open longer kept working on screen while
+// every request was refused. Loading the page signs in again - silently, since Microsoft already knows who it is - so
+// the first refusal reloads it, back into the same chat. If that doesn't help within two minutes, it says so instead
+// of reloading for ever.
+function signedOut(){let last=0;try{last=+sessionStorage.getItem("liteResign")||0}catch(e){}
+ if(Date.now()-last>120000){try{sessionStorage.setItem("liteResign",String(Date.now()))}catch(e){}
+  toast("Signing you in again…",4000);setTimeout(()=>location.reload(),600);return "reload"}
+ if(!document.getElementById("resign")){const b=document.createElement("div");b.id="resign";b.setAttribute("role","alert");
+  b.style.cssText="position:fixed;left:12px;right:12px;bottom:16px;z-index:999;max-width:560px;margin:0 auto;padding:14px 16px;"
+   +"border-radius:14px;background:#17181B;color:#fff;font:15px/1.45 system-ui,sans-serif;box-shadow:0 8px 30px rgba(0,0,0,.35)";
+  b.innerHTML='Your SDI sign-in has run out and signing in again didn\'t take. <button type="button" style="margin-left:6px;'
+   +'border:0;border-radius:999px;padding:6px 14px;background:#F6D946;color:#000;font-weight:600;cursor:pointer">Sign in again</button>'
+   +'<div style="opacity:.75;font-size:13px;margin-top:6px">If it keeps happening, close this tab and open SDI Live from the app portal.</div>';
+  b.querySelector("button").onclick=()=>{try{sessionStorage.removeItem("liteResign")}catch(e){}location.reload()};
+  document.body.appendChild(b)}
+ return "said"}
+function watchSignIn(){const F=window.fetch;
+ window.fetch=async function(u,o){const r=await F.apply(this,arguments);
+  if(r&&r.status===401&&typeof u==="string"&&u.charAt(0)==="/"&&u.indexOf("page-problem")<0)signedOut();
+  return r}}
+watchSignIn();
 let briefHave=0;
 function setStep(n){step=Math.max(step,n);$("#steps").innerHTML=`<button class="menu" id="menu" aria-label="Menu">☰<svg class="svgi" style="display:block" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M4 12h16M4 17h10"/></svg></button><div class="crumb" id="crumb"></div>`+STEPS.map((s,i)=>`<div class="st ${i<step?"done":i===step?"now":""}"><i>${i<step?"✓":i+1}</i>${s}</div>`).join("")
   +`<button class="mbar mbrief ${briefHave>=5?"full":""}" id="mbrief" aria-label="The brief">${briefHave}/5</button><button class="mbar" id="mnew" aria-label="New chat"><svg class="svgi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.4 2.6a1 1 0 0 1 3 3l-9 9a2 2 0 0 1-.85.5l-2.87.84a.5.5 0 0 1-.62-.62l.84-2.87a2 2 0 0 1 .5-.85z"/></svg></button><div class="mprog"><i style="width:${Math.round(100*(step+1)/STEPS.length)}%"></i></div>`;
