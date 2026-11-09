@@ -1132,7 +1132,7 @@ const $=s=>document.querySelector(s),log=$("#log"),t=$("#t");
 const esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 let who;try{who=localStorage.getItem("liteWho")||("u"+Math.random().toString(36).slice(2,9));localStorage.setItem("liteWho",who)}catch(e){who="u"+Math.random().toString(36).slice(2,9)}
 let fresh=false,busy=false,step=0,gallery=[],optBox=null,refBox=null,brief={},sid=null;
-function toast(m){const e=$("#toast");e.textContent=m;e.classList.add("on");clearTimeout(e._t);e._t=setTimeout(()=>e.classList.remove("on"),2200)}
+function toast(m,ms){const e=$("#toast");e.textContent=m;e.classList.add("on");clearTimeout(e._t);e._t=setTimeout(()=>e.classList.remove("on"),ms||2200)}
 let briefHave=0;
 function setStep(n){step=Math.max(step,n);$("#steps").innerHTML=`<button class="menu" id="menu" aria-label="Menu">☰<svg class="svgi" style="display:block" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M4 12h16M4 17h10"/></svg></button><div class="crumb" id="crumb"></div>`+STEPS.map((s,i)=>`<div class="st ${i<step?"done":i===step?"now":""}"><i>${i<step?"✓":i+1}</i>${s}</div>`).join("")
   +`<button class="mbar mbrief ${briefHave>=5?"full":""}" id="mbrief" aria-label="The brief">${briefHave}/5</button><button class="mbar" id="mnew" aria-label="New chat"><svg class="svgi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.4 2.6a1 1 0 0 1 3 3l-9 9a2 2 0 0 1-.85.5l-2.87.84a.5.5 0 0 1-.62-.62l.84-2.87a2 2 0 0 1 .5-.85z"/></svg></button><div class="mprog"><i style="width:${Math.round(100*(step+1)/STEPS.length)}%"></i></div>`;
@@ -1845,11 +1845,16 @@ function reportProblem(what){try{fetch("/api/page-problem",{method:"POST",header
  body:JSON.stringify({what:String(what).slice(0,400),chat:sid||""})}).catch(()=>{})}catch(e){}}
 async function openSession(id){
  // 9 Nov 2026: a chat that would not open used to do nothing at all. Now it says why, and the reason is logged.
+ // The reason is the server's own words where it gives them ("Signed out - ...", "SDI Live isn't answering ...").
+ // A restart takes a few seconds, so a busy or restarting answer is tried once more before it is reported.
  let r;
- try{const res=await fetch("/api/session/"+id);
-  if(!res.ok)throw new Error(res.status===404?"it isn't there any more":"the server answered "+res.status);
-  r=await res.json();if(!r||!r.session)throw new Error("the server sent no chat")}
- catch(e){toast("Couldn't open that chat: "+(e.message||e)+". Try again in a moment.");reportProblem("open chat "+id+": "+(e.message||e));return}
+ for(let attempt=0;attempt<2;attempt++){
+  try{const res=await fetch("/api/session/"+id);let body=null;try{body=await res.json()}catch(e){}
+   if(!res.ok)throw Object.assign(new Error(body&&body.error?String(body.error).replace(/\.$/,""):
+     res.status===404?"it isn't there any more":"the server answered "+res.status),{retry:res.status===503});
+   if(!body||!body.session)throw new Error("the server sent no chat");r=body;break}
+  catch(e){if(attempt===0&&(e.retry||e instanceof TypeError)){await new Promise(ok=>setTimeout(ok,3000));continue}
+   toast("Couldn't open that chat: "+(e.message||e)+". Try again in a moment.",8000);reportProblem("open chat "+id+": "+(e.message||e));return}}
  try{await showSession(id,r)}
  catch(e){toast("Part of that chat couldn't be shown. It's been noted.");reportProblem("show chat "+id+": "+(e&&e.stack||e))}}
 async function showSession(id,r){leavePage();if(rt)rtStop();sid=id;rememberChat();fresh=false;
@@ -1861,7 +1866,13 @@ async function showSession(id,r){leavePage();if(rt)rtStop();sid=id;rememberChat(
   else if(m.text&&!m.media)render({type:"text",text:m.text,role:/^From our history/.test(m.text)?"history":""})}
  for(const f of r.files){const sh=/^Concept/.test(f.name);render({type:"document",url:f.url,caption:sh?"Client concept sheet":"Full brief pack (internal)",role:sh?"sheet":"brief"})}
  $("#rail").classList.remove("open")}
-async function status(){const s=await fetch("/api/status").then(r=>r.json()).catch(()=>null);if(!s){setTimeout(status,4000);return}
+// 9 Nov 2026 (James: "AI spend today $NaN of $undefined"): an answer that isn't the status - SDI Intelligence saying
+// "Signed out" or "SDI Live isn't answering" - was drawn as if it were. Now it says what came back, once, and tries again.
+async function status(){const s=await fetch("/api/status").then(r=>r.json()).catch(()=>null);
+ if(!s||s.spent_today==null){$("#spend").textContent="-";$("#cap").textContent="-";
+  if(s&&s.error&&!status.told){status.told=1;toast(s.error,8000);reportProblem("status: "+s.error)}
+  setTimeout(status,4000);return}
+ status.told=0;
  $("#dots").innerHTML=[[s.search_ready,"Past work"],[s.openai_key,"Visuals"],[s.whatsapp,"WhatsApp"]].map(([ok,l])=>`<span><i class="${ok?"ok":"off"}"></i>${l}</span>`).join("");
  $("#spend").textContent="$"+(+s.spent_today).toFixed(2);$("#cap").textContent="$"+s.cap;$("#meterbar").style.width=Math.min(100,100*s.spent_today/s.cap)+"%";
  if(!s.search_ready)setTimeout(status,5000)}

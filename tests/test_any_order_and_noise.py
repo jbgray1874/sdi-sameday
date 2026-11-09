@@ -1439,8 +1439,29 @@ class AChatAlwaysOpensOrSaysWhyTests(unittest.TestCase):
         self.assertEqual(sent[0]["what"], "open chat abc: the server answered 500")
         said, _ = open_with(404, "({})")
         self.assertIn("it isn't there any more", said[0])
+        said, sent = open_with(401, "({error:'Signed out - open SDI Live again from the app portal.'})")
+        self.assertIn("Couldn't open that chat: Signed out - open SDI Live again from the app portal.", said[0])
         said, sent = open_with(200, "({session:{project:'p_andy'},messages:[],files:[]})")
         self.assertEqual((said, sent), (["shown"], []))
+
+    @unittest.skipUnless(NODE, "node is not installed")
+    def test_the_spend_line_never_shows_nan(self):
+        """9 Nov 2026: "AI spend today $NaN of $undefined" - SDI Intelligence's own answer drawn as if it were the status."""
+        def status_with(body):
+            src = ("const said=[],sent=[],els={};const $=s=>els[s]||(els[s]={textContent:'',innerHTML:'',style:{}});"
+                   "const toast=m=>said.push(m);const reportProblem=w=>sent.push(w);let sid=null;"
+                   "const setTimeout=()=>0;const fetch=async()=>({json:async()=>%s});\n" % body
+                   + "async " + page_fn("status")
+                   + "\nstatus().then(()=>console.log(JSON.stringify([els['#spend'].textContent,els['#cap'].textContent,said,sent])))")
+            r = subprocess.run([NODE, "-e", src], capture_output=True, text=True, timeout=30)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            return json.loads(r.stdout)
+        spend, cap, said, sent = status_with("({error:\"SDI Live isn't answering on the server just now.\"})")
+        self.assertEqual((spend, cap), ("-", "-"))
+        self.assertEqual(said, ["SDI Live isn't answering on the server just now."])
+        self.assertEqual(sent, ["status: SDI Live isn't answering on the server just now."])
+        spend, cap, said, _ = status_with("({search_ready:true,openai_key:true,whatsapp:false,spent_today:1.5,cap:20})")
+        self.assertEqual((spend, cap, said), ("$1.50", "$20", []))
 
     def test_the_problem_is_written_to_the_log_short_and_plain(self):
         import contextlib
