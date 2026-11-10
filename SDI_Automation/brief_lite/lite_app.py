@@ -3859,6 +3859,7 @@ def api_rt_tool():
             return jsonify({"slow": False, "output": json.dumps({"note": (
                 f"Not changed: the AM said \"{last_[:60]}\", which doesn't name a pack. It's {convo.pack_label(b_)}. Don't ask "
                 "the pack question again - follow what they just said. They can change the pack any time by saying so.")})})
+    gave_up_ref = False
     if js.get("name") == "make_concepts":
         b_ = s["brief"]
         if args.get("design_route") == "new" and (ref_pending(b_) or b_.get("_ref_job")):
@@ -3885,8 +3886,21 @@ def api_rt_tool():
                             f"mean {b_['_ref_confirm']['label']}?' If yes, call make_concepts again (it will follow that job)."
                             + way_out})})
         if b_.get("_ref_ask"):
-            return jsonify({"slow": False, "output": json.dumps({"error": "Not drawing yet - more than one past job fits. Read "
-                            "these out and ask which one they mean: " + "; ".join(b_["_ref_ask"][:3]) + "." + way_out})})
+            # 10 Nov 2026 (Muhammad: "it was still pushing down the particular job reference"). After the first render a
+            # liked job was saved and three past jobs read out; his answer was saved as a new liked job, looked up again,
+            # and a different three read out - round and round. One list per brief: an answer that doesn't pick from it
+            # lets the past job go, and it's drawn as a new design.
+            if b_.get("_ref_ask_read"):
+                drop_ref(b_)
+                b_["design_route"] = "new"
+                gave_up_ref = True
+                save_session(s)
+            else:
+                b_["_ref_ask_read"] = list(b_["_ref_ask"])
+                save_session(s)
+                return jsonify({"slow": False, "output": json.dumps({"error": "Not drawing yet - more than one past job fits. "
+                                "Read these out and ask which one they mean: " + "; ".join(b_["_ref_ask"][:3]) + "."
+                                + way_out})})
         if b_.get("_ref_more") and not b_.get("_ref_job"):
             return jsonify({"slow": False, "output": json.dumps({"error": "Not drawing yet - the past job they asked for wasn't "
                             "found. Ask once for its job number (digit by digit is fine). Never draw from a job they didn't "
@@ -3910,6 +3924,9 @@ def api_rt_tool():
         drawing = js.get("name") in ("make_concepts", "change_option", "more_options")
         return jsonify({"turn": jid, "slow": True,
                         "output": json.dumps({"started": True, "note": (
+                            ("Which past job they meant couldn't be pinned down from the list already read out, so it's "
+                             "drawn as a new design - say that in one line; if they want a past job followed, they can say "
+                             "its job number. Never read out another list of past jobs. " if gave_up_ref else "") +
                             "It's being drawn now - about a minute. Tell the AM in one short line, then WAIT: ask nothing and "
                             "don't move on until it's on screen." if drawing else
                             "Working on it - it appears on screen shortly. Tell the AM in one short line.")})})

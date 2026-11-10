@@ -940,6 +940,44 @@ class LettingGoOfAPastJobTests(unittest.TestCase):
         self.assertEqual(len(started), 1)
         self.assertNotIn("_ref_confirm", L._session_by_id(self.s["id"])["brief"])
 
+    def test_one_list_of_past_jobs_per_brief_never_round_and_round(self):
+        """10 Nov 2026 (Muhammad: "it was still pushing down the particular job reference"). After the first render a
+        liked job was saved and three past jobs read out (8928, 6548, 5988); his answer was saved as a new liked job and
+        a different three read out (12271, 4970, ...) - round and round, never drawn."""
+        def draw():
+            keep = (L._start_turn, L._busy_until_done)
+            started = []
+
+            def fake_turn(*a, **k):
+                started.append(a)
+                L.JOBS["fake"] = {"ch": L.Channel("pending"), "done": True, "session": self.s["id"], "brief": {},
+                                  "error": None}
+                return "fake"
+            L._start_turn, L._busy_until_done = fake_turn, (lambda *a: None)
+            try:
+                out = json.loads(self.client.post("/api/rt/tool", json={
+                    "session": self.s["id"], "name": "make_concepts",
+                    "arguments": {"output": "3D render", "design_route": "past"}}).get_json()["output"])
+            finally:
+                L._start_turn, L._busy_until_done = keep
+            return out, started
+        self.brief(_ref_ask=["8928 - Gift Card Gondola End (2021-09)", "6548 - Tesco Transformation Gondola End (2016-09)"])
+        out, started = draw()
+        self.assertIn("more than one past job fits", out["error"])      # the first list is read out
+        self.assertEqual(started, [])
+        self.brief(_ref_ask=["12271 - Stationary Branded Double Mod Refresh (2026-01)", "4970 - Tesco Bank Queue Barrier"])
+        out, started = draw()                                            # a second list: never read out
+        self.assertTrue(out.get("started"), out)
+        self.assertEqual(len(started), 1)
+        self.assertIn("couldn't be pinned down", out["note"])
+        self.assertIn("Never read out another list", out["note"])
+        b = L._session_by_id(self.s["id"])["brief"]
+        self.assertNotIn("_ref_ask", b)
+        self.assertEqual(b.get("design_route"), "new")
+        self.brief(_ref_ask=["8928 - Gift Card Gondola End (2021-09)"])  # and none after that, in this brief
+        out, _ = draw()
+        self.assertTrue(out.get("started"), out)
+
     def test_something_new_saved_as_the_liked_job_is_not_looked_up(self):
         self.brief(liked_job="something new, not the old one")
         keep = L.ref_lookup
