@@ -1035,6 +1035,227 @@ class LettingGoOfAPastJobTests(unittest.TestCase):
         self.assertNotIn("pollQuiet(j.turn,w)", page)
 
 
+GONDOLA_JOBS = [("5988", "5988 - Tesco Gondola End", "2016-01-20"), ("8928", "8928 - Gift Card Gondola End", "2021-09-01"),
+                ("6548", "6548 - Tesco Transformation Gondola End", "2016-09-01"),
+                ("12271", "12271 - Stationary Branded Double Mod Refresh", "2026-01-10"),
+                ("4970", "4970 - Tesco Bank Queue Barrier Gift Card Unit", "2015-05-01")]
+FIRST_LIST = ["8928 - Gift Card Gondola End (2021-09)", "6548 - Tesco Transformation Gondola End (2016-09)",
+              "5988 - Tesco Gondola End (2016-01)"]
+
+
+class ASaidJobNumberIsTheJobTests(unittest.TestCase):
+    """10 November 2026, Muhammad's call (chat 9de922ce52), and James: "That's still wrong, because he'd clearly asked
+    for 5988 - this is to be the basis for the new one. The look and feel, but of course he can ask for a different
+    colour, dimensions etc." He said "five nine double eight" five times and "yes" to "5988 - Tesco Gondola End, is that
+    the one?", and was offered 8928, 6548, then 12271, 4970, then "do you mean 12271?" ("double" matched "Double Mod").
+    "One two four zero eight" wasn't on file and was never said to be missing. And "a new render referencing 5988" was
+    sent as design_route 'new', which let 5988 go."""
+
+    def setUp(self):
+        import lite_search, sqlite3
+        self.S = lite_search
+        self.keep = {k: getattr(lite_search, k) for k in ("JOBS_DB", "ESTIMATES_DB", "PICTURES", "WALK_SECONDS")}
+        self.dir = Path(tempfile.mkdtemp(prefix="saidjob-"))
+        _past_jobs_index(self.dir)
+        con = sqlite3.connect(self.dir / "projects.db")
+        con.executemany("INSERT INTO projects (job_no, name, brand, folder, first_date, last_date, n_drawings, n_images, "
+                        "n_renders) VALUES (?,?,?,?,?,?,0,0,0)",
+                        [(j, nm, "Tesco", rf"W:\Tesco\{j}", d, d) for j, nm, d in GONDOLA_JOBS])
+        con.commit()
+        con.close()
+        self._fresh(JOBS_DB=str(self.dir / "projects.db"), ESTIMATES_DB=str(self.dir / "knowledge.db"),
+                    PICTURES=str(self.dir / "all_img_index.npz"))
+        self.client = L.app.test_client()
+        self.who = new_chat()
+        _, self.s = say(self.who, "Tesco want a gondola end", {"client": "Tesco", "unit_type": "gondola end"})
+        self.stub, L.ref_lookup = L.ref_lookup, REF_LOOKUP          # the real look-up, on the small job index
+
+    def _fresh(self, **attrs):
+        if self.S._state.get("con"):
+            self.S._state["con"].close()
+        for d in (self.S._state, self.S._pic, self.S._clip):
+            d.clear()
+        for k, v in attrs.items():
+            setattr(self.S, k, v)
+
+    def tearDown(self):
+        L.ref_lookup = self.stub
+        self._fresh(**self.keep)
+        shutil.rmtree(self.dir, ignore_errors=True)
+
+    def brief(self, **state):
+        s = L._session_by_id(self.s["id"])
+        s["brief"].update(state)
+        L.save_session(s)
+        return s
+
+    def on_the_call(self, text):
+        """A line the AM says on the call: logged (as /api/rt/log does) and read the way the call reads it."""
+        L.log_msg(self.s["id"], "in", text)
+        L.handle(self.who, "Test", text, voice=True, record_only=True, sid=self.s["id"])
+        return L._session_by_id(self.s["id"])["brief"]
+
+    def draw(self, route="past"):
+        keep = (L._start_turn, L._busy_until_done)
+        started = []
+
+        def fake_turn(*a, **k):
+            started.append(k.get("t_override"))
+            L.JOBS["fake"] = {"ch": L.Channel("pending"), "done": True, "session": self.s["id"], "brief": {}, "error": None}
+            return "fake"
+        L._start_turn, L._busy_until_done = fake_turn, (lambda *a: None)
+        try:
+            out = json.loads(self.client.post("/api/rt/tool", json={
+                "session": self.s["id"], "name": "make_concepts",
+                "arguments": {"output": "3D render", "design_route": route}}).get_json()["output"])
+        finally:
+            L._start_turn, L._busy_until_done = keep
+        return out, started
+
+    def test_job_numbers_read_out_in_words(self):
+        for said, digits in (("five nine double eight", "5988"), ("one two four zero eight", "12408"),
+                             ("fifty nine eighty eight", "5988"), ("twelve four oh eight", "12408"),
+                             ("twelve thousand four hundred and eight", "12408"), ("one, two, one, four, eight", "12148"),
+                             ("5 9 double 8", "5988"), ("ten five one nine", "10519")):
+            with self.subTest(said=said):
+                self.assertEqual(L.spoken_digits(said), digits)
+        for said in ("one or two shelves", "a double sided unit", "the one with two shelves", "Oh, the one we did",
+                     "make it double", "two or three"):
+            with self.subTest(said=said):
+                self.assertNotRegex(L.spoken_digits(said), r"\d{3}")
+
+    def test_a_size_a_quantity_money_or_a_year_is_not_a_job(self):
+        for said in ("1800 high, 600 wide and 400 deep", "1800 x 600 x 400", "eighteen hundred high", "budget of £5000",
+                     "about 3000 units", "the 2016 one", "for 200 stores", "store 4567", "two thousand units",
+                     "order number 45678"):
+            with self.subTest(said=said):
+                self.assertEqual(L.said_jobs(said), [])
+        self.assertEqual([x["n"] for x in L.said_jobs("Do you know about the job number one two four zero eight?")],
+                         ["12408"])
+        self.assertTrue(L.said_jobs("job number 12408")[0]["strong"])
+
+    def test_a_bare_number_answering_another_question_is_not_a_job(self):
+        import sqlite3
+        con = sqlite3.connect(self.dir / "projects.db")
+        con.execute("INSERT INTO projects (job_no, name, brand, last_date) VALUES ('1800', '1800 - Old Plinth', 'Boots', "
+                    "'2009-01-01')")
+        con.commit()
+        con.close()
+        self._fresh()
+        for said in ("1800, 600, 400", "eighteen hundred", "1800"):
+            with self.subTest(said=said):
+                b = self.on_the_call(said)
+                self.assertNotIn("_ref_confirm", b)
+        self.brief(_ref_job="5988", design_route="past")
+        b = self.on_the_call("make it 1800")
+        self.assertEqual(b.get("_ref_job"), "5988")
+        self.assertNotIn("_ref_confirm", b)
+
+    def test_muhammads_call_follows_5988(self):
+        self.brief(_ref_ask=list(FIRST_LIST), _ref_ask_read=list(FIRST_LIST), liked_job="our past jobs")
+        b = self.on_the_call("Do you know about the job number one two four zero eight?")
+        self.assertEqual(b.get("_ref_missing"), "12408")             # said to be missing, never swapped for a list
+        self.assertNotIn("_ref_ask", b)
+        told = json.loads(rt.tool_result(L._session_by_id(self.s["id"]), []))["which_past_job"]
+        self.assertIn("12408", told["not_on_file"])
+        self.assertIn("Never offer other jobs", told["not_on_file"])
+        b = self.on_the_call("Could you make me a new render from five nine double eight?")
+        self.assertTrue(b["_ref_confirm"]["label"].startswith("5988 - Tesco Gondola End (2016-01)"), b.get("_ref_confirm"))
+        self.assertNotIn("_ref_missing", b)
+        b = self.on_the_call("Yes.")
+        self.assertEqual(b.get("_ref_job"), "5988")
+        self.assertEqual(b.get("design_route"), "past")
+        out, started = self.draw("new")                             # the voice sent "a new render" as 'new'
+        self.assertTrue(out.get("started"), out)
+        b = L._session_by_id(self.s["id"])["brief"]
+        self.assertEqual(b.get("_ref_job"), "5988")                  # still the basis
+        self.assertEqual(started[0]["updates"].get("design_route"), "past")
+        self.assertIn("basis", json.loads(rt.tool_result(L._session_by_id(self.s["id"]), []))["following_past_job"])
+
+    def test_the_basis_stays_through_colour_and_size_changes(self):
+        self.brief(_ref_job="5988", design_route="past", liked_job="5988 - Tesco Gondola End (2016-01) - the AM asked "
+                                                                   "to follow it closely")
+        for said in ("make it a completely different colour, blue", "brand new graphics on the header",
+                     "make it 1800 high and 900 wide", "a new render in black please", "no, not that colour"):
+            with self.subTest(said=said):
+                b = self.on_the_call(said)
+                self.assertEqual(b.get("_ref_job"), "5988")
+        b = self.on_the_call("actually forget the past job, start again")
+        self.assertNotIn("_ref_job", b)                             # only their own words let it go
+
+    def test_saying_it_again_after_the_read_back_is_a_yes(self):
+        b = self.on_the_call("refer to five nine double eight")
+        self.assertTrue(b["_ref_confirm"]["label"].startswith("5988"))
+        self.assertNotIn("_ref_job", b)                             # read back first
+        b = self.on_the_call("One to follow five nine double eight")
+        self.assertEqual(b.get("_ref_job"), "5988")
+
+    def test_a_number_beats_the_words_in_a_list(self):
+        self.brief(_ref_ask=["12271 - Stationary Branded Double Mod Refresh (2026-01)",
+                             "4970 - Tesco Bank Queue Barrier Gift Card Unit (2015-05)"])
+        b = self.on_the_call("Five nine double eight.")
+        self.assertTrue(b["_ref_confirm"]["label"].startswith("5988"), b.get("_ref_confirm"))
+        self.assertNotIn("_ref_ask", b)
+
+    def test_a_number_is_never_a_word_search(self):
+        b = self.on_the_call("Just make a render, new render referencing 5988")
+        self.assertTrue(b["_ref_confirm"]["label"].startswith("5988"), b)
+        self.assertNotIn("_ref_ask", b)
+
+    def test_a_render_asked_for_from_a_number_is_checked_once_then_drawn(self):
+        L.log_msg(self.s["id"], "in", "new render referencing five nine double eight")
+        out, started = self.draw("new")
+        self.assertIn("Do you mean 5988 - Tesco Gondola End", out["error"])
+        self.assertEqual(started, [])
+        self.on_the_call("yes")
+        out, started = self.draw("new")
+        self.assertTrue(out.get("started"), out)
+        self.assertEqual(L._session_by_id(self.s["id"])["brief"].get("_ref_job"), "5988")
+
+    def test_a_number_not_on_file_is_said_once_then_it_is_a_new_design(self):
+        b = self.on_the_call("refer to job one two four zero eight")
+        self.assertEqual(b.get("_ref_missing"), "12408")
+        out, started = self.draw()
+        self.assertIn("12408 isn't in SDI's past jobs", out["error"])
+        self.assertIn("1 2 4 0 8", out["error"])
+        b = self.on_the_call("yes, one two four zero eight")
+        self.assertNotIn("_ref_missing", b)
+        self.assertEqual(b.get("_ref_not_on_file"), "12408")
+        self.assertEqual(b.get("design_route"), "new")
+        self.assertIn("12408 isn't on file", json.loads(rt.tool_result(L._session_by_id(self.s["id"]), []))
+                      ["which_past_job"]["dropped"])
+        out, started = self.draw()
+        self.assertTrue(out.get("started"), out)                    # no list, no second ask
+
+    def test_drawn_anyway_after_missing_is_told_once(self):
+        self.on_the_call("refer to job 12408")
+        out, _ = self.draw()
+        self.assertIn("12408", out["error"])
+        out, started = self.draw()
+        self.assertTrue(out.get("started"), out)
+        self.assertIn("12408 isn't in SDI's past jobs", out["note"])
+
+    def test_misheard_and_corrected(self):
+        self.on_the_call("refer to job 12408")
+        b = self.on_the_call("no, it's one two one four eight")
+        self.assertNotIn("_ref_missing", b)
+        self.assertTrue(b["_ref_confirm"]["label"].startswith("12148"))
+
+    def test_turning_it_down_by_number(self):
+        self.brief(_ref_job="5988", design_route="past", liked_job="5988 - Tesco Gondola End - the AM asked to follow it "
+                                                                   "closely")
+        b = self.on_the_call("I don't want 5988, let's do something new")
+        self.assertNotIn("_ref_job", b)
+        self.assertEqual(b.get("design_route"), "new")
+
+    def test_a_new_design_said_plainly_still_lets_a_pending_job_go(self):
+        self.brief(_ref_confirm={"label": "5988 - Tesco Gondola End (2016-01)", "hint": "", "others": []})
+        L.log_msg(self.s["id"], "in", "no, let's do something completely new")
+        out, started = self.draw("new")
+        self.assertTrue(out.get("started"), out)
+        self.assertNotIn("_ref_confirm", L._session_by_id(self.s["id"])["brief"])
+
+
 class StillTrueTests(unittest.TestCase):
     """What Muhammad's earlier fixes guard, unchanged by any of this."""
 

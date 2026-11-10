@@ -2131,12 +2131,167 @@ SHOW_REF = re.compile(r"\b(show|open|see|view|pull up|bring up|display)\b.{0,40}
                       r"drawings|ga|pdf|render|renders|picture|pictures|job|one|\d{3,6})\b|\bwhat does (it|that|this) look like\b", re.I)
 
 
+# 10 Nov 2026 (Muhammad's call): "five nine double eight" and "one two four zero eight" were job numbers said out loud.
+# Nothing here read number words, so "double" matched "Stationary Branded Double Mod Refresh" and a word search offered
+# jobs he never named. Number words said in a run are a number: "five nine double eight" 5988, "fifty nine eighty eight"
+# 5988, "twelve four oh eight" 12408, "twelve thousand four hundred and eight" 12408.
+_ONES = {"zero": 0, "nought": 0, "nil": 0, "oh": 0, "o": 0, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6,
+         "seven": 7, "eight": 8, "nine": 9}
+_TEENS = {"ten": 10, "eleven": 11, "twelve": 12, "thirteen": 13, "fourteen": 14, "fifteen": 15, "sixteen": 16,
+          "seventeen": 17, "eighteen": 18, "nineteen": 19}
+_TENS = {"twenty": 20, "thirty": 30, "forty": 40, "fourty": 40, "fifty": 50, "sixty": 60, "seventy": 70, "eighty": 80,
+         "ninety": 90}
+_NUM_TOK = r"(?:\d+|" + "|".join(sorted(list(_ONES) + list(_TEENS) + list(_TENS) + ["double", "triple", "hundred",
+                                                                                     "thousand"], key=len, reverse=True)) + ")"
+_NUM_RUN = re.compile(rf"\b{_NUM_TOK}(?:(?:[\s,]+|-)(?:and\s+)?{_NUM_TOK})*\b", re.I)
+
+
+def _run_digits(run):
+    """One run of number words (and digits) as the digits it says, or None when it isn't a number read out."""
+    toks = [w.lower() for w in re.findall(r"\d+|[a-z]+", run, re.I) if w.lower() != "and"]
+    while toks and toks[0] in ("oh", "o"):
+        toks.pop(0)                       # "Oh, five nine ..." - a sound, not a nought
+    if len(toks) < 2 or not any(not w.isdigit() for w in toks) or any(w.isdigit() and len(w) > 2 for w in toks):
+        return None                       # "the 2016 one" is a year and a word, not 20161
+    if any(w in ("hundred", "thousand") for w in toks):
+        total = cur = 0
+        for w in toks:
+            if w.isdigit():
+                cur += int(w)
+            elif w in _ONES or w in _TEENS or w in _TENS:
+                cur += _ONES.get(w, _TEENS.get(w, _TENS.get(w, 0)))
+            elif w == "hundred":
+                cur = (cur or 1) * 100
+            elif w == "thousand":
+                total, cur = total + (cur or 1) * 1000, 0
+            else:
+                return None
+        return str(total + cur)
+    out, rep, i = "", 1, 0
+    while i < len(toks):
+        w = toks[i]
+        if w in ("double", "triple"):
+            if rep != 1:
+                return None
+            rep, i = (2 if w == "double" else 3), i + 1
+            continue
+        if w.isdigit():
+            d = w
+        elif w in _ONES:
+            d = str(_ONES[w])
+        elif w in _TEENS:
+            d = str(_TEENS[w])
+        elif w in _TENS:
+            d = str(_TENS[w])
+            if i + 1 < len(toks) and _ONES.get(toks[i + 1]) and toks[i + 1] not in ("oh", "o"):
+                d, i = str(_TENS[w] + _ONES[toks[i + 1]]), i + 1        # "fifty nine" 59
+        else:
+            return None
+        if rep > 1:
+            if len(d) != 1:
+                return None
+            d, rep = d * rep, 1
+        out += d
+        i += 1
+    return out if rep == 1 and len(out) >= 3 else None
+
+
+def spoken_digits(text):
+    """The text with job numbers read out in words written as digits ("five nine double eight" -> "5988"). Anything
+    that isn't a number read out (one word, "one or two", "double sided") is left as it was."""
+    return _NUM_RUN.sub(lambda m: _run_digits(m.group(0)) or m.group(0), text or "")
+
+
+# what a number is when it isn't a job: a size, a quantity, money, a store or order number
+_NOT_JOB_BEFORE = re.compile(r"(?:[£$€]|\b(?:x|by|budget|cost|costs|price|spend|order|orders|ordering|po|invoice|phone|tel|"
+                             r"mobile|store|shop|branch|site|sku|item|product|part|code|ean|barcode|account|ticket|room|page|"
+                             r"model|quantity|qty|run of|up to|at least|over|under)(?:\s+(?:of|is|was|number|no\.?))?)\W{0,2}$",
+                             re.I)
+_NOT_JOB_AFTER = re.compile(r"^\s*(?:mm|cm|m\b|metres?|meters?|millimet|high|tall|wide|deep|depth|width|height|x\b|×|by\b|"
+                            r"kg|units?\b|pcs|pieces|stores?|shops?|branches|sites|quid|pounds?|k\b|grand|percent|%|bays?\b|"
+                            r"shelves|hooks|facings|skus|products|items|off\b|of (?:them|these|those)|times|hours|days|"
+                            r"weeks|minutes)", re.I)
+_JOB_WORD = re.compile(r"(?:\b(?:job|jobs|drawing|drawings|dwg|ga|project|ref|reference|referencing|refer(?:ring)? to|number|"
+                       r"no\.?|follow|following|based on|base it on|use|using)|#)\W{0,3}$", re.I)
+_JOB_WORD_YEAR = re.compile(r"(?:\b(?:job|drawing|dwg|project|ref|reference|number|no\.?)|#)\W{0,3}$", re.I)
+_NEGATED = re.compile(r"\b(?:not|don'?t|do not|didn'?t|isn'?t|wasn'?t|never|without|forget|drop|ignore)\b[^.?!,;]{0,14}$", re.I)
+REF_CTX = re.compile(r"\b(refer\w*|reference\w*|based? (it )?on|follow\w*|job|jobs|number|drawing|drawings|dwg|ga|project|"
+                     r"past|previous|old one|same as|similar to|like (the|that|this|job|number)|"
+                     r"(render|design|drawing|it|one|work|look)\s+(off|from)|the one|that one|this one|use|using)\b|#", re.I)
+_FILLER = set("yes yeah yep yup ok okay so um uh er erm it its it's is the a job number no that this one please sorry i "
+              "said mean meant was correct right go with for to follow use that's thats".split())
+
+
+def said_jobs(text):
+    """The job numbers in what the AM said, in order: [{"n", "strong" (a job word just before it), "neg" ("not 5988")}].
+    Sizes, quantities, money, store / order numbers and bare years are left out."""
+    t = spoken_digits(text)
+    out = []
+    for m in re.finditer(r"\d+(?:[ :\-./]\d+)*", t):
+        groups = re.findall(r"\d+", m.group(0))
+        joined = "".join(groups)
+        if len(groups) > 1 and 3 <= len(joined) <= 6:
+            parts = [(joined, m.start(), m.end())]           # "12 148", "1:148", "59 88"
+        else:
+            parts, at = [], m.start()
+            for g in groups:
+                k = t.index(g, at)
+                parts.append((g, k, k + len(g)))
+                at = k + len(g)
+        for n, a, z in parts:
+            before, after = t[max(0, a - 40):a], t[z:z + 20]
+            if not 3 <= len(n) <= 6 or _NOT_JOB_BEFORE.search(before) or _NOT_JOB_AFTER.match(after):
+                continue
+            if re.search(r"\d\s*[x×]\s*$", before) or re.match(r"\s*[.,]\d", after):
+                continue                                     # "1800 x 600", "1.5"
+            strong = bool(_JOB_WORD.search(before))
+            if re.fullmatch(r"(19|20)\d\d", n) and not _JOB_WORD_YEAR.search(before):
+                continue                                     # "the 2016 one" is when, not which
+            if len(n) == 3 and not strong:
+                continue
+            out.append({"n": n, "strong": strong, "neg": bool(_NEGATED.search(before))})
+    return out
+
+
+def said_job(b, text):
+    """10 Nov 2026 (Muhammad): the job number the AM said and means as a past job - it beats any word search. Returns
+    {"n", "row" (its line in SDI's job index, or None when it isn't there)}, {"n", "neg": True} when the only one said was
+    turned down ("not 5988"), or None when they didn't say one."""
+    t = spoken_digits(text or "")
+    c = said_jobs(t)
+    if not c:
+        return None
+    pending = ref_pending(b)              # a job being checked or asked for - not one already chosen ("make it 1200")
+    ctx = bool(REF_CTX.search(t))
+    short = len([w for w in re.findall(r"[a-z']+", re.sub(r"\d+", " ", t.lower())) if w not in _FILLER]) <= 1
+    try:
+        import lite_search
+        rows = lite_search.project_rows(sorted({x["n"] for x in c}))
+    except Exception as e:                    # no job index to check against: never call a job missing
+        print("said job:", str(e)[:160], flush=True)
+        return None
+    on_file, missing, neg = None, None, None
+    for x in c:
+        row = rows.get(x["n"])
+        if x["neg"]:
+            neg = neg or x["n"]
+        elif row and (x["strong"] or ctx or pending):     # a bare "1800" answering "what size?" is not a job
+            on_file = {"n": x["n"], "row": row}
+        elif not row and len(x["n"]) >= 4 and (x["strong"] or pending or (ctx and short)):
+            missing = {"n": x["n"], "row": None}
+    return on_file or missing or ({"n": neg, "neg": True} if neg else None)
+
+
+def _label_of(n, row):
+    return f"{n} - " + re.sub(r"^\d+\s*-\s*", "", row.get("name") or "") + f" ({(row.get('last_date') or '')[:7] or 'date unknown'})"
+
+
 def spoken_job(b, text):
     """3 Nov 2026 (Andy's call): '12148' came through as '1:148' and '1-1-08'. The job number they meant: digits joined up,
     checked against SDI's jobs, then against the jobs on offer (a number that ends or runs inside one, or that job's name
     words - 'the roller shutter one'). None when nothing fits."""
     import lite_search
-    t = text or ""
+    t = spoken_digits(text or "")
     joined = re.sub(r"(?<=\d)[\s:\-.,/]+(?=\d)", "", t)
     nums = re.findall(r"\b(\d{3,6})\b", joined)
     for n_ in nums:
@@ -2178,7 +2333,7 @@ def ref_job_of(b, text):
     sj_ = spoken_job(b, text)
     if sj_:
         return [sj_]
-    if re.search(r"\d[\s:\-.,/]*\d", text or ""):
+    if re.search(r"\d[\s:\-.,/]*\d", spoken_digits(text)):
         return []                 # a number we couldn't make out - ask, never open a different job instead
     lst = b.get("_ref_list") or b.get("_ref_ask") or []
     if lst and re.search(r"\b(all|each|every|both|them all|all (of )?(them|those|three))\b", text or "", re.I):
@@ -2265,6 +2420,19 @@ DROP_CHOSEN = re.compile(
     r"forget (the|that) (job|past job|old one|reference)|no past job|no reference|without (a|the) (past|old) (job|one)|"
     r"from scratch|start (again|afresh|over)|clean sheet|completely (new|different)|brand[- ]?new|new design|"
     r"fresh design|something (completely|totally) (new|different))\b", re.I)
+# 10 Nov 2026 (James: "this is to be the basis for the new one - the look and feel, but of course he can ask for a different
+# colour, dimensions etc."): "a completely different colour" or "brand new graphics" changes the design that follows the
+# job; it never lets the job go.
+DESIGN_PART = re.compile(r"^\W*(colou?rs?|finish(es)?|size|sizes|dimensions?|height|width|depth|graphics?|artwork|logo|"
+                         r"branding|header|shelf|shelves|material|materials|wood|metal|lighting|lights?|base|top|door|doors|"
+                         r"shutter|products?|look on the|paint|print|signage|look for the|style of the)\b", re.I)
+
+
+def drops_chosen(text):
+    """They let the chosen past job go - not when the words only change part of the design."""
+    return any(not DESIGN_PART.match((text or "")[m.end():]) for m in DROP_CHOSEN.finditer(text or ""))
+
+
 NO_ANSWER = re.compile(r"^\W*(no|nope|nah|neither|none|not really|i don'?t know|don'?t know|not sure|can'?t remember)\b", re.I)
 SAYS_YES = re.compile(r"^\W*(yes|yeah|yep|yup|ya|correct|exactly|spot on|that'?s (it|the one|right|correct)|that one)\b", re.I)
 NAMES_ONE = re.compile(r"\b(refer|job|drawing|file|called|the one|it was|was the|with the)\b", re.I)
@@ -2294,7 +2462,7 @@ def drop_ref(b):
         if "follow it closely" in str(b.get("liked_job") or ""):
             b.pop("liked_job", None)
     for k_ in ("_ref_confirm", "_ref_ask", "_ref_more", "_ref_list", "_ref_job", "_ref_hint", "_ref_redraw",
-               "_redraw_for_ref", "_size_from_ref", "_ref_weak"):
+               "_redraw_for_ref", "_size_from_ref", "_ref_weak", "_ref_missing", "_ref_missing_told", "_ref_said"):
         b.pop(k_, None)
     b["_ref_declined"] = sorted(gone)
     b["_ref_off"] = 1
@@ -2306,7 +2474,8 @@ def drop_ref(b):
 
 
 def ref_pending(b):
-    return bool(b.get("_ref_confirm") or b.get("_ref_ask") or (b.get("_ref_more") and not b.get("_ref_job")))
+    return bool(b.get("_ref_confirm") or b.get("_ref_ask") or b.get("_ref_missing")
+                or (b.get("_ref_more") and not b.get("_ref_job")))
 
 
 # "based on the previous job we discussed", "the one we talked about", "that job" - pointing back at this chat
@@ -2351,6 +2520,75 @@ def ref_lookup(b, text):
     """The past SDI job the AM points at, for the typed chat AND the live call (2 Nov 2026: the live call skipped it and
     drew straight away). Sets _ref_confirm / _ref_ask / _ref_more, or _ref_job once the AM has said yes - and lets it go
     when they move away from it (drop_ref)."""
+    # 10 Nov 2026 (Muhammad's call): he said "five nine double eight" five times - "make me a new render from 5988", "one
+    # to follow 5988", "yes" to "5988 - Tesco Gondola End, is that the one?" - and was offered 8928, 6548, then 12271,
+    # 4970, then "do you mean 12271?". A job number the AM says is THE job: read back once, and followed when they say
+    # yes or say it again. Never swapped for a word search. One that isn't in SDI's job index is said to be missing.
+    text = spoken_digits(text or "")
+    sj = said_job(b, text)
+    if sj and sj.get("neg"):                  # "not 5988", "I don't want 5988"
+        n = sj["n"]
+        let_go = DROP_REF.search(text) or re.search(r"\b(don'?t|do not|not|never) (want|need|follow|use|base)|\b(forget|drop|"
+                                                    r"ignore)\b", text, re.I)
+        if b.get("_ref_job") == n:
+            if let_go:
+                drop_ref(b)
+            return
+        if _job_no((b.get("_ref_confirm") or {}).get("label")) == n:
+            if DROP_REF.search(text):
+                drop_ref(b)
+                return
+            b.pop("_ref_confirm", None)
+            b["_ref_declined"] = sorted(set(b.get("_ref_declined") or []) | {n})
+            b["_ref_said"] = [x for x in b.get("_ref_said") or [] if x != n]
+            return
+        sj = None
+    if sj and sj.get("row"):
+        n = sj["n"]
+        b.pop("_ref_missing", None)
+        b.pop("_ref_missing_told", None)
+        if b.get("_ref_job") == n:
+            return                            # already following it
+        b["_ref_declined"] = [x for x in b.get("_ref_declined") or [] if x != n]
+        b.pop("_ref_off", None)
+        conf = b.get("_ref_confirm") or {}
+        asking_q = re.match(r"\s*(what|which|when|who|how|have|did|do|does|is|was|were|are)\b", text, re.I)
+        if (_job_no(conf.get("label")) == n or n in (b.get("_ref_said") or [])) and not SHOW_REF.search(text) \
+                and not asking_q:
+            # read back already and said again - "one to follow 5988", "a new render from 5988": that's their yes
+            _follow_job(b, conf.get("label") if _job_no(conf.get("label")) == n else _label_of(n, sj["row"]), text)
+            return
+        others = [x for x in list(b.get("_ref_list") or []) + list(b.get("_ref_ask") or []) + list(conf.get("others") or [])
+                  if _job_no(x) != n]
+        b["_ref_confirm"] = {"label": _label_of(n, sj["row"]), "hint": text, "others": list(dict.fromkeys(others))[:3]}
+        b["_ref_said"] = sorted(set(b.get("_ref_said") or []) | {n})
+        b.pop("_ref_ask", None)
+        b.pop("_ref_more", None)
+        return
+    if sj:                                    # a job number said plainly that isn't in SDI's job index
+        n = sj["n"]
+        if b.get("_ref_missing") == n:        # said again: it's right, it just isn't on file - a new design
+            drop_ref(b)
+            b["_ref_not_on_file"] = n
+            return
+        if n in (b.get("_ref_absent") or []):
+            return                            # told already - never a word search over it
+        b["_ref_missing"] = n
+        b["_ref_absent"] = sorted(set(b.get("_ref_absent") or []) | {n})
+        for k_ in ("_ref_ask", "_ref_confirm", "_ref_more", "_ref_missing_told"):
+            b.pop(k_, None)
+        return
+    if b.get("_ref_missing"):
+        if SAYS_YES.search(text) and not DROP_REF.search(text):
+            n = b["_ref_missing"]
+            drop_ref(b)                       # "yes, 12408" - right, but not on file: a new design, said so once
+            b["_ref_not_on_file"] = n
+            return
+        if re.match(r"^\W*(no|nope|nah|wrong|not (that|it|right))\b", text, re.I) and not DROP_REF.search(text):
+            b.pop("_ref_missing", None)
+            b.pop("_ref_missing_told", None)
+            b["_ref_more"] = 1                # misheard - asked once more for the number
+            return
     # 5 Nov 2026 (James's call): "let's base it on the 10519 HRI DDA", then later "based on the previous job we
     # discussed" - searched for by those words, not found, the job number asked for, and "I don't know - you need to
     # remember" dropped it as a new design. Pointing back is the job already named here, said twice: it's followed.
@@ -2362,7 +2600,7 @@ def ref_lookup(b, text):
                 _follow_job(b, _job_label(b, job_), text)
             return
     if not re.search(r"\b\d{3,6}\b", text or "") and not SAYS_YES.search(text or ""):   # 'yes - but something different'
-        if (ref_pending(b) and DROP_REF.search(text or "")) or (b.get("_ref_job") and DROP_CHOSEN.search(text or "")):
+        if (ref_pending(b) and DROP_REF.search(text or "")) or (b.get("_ref_job") and drops_chosen(text)):
             drop_ref(b)
             return
         if b.get("_ref_more") and not b.get("_ref_job") and _plain_no(text):
@@ -2405,6 +2643,8 @@ def ref_lookup(b, text):
                 b["_ref_ask"] = others      # the other matches - offered once
                 b["_ref_others_offered"] = 1
             elif not names_one:
+                if b.get("_ref_job"):
+                    return                  # not the other job they named - the one they chose stays
                 drop_ref(b)                 # 4 Nov 2026 (Andy): no is no - it used to go on to ask for a job number
                 return
             ref_done = not names_one
@@ -2865,7 +3105,8 @@ def handle(number, name, text, image_path=None, voice=False, ch=None, new=False,
     # 3 Nov 2026 (Muhammad): show what they ask for, nothing else
     if intent == "show_past" and (
             (text and SHOW_REF.search(text) and (b.get("_ref_confirm") or b.get("_ref_ask") or b.get("_ref_job")
-                                                 or b.get("_ref_more") or re.search(r"\d[\s:\-.,/]*\d[\s:\-.,/]*\d", text)))
+                                                 or b.get("_ref_more")
+                                                 or re.search(r"\d[\s:\-.,/]*\d[\s:\-.,/]*\d", spoken_digits(text))))
             or not PAST_Q.search(text or "")):
         intent = "question" if (text or "").rstrip().endswith("?") else "answer"
     if intent == "off_topic":
@@ -2927,9 +3168,12 @@ def handle(number, name, text, image_path=None, voice=False, ch=None, new=False,
         return ch, s
     want_see = bool(text and SHOW_REF.search(text)) and bool(b.get("_ref_confirm") or b.get("_ref_ask") or b.get("_ref_job")
                                                                or b.get("_ref_more") or b.get("liked_job")
-                                                               or re.search(r"\d[\s:\-.,/]*\d[\s:\-.,/]*\d", text))   # '9 9 9 7 1'
-    if want_see and not b.get("_ref_confirm") and not b.get("_ref_ask") and not b.get("_ref_job"):
-        ref_lookup(b, "refer to " + text)        # 'show me 12148' - look it up and confirm it too
+                                                               or re.search(r"\d[\s:\-.,/]*\d[\s:\-.,/]*\d",
+                                                                            spoken_digits(text)))   # '9 9 9 7 1'
+    said_see = said_job(b, "refer to " + text) if want_see else None
+    if want_see and ((said_see and not said_see.get("neg")) or
+                     (not b.get("_ref_confirm") and not b.get("_ref_ask") and not b.get("_ref_job"))):
+        ref_lookup(b, "refer to " + text)        # 'show me 12148' / 'five nine double eight' - look it up, confirm it too
     elif not want_see:
         ref_lookup(b, text)
     if want_see and not b.get("_ref_confirm") and not b.get("_ref_ask") and not b.get("_ref_job") and b.get("liked_job") \
@@ -2943,13 +3187,14 @@ def handle(number, name, text, image_path=None, voice=False, ch=None, new=False,
             import lite_search
             row = lite_search.project_rows([n_said]).get(n_said)
             if row:
-                b.pop("_ref_job", None)            # a different job named after one was chosen: check it again
-                lab = f"{n_said} - " + re.sub(r"^\d+\s*-\s*", "", row.get("name") or "") \
-                      + f" ({(row.get('last_date') or '')[:7] or 'date unknown'})"
+                # a different job named after one was chosen: checked, and the chosen one stays until they say yes
+                lab = _label_of(n_said, row)
                 others = [x for x in (b.get("_ref_list") or b.get("_ref_ask") or (b.get("_ref_confirm") or {}).get("others") or [])
                           if not x.startswith(n_said)]
                 b["_ref_confirm"] = {"label": lab, "hint": text, "others": others}
+                b["_ref_said"] = sorted(set(b.get("_ref_said") or []) | {n_said})
                 b.pop("_ref_ask", None)
+                b.pop("_ref_missing", None)
         pool_ = b.get("_ref_list") or b.get("_ref_ask") or []
         if len(jobs) > 1 and not b.get("_ref_job"):      # all of them on screen - they choose
             b["_ref_ask"] = [x for x in pool_ if any(x.startswith(j_) for j_ in jobs)] or pool_
@@ -2960,18 +3205,25 @@ def handle(number, name, text, image_path=None, voice=False, ch=None, new=False,
                 b["_ref_confirm"] = {"label": lab, "hint": text, "others": [x for x in pool_ if x != lab]}
                 b.pop("_ref_ask", None)
         pool_now = b.get("_ref_list") or b.get("_ref_ask") or []
+        if not jobs and b.get("_ref_missing"):
+            n_ = b["_ref_missing"]
+            save_session(s)
+            ch.ask(f"I can't find job {n_} in SDI's past jobs on W: - it may be newer than the job index, or I misheard a "
+                   f"digit. Is it {' '.join(n_)}?", field="_ref_missing", options=[f"Yes, {n_}", "No, a different number"])
+            return ch, s
         if not jobs and pool_now:
             save_session(s)
             ch.ask("I didn't catch the job number - which one do you want to see?", field="_ref_ask", options=pool_now[:3])
             return ch, s
-        if not jobs and re.search(r"\d", text or ""):
+        if not jobs and re.search(r"\d", spoken_digits(text)):
             save_session(s)
             ch.ask("I didn't catch that job number - could you say it again, digit by digit?", field="_ref_more", options=[])
             return ch, s
         n_ = show_ref_files(ch, b, jobs, text) if jobs else 0
         save_session(s)
         if not n_:
-            ch.text("I couldn't find a drawing or render for that one on W: yet - it may still be in progress.")
+            ch.text(f"I couldn't find a drawing or render for {', '.join(jobs[:3]) or 'that one'} on W: - its folder may not "
+                    "have them yet." if jobs else "I couldn't find a drawing or render for that one on W:.")
         if b.get("_ref_confirm"):
             ch.ask(f"That's {b['_ref_confirm']['label']}. Is this the one to follow?", field="_ref_confirm",
                    options=["Yes, that one", "No, a different one"])
@@ -3859,9 +4111,28 @@ def api_rt_tool():
             return jsonify({"slow": False, "output": json.dumps({"note": (
                 f"Not changed: the AM said \"{last_[:60]}\", which doesn't name a pack. It's {convo.pack_label(b_)}. Don't ask "
                 "the pack question again - follow what they just said. They can change the pack any time by saying so.")})})
-    gave_up_ref = False
+    gave_up_ref = ""
     if js.get("name") == "make_concepts":
         b_ = s["brief"]
+        last_am = _last_am_line(s["id"])
+        said_ = said_job(b_, last_am) if last_am else None
+        named_ = bool(said_ and said_.get("row") and not said_.get("neg"))
+        if args.get("design_route") == "new" and (named_ or ref_pending(b_) or b_.get("_ref_job")):
+            # 10 Nov 2026 (Muhammad: "just make a render, new render referencing 5988"). The voice sent design_route 'new'
+            # for "a new render", and that alone let 5988 go. A new RENDER that follows a past job is still that job -
+            # only the AM's own words let it go ("something new", "forget the past job").
+            keeps = named_ or re.search(r"\b(refer\w*|reference\w*|based? (it )?on|follow\w*|same as|like (the|that) "
+                                        r"(job|one))\b", last_am, re.I)
+            if b_.get("_ref_job") and not (DROP_REF.search(last_am) or drops_chosen(last_am)):
+                keeps = True
+            if keeps:
+                args["design_route"] = "past"
+                if isinstance(t.get("updates"), dict):
+                    t["updates"]["design_route"] = "past"
+        if named_ and b_.get("_ref_job") != said_["n"] \
+                and _job_no((b_.get("_ref_confirm") or {}).get("label")) != said_["n"]:
+            ref_lookup(b_, last_am)               # (the call's line already ran it once - never twice, or it'd skip the check)
+            save_session(s)
         if args.get("design_route") == "new" and (ref_pending(b_) or b_.get("_ref_job")):
             # 4 Nov 2026 (Andy): they want a new design - a past job still being checked no longer holds the render up
             # (a new design follows no past job, so nothing unconfirmed is drawn from)
@@ -3875,12 +4146,28 @@ def api_rt_tool():
             # 4 Nov 2026: "something new" saved as the liked job was looked up on W: as if it named one
             b_["_ref_checked"] = b_.get("liked_job")
             try:
-                ref_lookup(b_, f"refer to {b_.get('liked_job')} {_last_am_line(s['id']) or ''}")
+                ref_lookup(b_, f"refer to {b_.get('liked_job')} {last_am or ''}")
             except Exception as e:
                 print("ref lookup (tool):", str(e)[:160], flush=True)
             save_session(s)
         way_out = (" If they'd rather not follow a past job, call make_concepts again with design_route 'new' - never "
                    "ask about the past job more than once.")
+        if b_.get("_ref_missing"):
+            n_ = b_["_ref_missing"]
+            if b_.get("_ref_missing_told") == n_:
+                drop_ref(b_)                  # told once and drawn anyway: it's a new design, and said so
+                b_["_ref_not_on_file"] = n_
+                gave_up_ref = (f"Job {n_} isn't in SDI's past jobs on W:, so it's drawn as a new design - say that in one "
+                               "line; if they meant another job, they can say its number. ")
+                save_session(s)
+            else:
+                b_["_ref_missing_told"] = n_
+                save_session(s)
+                return jsonify({"slow": False, "output": json.dumps({"error": (
+                    f"Not drawing yet - job {n_} isn't in SDI's past jobs on W: (it may be newer than the job index, or a "
+                    f"digit was misheard). Read it back digit by digit once: 'I can't find {' '.join(n_)} - is that the "
+                    "number?' Never offer other jobs instead. If they give another number, that one is checked. If it's "
+                    "right, say it isn't on file, so it'll be a new design, and call make_concepts again." + way_out)})})
         if b_.get("_ref_confirm"):
             return jsonify({"slow": False, "output": json.dumps({"error": "Not drawing yet - check the past job first. Ask: 'Do you "
                             f"mean {b_['_ref_confirm']['label']}?' If yes, call make_concepts again (it will follow that job)."
@@ -3893,7 +4180,9 @@ def api_rt_tool():
             if b_.get("_ref_ask_read"):
                 drop_ref(b_)
                 b_["design_route"] = "new"
-                gave_up_ref = True
+                gave_up_ref = ("Which past job they meant couldn't be pinned down from the list already read out, so it's "
+                               "drawn as a new design - say that in one line; if they want a past job followed, they can "
+                               "say its job number. Never read out another list of past jobs. ")
                 save_session(s)
             else:
                 b_["_ref_ask_read"] = list(b_["_ref_ask"])
@@ -3924,9 +4213,7 @@ def api_rt_tool():
         drawing = js.get("name") in ("make_concepts", "change_option", "more_options")
         return jsonify({"turn": jid, "slow": True,
                         "output": json.dumps({"started": True, "note": (
-                            ("Which past job they meant couldn't be pinned down from the list already read out, so it's "
-                             "drawn as a new design - say that in one line; if they want a past job followed, they can say "
-                             "its job number. Never read out another list of past jobs. " if gave_up_ref else "") +
+                            gave_up_ref +
                             "It's being drawn now - about a minute. Tell the AM in one short line, then WAIT: ask nothing and "
                             "don't move on until it's on screen." if drawing else
                             "Working on it - it appears on screen shortly. Tell the AM in one short line.")})})

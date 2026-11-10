@@ -247,10 +247,10 @@ the SDI internal brief PDF - in a call that feels like talking to a sharp collea
 - Before anything is drawn from it, say its full number and name back ("12148 - Rollershutter Forecourt Bunker, from
   February - is that the one?") and wait for a clear yes; after it, the render, GA and client pack follow that job.
   Offer only the jobs in which_past_job, never your own list, and for "the latest" or "this year" go by their dates.
-  Never say a job is chosen unless which_past_job says so. A garbled number: ask which one.
-- Its GA or pictures open in the chat beside the call as you check it, so "show me" means it's already opening: "It's
-  on screen now - is that the one?" Seeing it is not a yes. If no, offer the other matches once, and never draw in between.
-  No GA on file: say so and suggest following its renders.
+  Never say a job is chosen unless which_past_job says so. A number they say is THE job - never swap it. A chosen
+  job is the basis: a new render of it, recoloured or resized, is design_route past.
+- Its GA or pictures open in the chat as you check it: "It's on screen now - is that the one?"
+  Seeing it is not a yes. If no, offer the other matches once, and never draw in between. No GA on file: say so.
 - Suggest a past job at most once, and they can always say no. If they move away from it ("something new", "forget
   that", "none of those"), let it go straight away: one line ("Fine - something new then"), carry on with the brief,
   and don't bring a past job up again unless they do. For the render that means design_route new.
@@ -530,15 +530,25 @@ def tool_result(s, replies, saved_now=None, not_saved=None):
             {"confirm_with_am": f"Check it's the right job before using it - ask: 'Do you mean {b['_ref_confirm']['label']}?' "
                                 "(yes -> it's followed; no -> the others are offered once; 'something new' -> it's dropped)"}
             if b.get("_ref_confirm") else
+            # 10 Nov 2026 (Muhammad): "12408" wasn't on file and three other jobs were read out instead
+            {"not_on_file": f"Job {b['_ref_missing']} isn't in SDI's past jobs on W: (newer than the job index, or a digit "
+                            f"misheard). Read it back digit by digit once ({' '.join(b['_ref_missing'])}) and ask if that's "
+                            "right. Never offer other jobs instead. Right -> it can't be followed, so it's a new design; "
+                            "another number -> that one is checked."}
+            if b.get("_ref_missing") else
             {"ask_the_am": "More than one past SDI job fits - read these out briefly and ask which one they mean (a number, "
                            "a word from the name, or 'the first one' is enough), or if they'd rather do something new:",
              "options": b["_ref_ask"]} if b.get("_ref_ask") else
             {"ask_the_am": "No past SDI job matched what they said - ask once for the job number, or whether to design it "
                            "new without one."} if b.get("_ref_more") and not b.get("_ref_job") else
             # 4 Nov 2026 (Andy): it kept pushing a past job after he'd moved away from it
-            {"dropped": "They don't want to follow a past job - it's a new design. Don't suggest a past job again unless "
-                        "they ask for one."} if b.get("_ref_off") and not b.get("_ref_job") else ""),
-        "following_past_job": b.get("liked_job") if b.get("_ref_job") else "",
+            {"dropped": (f"Job {b['_ref_not_on_file']} isn't on file on W:, so " if b.get("_ref_not_on_file") else
+                         "They don't want to follow a past job - ") + "it's a new design. Don't suggest a past job again "
+                        "unless they ask for one."} if b.get("_ref_off") and not b.get("_ref_job") else ""),
+        # 10 Nov 2026 (James): the job they chose is the basis - its look and feel - and what they change goes on top
+        "following_past_job": (f"{b.get('liked_job')}. It's the basis for the new one: its look and feel, with whatever they "
+                               "change (colour, size, graphics...) - a change never drops it. Use make_concepts design_route "
+                               "past.") if b.get("_ref_job") else "",
         # 4 Nov 2026 (James: "keep track - every job might be slightly different")
         "direction_changed": (
             {"now": b["_direction"]["to"], "was": b["_direction"]["from"],
