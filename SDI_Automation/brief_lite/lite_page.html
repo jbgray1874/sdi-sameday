@@ -1469,7 +1469,14 @@ function junkHeard(tx){tx=(tx||"").trim().toLowerCase();
  return !tx||/client names include|uk retail display brief|retail display brief\b|^\W*clients? include\b|sdi displays retail|gondola end, fsdu/.test(tx)||/^(thank you|thanks|you|hmm+|uh+|um+|mhm+|mm+|uh[- ]?huh|aha|hm)[.!?]*$/.test(tx)
   // what speech models "hear" in silence or room noise (well-known phantom lines) - never the AM's answer
   ||/^(we'?ll |i'?ll )?see you (later|soon|next time)[.!?]*$|^(first|bye|bye[- ]bye|okay bye|thanks for watching|thank you for watching|please subscribe|subtitles by.*|so|the|a|oh|right)[.!?]*$/.test(tx)||tx.replace(/[^a-z]/g,"").length<2}
-const FINISH=/\b(finish|we'?re (done|finished)|that'?s (all|it|everything)|all done|end (the )?call|hang up|goodbye|bye( bye)?|no,? (thanks|thank you|that'?s (all|it)))\b/i;
+// 11 Nov 2026 (Andy: "it was trying to finish up quickly"): only a goodbye ends the call. "That's it", "that's all", "all
+// done", "no thanks" and "finish" were hanging up mid-brief - "gloss finish", "just the logo, that's it", "no thanks" to
+// lighting - and the answer was lost. They go to the voice now, which knows what it asked (at "anything else for the
+// brief?" that's finish_brief and its "are you sure?"); if the voice answers one with a goodbye, the call ends after it.
+const BYE=/\b(good ?bye|bye( bye)?|end (the )?call|hang up)\b/i;
+const MAYBE_DONE=/\b(we'?re (done|finished)|that'?s (all|it|everything)|all done|no,? (thanks|thank you)|finish(ed)?)\b/i;
+function hangsUp(tx){return BYE.test(tx)&&tx.split(/\s+/).length<=8&&!/\b(info|information|details|have|got|know|brief|pack|pdf|build|make|generate|render|document|questions?)\b/i.test(tx)}
+function saidBye(said){said=said||"";return /\b(good ?bye|bye|take care|speak soon|talk soon)\b/i.test(said)&&!/\?/.test(said)}
 function dropLog(tx,why){try{fetch("/api/rt/drop",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({session:sid,why,text:String(tx||"").slice(0,300),noisy:!!(rt&&rt.noisy),peak:rt&&rt.peak})})}catch(e){}}
 async function rtHeard(tx,itemId){
  // 4 Nov 2026: "both please" came through as "bullet please" - after the pack question it can only mean both
@@ -1498,7 +1505,8 @@ async function rtHeard(tx,itemId){
  {const m=/\b(show|see|open|where)\b.*\b(client pack|client sheet|pack|pdf|brief pdf|brief|document|doc|ga|render|drawing)\b/i.exec(tx);if(m&&!/\b(past|previous|before|history)\b/i.test(tx)){const k=m[2].toLowerCase();const els=[...log.querySelectorAll(k==="render"?".opt":/ga|drawing/.test(k)?".card.ga":".doc")].filter(e=>/pdf|pack|sheet|ga/i.test(k)?/pdf|pack|sheet|GA/i.test(e.textContent):true);const el=els[els.length-1];if(el){LS.showing=true;LS.past=true;lsBlur(false);el.scrollIntoView({behavior:"smooth",block:"center"});el.classList.add("spot");setTimeout(()=>el.classList.remove("spot"),4000)}}}
  // 11 Nov 2026: "that's all the information I have" / "that's all, build it" is about the brief, not a goodbye - it goes
  // to the voice, which asks "are you sure that's everything?" before building. Only a goodbye ends the call.
- if(FINISH.test(tx)&&tx.split(/\s+/).length<=8&&!/\b(info|information|details|have|got|know|brief|pack|pdf|build|make|generate|render|document|questions?)\b/i.test(tx)){rt.closing=true;
+ rt.maybeDone=MAYBE_DONE.test(tx);
+ if(hangsUp(tx)){rt.closing=true;
   if(sid)fetch("/api/rt/log",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({session:sid,role:"user",text:tx})}).catch(()=>{});
   rtSay({type:"conversation.item.create",item:{type:"message",role:"user",content:[{type:"input_text",text:"[Showroom: the AM is finishing. Say one short, warm goodbye line (everything is saved in the chat) - nothing else, no question.]"}]}});
   rtSay({type:"response.create"});return}
@@ -1610,7 +1618,7 @@ async function rtEvent(ev){const ty=ev.type||"";
  else if(ty==="response.function_call_arguments.done"){rtTool(ev.call_id,ev.name,ev.arguments)}
  else if(ty==="response.done"){rt.inResp=false;if(rt.pendingCreate){rt.pendingCreate=false;if(!rt.spoke)rtSay({type:"response.create"})}
   const u=ev.response&&ev.response.usage;if(u)fetch("/api/rt/usage",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({session:sid,usage:u})}).then(r=>r.json()).then(j=>{if(j&&j.stop){toast("Today's AI budget is used up - live voice has stopped");rtStop()}}).catch(()=>{});
-  talkUI(true,"Live - your turn");if(rt&&rt.closing)setTimeout(()=>{if(rt){rtStop();toast("Call ended - everything is in the chat")}},1400)}
+  talkUI(true,"Live - your turn");if(rt&&(rt.closing||(rt.maybeDone&&saidBye(rt.said))))setTimeout(()=>{if(rt){rtStop();toast("Call ended - everything is in the chat")}},1400)}
  else if(ty==="error"){console.warn("realtime",ev.error);if(ev.error&&/expired|session/i.test(ev.error.message||""))toast(ev.error.message)}}
 async function rtTool(call_id,name,args){
  const LBL={make_concepts:"Making the concepts and checking them…",choose_option:"Drawing the GA and the client sheet…",change_option:"Changing that option…",more_options:"Making more options…",finish_brief:"Building the full brief PDF…",show_past_work:"Looking through SDI's history…"};

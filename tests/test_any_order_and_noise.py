@@ -2216,3 +2216,28 @@ class NothingHurriesTheAMToFinishTests(unittest.TestCase):
         self.assertIn("Still missing", text)
         self.assertNotIn("fill the gaps", text)
         self.assertIn("whenever you're ready", text)
+
+    @unittest.skipUnless(NODE, "node is not installed")
+    def test_on_a_call_only_a_goodbye_hangs_up(self):
+        """'That's it', 'no thanks' and 'gloss finish' are answers mid-brief - they were ending the call and the answer
+        was lost. Only a goodbye hangs up; the rest go to the voice, and if it answers with a goodbye, the call ends."""
+        consts = "\n".join(l for l in PAGE.splitlines() if l.startswith(("const BYE=", "const MAYBE_DONE=")))
+        answers = ["White gloss finish", "Just the logo, that's it", "No thanks", "Two shelves, that's all",
+                   "No, that's it", "we're done with the graphics", "all done on that one",
+                   "that's all the information I have", "that's it, build the brief"]
+        byes = ["Goodbye", "OK, bye bye", "end the call please", "hang up now", "thanks, goodbye"]
+        js = (consts + "\n" + page_fn("hangsUp") + "\n" + page_fn("saidBye") + "\n"
+              "const A=%s,B=%s;console.log(JSON.stringify({answers:A.map(hangsUp),byes:B.map(hangsUp),"
+              "maybe:A.slice(0,5).map(x=>MAYBE_DONE.test(x)),"
+              "ended:[saidBye('Lovely - it is all in the chat. Bye for now!'),saidBye('Speak soon, take care.')],"
+              "kept:[saidBye('Any lighting on it?'),saidBye('Got it - and roughly what size? Bye the way...'),"
+              "saidBye('Black acrylic - and what size?')]}))") % (json.dumps(answers), json.dumps(byes))
+        r = subprocess.run([NODE, "-e", js], capture_output=True, text=True, timeout=30)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        got = json.loads(r.stdout)
+        self.assertEqual(got["answers"], [False] * len(answers))     # never a hang-up mid-brief
+        self.assertEqual(got["byes"], [True] * len(byes))
+        self.assertEqual(got["maybe"], [True] * 5)                    # ...but the voice's goodbye after one ends the call
+        self.assertEqual(got["ended"], [True, True])
+        self.assertEqual(got["kept"], [False, False, False])         # a question back is never the end
+        self.assertNotIn("FINISH.test", PAGE)
