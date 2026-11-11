@@ -686,7 +686,7 @@ ANDY_Q = [
     ("volume_required", "Is volume manufacture needed? How many units, and what lead time do you prefer?", ["volume_qty", "leadtime"]),
     ("installation", "Will SDI need to install it once it's made?", []),
     ("repeat", "Is this likely to repeat in future - and how often?", []),
-    ("narrative", "In a minute or less: what does the customer need, what's the unit's role, and what do they hope to achieve with it?", []),
+    ("narrative", "In your own words: what does the customer need, what's the unit's role, and what do they hope to achieve with it?", []),
     ("shelf_life", "How long is the unit expected to stay in store?", []),
     ("references", "Has the client supplied any design or artwork reference? You can send a photo here.", []),
     ("warehousing", "Will SDI warehouse it, or is delivery direct to store?", []),
@@ -3014,7 +3014,7 @@ def handle(number, name, text, image_path=None, voice=False, ch=None, new=False,
         top = [m for m in ml if m[1] in convo.NEED] + [m for m in ml if m[1] not in convo.NEED]
         ch.text(f"Still missing ({len(ml)}):\n" + "\n".join(f"• {m[2]}" for m in top[:8])
                 + (f"\n…and {len(ml) - 8} smaller ones." if len(ml) > 8 else "")
-                + "\n\nYou can give me any of these, or say *make a render* and I'll fill the gaps sensibly.")
+                + "\n\nGive me any of these whenever you're ready.")   # 11 Nov 2026: never an offer to skip them
         save_session(s)
         return convo.ask_next(s, ch)
     # "leave the questions now": no more template questions until they ask for the full brief
@@ -3040,7 +3040,7 @@ def handle(number, name, text, image_path=None, voice=False, ch=None, new=False,
                 return convo.ask_next(s, ch, ack=prefix + "Noted - the full SDI brief is on.")
             left = len(convo.plan(b))
             return convo.ask_next(s, ch, ack=(prefix + f"Let's do the SDI brief questions now - {left} to go, one at a time. "
-                                               "\"Don't know\" or \"skip\" is fine, and say \"back to the render\" whenever you like."))
+                                               "\"Don't know\" is fine, and say \"back to the render\" whenever you like."))
         if not b.get("output"):
             b["output"] = "Brief only"
         b["_out_asked"] = 1
@@ -3048,8 +3048,8 @@ def handle(number, name, text, image_path=None, voice=False, ch=None, new=False,
         b.pop("_no_more_q", None)
         left = len(convo.plan(b))
         save_session(s)
-        return convo.ask_next(s, ch, ack=(prefix + f"Let's do the full brief - {left} questions, one at a time. Say \"don't know\" or "
-                                           "\"skip\" whenever you like, and \"make a render\" any time you want to see it."))
+        return convo.ask_next(s, ch, ack=(prefix + f"Let's do the full brief - {left} questions, one at a time. \"Don't know\" is fine, and say "
+                                           "\"make a render\" any time you want to see it."))
     if t_override is None and re.search(r"\bwhat (can|do) you do\b|\bhow (does this|do you) work\b|\bwhat are you( for)?\b|^\s*help\s*\??$",
                                         text or "", re.I):
         ch.text("I take a client brief from you - by text, voice note or files - and:\n"
@@ -3495,7 +3495,7 @@ def handle(number, name, text, image_path=None, voice=False, ch=None, new=False,
         shown = next((x for x in reversed(s["visuals"]) if x.get("path") == chosen.get("hd_path")), chosen) if hd else chosen
         sig = f"{shown.get('path')}|{(ga or {}).get('path')}"
         if b.get("_sheet_sig") == sig and b.get("_sheet_pdf") and os.path.exists(b["_sheet_pdf"]):   # asked twice: one pack
-            ch.text(f"The client pack for Option {label} is already in the chat above ↑ - anything else, or shall we finish?")
+            ch.text(f"The client pack for Option {label} is already in the chat above ↑ - anything else?")
             return ch, s
         sheet = pdf_pack.client_sheet(s, [shown] + ([ga] if ga else []), OUT)
         save_session(s)
@@ -3511,21 +3511,21 @@ def handle(number, name, text, image_path=None, voice=False, ch=None, new=False,
             if convo.pack_of(b) == "both":
                 left = len(convo.plan(b))
                 return convo.ask_next(s, ch, ack="That's the client pack ✓ - the render, its GA and the one-page sheet." + (
-                    (f" Now the SDI internal brief - {left} quick one{'s' if left != 1 else ''}; say \"that's all\" if you "
-                     "don't need it." if b.get("_pack_assumed") else
+                    (f" Now the SDI internal brief - {left} question{'s' if left != 1 else ''}, one at a time. If you only wanted "
+                     "the client pack, just say." if b.get("_pack_assumed") else
                      f" Now the SDI internal brief pack - {left} question{'s' if left != 1 else ''}, one at a time; \"don't know\" "
-                     "or \"skip\" is fine.") if left else ""))
+                     "is fine.") if left else ""))
             ch.text("That's the client pack ✓ - the render, its GA and the one-page client sheet, ready to send. Say \"internal "
                     "pack\" any time if you want the full SDI brief too.")
             return ch, s
         if b.get("_no_more_q"):
-            ch.text("Anything else - a change, another option or the full brief pack? Or shall we finish?")
+            ch.text("Anything else - a change, another option or the full brief pack?")
             return ch, s
         left = len(convo.plan(b))
         if not left:
             return convo.finish_brief(s, ch, "That's the one-page sheet to send the client.")
         return convo.ask_next(s, ch, ack=("That's the one-page sheet to send the client." + ("" if ga else " Say \"GA\" any time for the technical drawing.")
-                                           + f" Now let's finish the full brief so nothing's missing - {left} quick ones, \"don't know\" is fine."))
+                                           + f" Now the full brief, so nothing's missing - {left} questions to go."))
 
     if intent == "more_options" and not missing and renders:
         n = max(1, min(5, int(t.get("n_options") or 3)))
@@ -3582,7 +3582,7 @@ def handle(number, name, text, image_path=None, voice=False, ch=None, new=False,
             and pic_gaps(b) and int(b.get("_pic_asked", 0)) < 3 \
             and not re.search(r"\b(just (make|do|draw)|go ahead|make it( now)?|skip|right away|straight away)\b", text or "", re.I):
         b["_pic_asked"] = int(b.get("_pic_asked", 0)) + 1
-        return convo.ask_next(s, ch, t, ack=(ack.strip() + (" A couple of quick ones so the render is right first time - or say \"just make it\"."
+        return convo.ask_next(s, ch, t, ack=(ack.strip() + (" A couple of questions so the render is right first time."
                                                             if b["_pic_asked"] == 1 else "")).strip())
     gas = [v for v in s["visuals"] if v.get("kind") == "technical"]
     if b["output"] == "GA only" and not gas and not t.get("no_auto"):

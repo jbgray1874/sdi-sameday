@@ -2162,3 +2162,57 @@ class TheChatSurvivesAReloadTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class NothingHurriesTheAMToFinishTests(unittest.TestCase):
+    """11 November 2026, James: "it's also not to force a quick exit" - Andy said it was trying to finish up quickly.
+    SDI Live never suggests skipping, assuming or building the brief early. "Just make it", "skip" and "that's all I
+    have" still work when the AM chooses to say them; the AM decides when they're done, and finish_brief then checks
+    what is still open."""
+
+    OFFERS = ("quick one", "just assume\\\" any time", "fill the gaps sensibly", "or say \\\"just make it\\\"",
+              "shall we finish", "for the PDF now", "In a minute or less", "\\\"skip\\\" is fine",
+              "\\\"skip\\\" whenever")
+
+    @staticmethod
+    def said_text(path):
+        """What the app can say or show: the strings of a .py file (comments left out), or the whole page."""
+        import io
+        import tokenize
+        src = path.read_text(encoding="utf-8")
+        if path.suffix != ".py":
+            return src
+        return "\n".join(t.string for t in tokenize.generate_tokens(io.StringIO(src).readline)
+                         if t.type == tokenize.STRING)
+
+    def test_no_line_offers_a_way_out_of_the_questions(self):
+        for name in ("lite_app.py", "convo_parts.py", "realtime_parts.py", "lite_page.html"):
+            text = self.said_text(SRC / "brief_lite" / name)
+            for offer in self.OFFERS:
+                with self.subTest(file=name, offer=offer):
+                    self.assertNotIn(offer, text)
+
+    def test_the_voice_is_told_never_to_hurry_them(self):
+        self.assertIn("Warm, unhurried", rt.VOICE_RULES)
+        self.assertIn("never steer them there", rt.VOICE_RULES)
+        self.assertIn("They say when they're done", rt.VOICE_RULES)
+        self.assertNotIn("Keep it light", rt.VOICE_RULES)
+        self.assertIn("If they want to stop the questions, stop", rt.VOICE_RULES)   # their choice still stands
+
+    def test_the_full_brief_starts_without_a_skip_offer(self):
+        who = new_chat()
+        say(who, "Tesco want a gondola end by the tills", {"client": "Tesco", "unit_type": "gondola end"})
+        out, _ = say(who, "let's do the full brief")
+        text = " ".join(r.get("text") or "" for r in out)
+        self.assertIn("one at a time", text)
+        self.assertNotIn("skip", text.lower())
+        self.assertNotIn("quick", text.lower())
+
+    def test_whats_missing_lists_them_without_an_offer_to_fill_them_in(self):
+        who = new_chat()
+        say(who, "Tesco want a gondola end by the tills", {"client": "Tesco", "unit_type": "gondola end"})
+        out, _ = say(who, "what's still missing?")
+        text = " ".join(r.get("text") or "" for r in out)
+        self.assertIn("Still missing", text)
+        self.assertNotIn("fill the gaps", text)
+        self.assertIn("whenever you're ready", text)

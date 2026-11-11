@@ -1315,7 +1315,7 @@ function historyCard(text){setStep(1);refBox=optBox=null;
 function questionsCard(x){refBox=optBox=null;
  const items=x.items||x.text.split("\n").filter(l=>/^\d+\./.test(l)).map(l=>l.replace(/^\d+\.\s*/,""));
  const head=x.text.split("\n")[0];
- const d=block(`<div class="card"><div class="ch"><span class="ico">💬</span>${/^\d+\./.test(head)?"A few more for the full brief":esc(head)}${x.left?`<span class="tag">${x.left} still open · say "skip" for the PDF now</span>`:""}</div>
+ const d=block(`<div class="card"><div class="ch"><span class="ico">💬</span>${/^\d+\./.test(head)?"A few more for the full brief":esc(head)}${x.left?`<span class="tag">${x.left} still open</span>`:""}</div>
   <div class="qs">${items.map((q,i)=>`<button class="qb" data-i="${i}"><i>${i+1}</i><span>${esc(q)}</span></button>`).join("")}</div></div>`);
  d.querySelectorAll(".qb").forEach(b=>b.onclick=()=>{t.value=(t.value?t.value+" ":"")+`${+b.dataset.i+1}) `;t.focus()});return d}
 // ---------- brief panel

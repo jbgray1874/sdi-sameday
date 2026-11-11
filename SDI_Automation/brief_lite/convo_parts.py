@@ -889,8 +889,9 @@ def ask_next(s, ch, t=None, ack=""):
     p = render_plan(b) if st == "render_q" else plan(b)
     if st == "render_q" and not b.get("_rq_hint"):     # once: they can always skip ahead
         b["_rq_hint"] = 1
-        ack = (ack.strip() + " A few quick ones so the render is right first time - say \"just assume\" any time and I'll "
-               "fill the rest in sensibly.").strip()
+        # 11 Nov 2026 (Andy: "it was trying to finish up quickly"): no shortcut offered - they can still say "just make
+        # it", but SDI Live never suggests skipping. Only the AM decides when they're done.
+        ack = (ack.strip() + " A few questions so the render is right first time.").strip()
     keys = [k for k, _, _ in p]
     field = t.get("ask_field")
     extra_q = field == "other_notes" and int(b.get("_extra_n", 0)) < 4 and t.get("ask")
