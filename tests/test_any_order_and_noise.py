@@ -221,7 +221,12 @@ class LiveCallToolsTests(unittest.TestCase):
             self.assertEqual(started, [])
             L.log_msg(self.s["id"], "in", "build the internal brief PDF now as it is")
             out = self.tool("finish_brief", {"now": True})
-            self.assertNotIn("Not yet", out["output"])
+            self.assertNotIn("didn't ask for the brief PDF", out["output"])  # they did ask - so the gaps are checked:
+            self.assertIn("Are you sure that's everything", out["output"])   # 11 Nov 2026: asked once, naming them
+            self.assertEqual(started, [])
+            L.log_msg(self.s["id"], "in", "yes, that's everything I have")
+            out = self.tool("finish_brief", {"now": True})
+            self.assertNotIn("Not built yet", out["output"])
             self.assertTrue(started and started[0].get("pdf"))
         finally:
             L._start_turn = real
@@ -1254,6 +1259,108 @@ class ASaidJobNumberIsTheJobTests(unittest.TestCase):
         out, started = self.draw("new")
         self.assertTrue(out.get("started"), out)
         self.assertNotIn("_ref_confirm", L._session_by_id(self.s["id"])["brief"])
+
+
+class TheBaseQuestionsAreAChecklistTests(unittest.TestCase):
+    """11 November 2026, Andy: "it pushed ahead and generated the brief without ensuring that all the questions were
+    answered". James: the base questions are gone through, each answer saved and ticked off like a checklist; the AM
+    can add more or change the flow; and if they say that's all they have, SDI Live asks once "are you sure that's
+    everything?" and then builds it, with what is still open listed as open points."""
+
+    def setUp(self):
+        self.built = []
+        self.keep = convo.finish_pack
+        convo.finish_pack = lambda s, ch, quiet=False: self.built.append(s["id"])
+        self.who = new_chat()
+        _, self.s = say(self.who, "Tesco want a gondola end by the tills, 1800 x 1330 x 450, steel",
+                        {"client": "Tesco", "unit_type": "gondola end", "placement": "by the tills",
+                         "size": "1800 x 1330 x 450 mm", "materials": "Powder-coated steel"})
+
+    def tearDown(self):
+        convo.finish_pack = self.keep
+
+    def brief(self, **state):
+        s = L._session_by_id(self.s["id"])
+        s["brief"].update(state)
+        L.save_session(s)
+        return s["brief"]
+
+    def test_thats_all_i_have_is_asked_once_then_built(self):
+        out, s = say(self.who, "that's all the information I have, build the brief", {}, "finish")
+        q = asked(out)
+        self.assertIn("Are you sure that's everything", q)
+        self.assertIn("still open", q)
+        self.assertEqual(self.built, [])                                  # nothing built past open questions unasked
+        out, s = say(self.who, "Yes - build it now")
+        self.assertEqual(self.built, [s["id"]])                           # their yes builds it
+        self.assertNotIn("Are you sure", asked(out))
+
+    def test_build_it_now_is_asked_too_and_never_skips_the_check(self):
+        # ("skip the rest" alone only stops the questions - nothing is built - so it needs no check)
+        for said in ("just build the brief now as it is", "build the brief anyway, that's all I've got"):
+            with self.subTest(said=said):
+                self.brief(_gaps_ok=None, _asking=[None])
+                out, _ = say(self.who, said, {}, "finish")
+                self.assertIn("Are you sure that's everything", asked(out))
+                self.assertEqual(self.built, [])
+
+    def test_lets_answer_them_carries_on_with_the_questions(self):
+        say(self.who, "that's all I have", {}, "finish")
+        self.brief(_deferred=["lighting"], _askn={"lighting": 2})
+        out, s = say(self.who, "No, let's answer them")
+        self.assertEqual(self.built, [])
+        self.assertNotIn("Are you sure", asked(out))
+        self.assertNotIn("_deferred", s["brief"])                         # the skipped ones are asked again
+        self.assertTrue(asked(out))                                       # and the next question is asked
+
+    def test_a_question_left_unanswered_stays_open_not_not_known(self):
+        for _ in range(2):
+            self.brief(_asking=["lighting"])
+            say(self.who, "it's for their spring range")                  # not an answer to lighting
+        b = L._session_by_id(self.s["id"])["brief"]
+        self.assertFalse(b.get("lighting"))                               # never written as "not known"
+        self.assertIn("lighting", b.get("_deferred") or [])
+        self.assertNotIn("lighting", [k for k, _, _ in convo.plan(b)])     # not asked again in turn...
+        row = next(c for c in convo.checklist(b) if c["key"] == "lighting")
+        self.assertEqual((row["status"], row["skipped"]), ("open", True))  # ...but still open on the checklist
+        self.assertIn(row["label"], convo.sure_question(b))                # and named before anything is built
+
+    def test_a_live_call_line_never_marks_a_question_skipped(self):
+        for _ in range(3):
+            self.brief(_asking=["lighting"])
+            L.handle(self.who, "Test", "it's for their spring range", voice=True, record_only=True, sid=self.s["id"])
+        self.assertNotIn("lighting", L._session_by_id(self.s["id"])["brief"].get("_deferred") or [])
+
+    def test_the_checklist_ticks_what_was_answered(self):
+        self.brief(lighting="not known", colours_graphics="Black and red (assumed)")
+        c = {r["key"]: r["status"] for r in convo.checklist(L._session_by_id(self.s["id"])["brief"])}
+        self.assertEqual(c["client"], "answered")
+        self.assertEqual(c["lighting"], "not known")                      # asked, and that was the answer
+        self.assertEqual(c["colours_graphics"], "assumed")                # filled in for them - to confirm
+        self.assertIn("open", c.values())
+        page = L.app.test_client().get(f"/api/session/{self.s['id']}").get_json()["session"]["brief"]
+        self.assertEqual({r["key"]: r["status"] for r in page["_checklist"]}, c)   # the page draws it
+        self.assertNotIn("_checklist", L._session_by_id(self.s["id"])["brief"])    # and it is never stored
+
+    def test_assumed_answers_are_open_points_on_the_brief(self):
+        b = self.brief(colours_graphics="Black and red (assumed)")
+        self.assertTrue(any("assumed: Black and red" in q and "confirm" in q for _, _, q in convo.missing_list(b)))
+
+    def test_on_a_call_the_line_that_asked_is_never_the_yes(self):
+        client = L.app.test_client()
+        tool = lambda: json.loads(client.post("/api/rt/tool", json={"session": self.s["id"], "name": "finish_brief",
+                                                                    "arguments": {"now": True}}).get_json()["output"])
+        L.log_msg(self.s["id"], "in", "that's all I have, build the brief PDF")
+        self.assertIn("Are you sure that's everything", tool()["error"])
+        self.assertIn("Not built yet", tool()["error"])                   # called again, nobody answered: still not
+        self.assertTrue(tool().get("still_open"))
+
+    def test_the_page_shows_it_and_a_call_is_not_ended_by_thats_all_i_have(self):
+        page = (WORK / "brief_lite" / "lite_page.html").read_text(encoding="utf-8")
+        self.assertIn('id="chk"', page)
+        self.assertIn("brief._checklist", page)
+        self.assertIn("!/\\b(info|information|details|have|got|know|brief|pack|pdf|build|make|generate|render|document|"
+                      "questions?)\\b/i.test(tx)", page)
 
 
 class StillTrueTests(unittest.TestCase):

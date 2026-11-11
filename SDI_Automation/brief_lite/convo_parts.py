@@ -218,6 +218,8 @@ def plan(b):
     for k, q, extra in PICTURE_Q + [x for x in jq if x[0] != "brand_assets"] + ANDY_Q:
         if real(b.get(k)):
             continue
+        if k in (b.get("_deferred") or []):
+            continue   # asked twice without an answer: not asked again in turn - still open, and named before the build
         if ga_only and k in ("colours_graphics", "liked_job", "brand_assets", "creative_required", "references"):
             continue   # a technical drawing doesn't need the look, a liked unit or creative questions
         if no_est and k in ("region", "production_drawings", "prototype_cost", "target_unit_cost", "finish_instructions",
@@ -230,6 +232,70 @@ def plan(b):
 def plan_total(b):
     keys = list(NEED) + [k for k, _, _ in PICTURE_Q + ANDY_Q] + [k for k, _, when in JOB_Q if when(b)]
     return len(keys), sum(1 for k in keys if real(b.get(k)))
+
+
+# ---------------------------------------------------------------- the base questions, ticked off (11 Nov 2026)
+# Andy: "it pushed ahead and generated the brief without ensuring that all the questions were answered". James: the base
+# questions are gone through, every answer saved and ticked off like a checklist; the AM can add more or change the
+# order at any time; and if they say that's all they have, SDI Live asks once "are you sure?" and then builds it, with
+# what is still open listed as open points.
+DONT_KNOW = re.compile(r"^\s*(not known|unknown|don'?t know|do not know|not sure|n/?a|tbc|tbd|none given)\s*$", re.I)
+
+
+def checklist(b):
+    """Every base question for THIS brief, in the order they are asked, with where it stands: answered, not known (the
+    AM said so - asked, and that is the answer), assumed (filled in for them - to confirm), or open."""
+    seen, out = set(), []
+    no_est = NOPE.match(str(b.get("estimate_required") or ""))
+    ga_only = b.get("output") == "GA only"
+    rows = [(k, NEED_Q.get(k, FIELDS[k][0] + "?")) for k in need_for(b)]
+    rows += [(k, q) for k, q, _ in PICTURE_Q + job_questions(b) + ANDY_Q]
+    for k, q in rows:
+        if k in seen or k not in FIELDS:
+            continue
+        if ga_only and k in ("colours_graphics", "liked_job", "brand_assets", "creative_required", "references"):
+            continue
+        if no_est and k in ("region", "production_drawings", "prototype_cost", "target_unit_cost", "finish_instructions",
+                            "delivery_packing", "delivery_restrictions"):
+            continue
+        seen.add(k)
+        v = b.get(k)
+        if not real(v):
+            st = "open"
+        elif v == UNKNOWN or DONT_KNOW.match(str(v)):
+            st = "not known"
+        elif "(assumed" in str(v).lower():
+            st = "assumed"
+        else:
+            st = "answered"
+        # the field's name, without its explanation ("Client SDI works for - the brand or company paying (e.g. ...)")
+        label = re.split(r"\s+-\s+|\s+\(e\.g\.", FIELDS[k][0])[0].strip()
+        out.append({"key": k, "label": label, "section": FIELDS[k][1], "status": st,
+                    "skipped": k in (b.get("_deferred") or [])})
+    return out
+
+
+def gaps(b):
+    """The base questions still open, or only assumed: what 'are you sure that's everything?' names."""
+    return [c for c in checklist(b) if c["status"] in ("open", "assumed")]
+
+
+def gaps_sig(b):
+    return "|".join(c["key"] for c in gaps(b))
+
+
+def sure_question(b, ack=""):
+    """Asked once before anything is built with base questions still open."""
+    g = gaps(b)
+    names = [c["label"] for c in g if c["status"] == "open"]
+    guessed = [c["label"] for c in g if c["status"] == "assumed"]
+    total = len(checklist(b))
+    said = (f"{len(names)} of the {total} base questions {'is' if len(names) == 1 else 'are'} still open: "
+            + "; ".join(names[:6]) + (f"; and {len(names) - 6} more" if len(names) > 6 else "") + "." if names else "")
+    if guessed:
+        said += (" " if said else "") + "I assumed " + "; ".join(guessed[:4]) + (" and more" if len(guessed) > 4 else "") + "."
+    return _q(ack, f"Before I build it - {said} Are you sure that's everything you have? If so, I'll build it now and "
+                   "list these as open points to confirm with the client.")
 
 
 # ---------------------------------------------------------------- questions that fit THIS job (Andy: "a brand-new client
@@ -930,12 +996,24 @@ def missing_list(b):
         v = b.get(k)
         if v is None or str(v).strip().lower() in ("", UNKNOWN, "unknown", "don't know", "not sure", "tbc"):
             out.append((section, k, CLIENT_ASKS.get(k) or label))
+        elif "(assumed" in str(v).lower():   # 11 Nov 2026: filled in for them - an open point until the client confirms it
+            out.append((section, k, f"{CLIENT_ASKS.get(k) or label} (assumed: {re.sub(r'[ (]*assumed[^)]*[)]?', '', str(v)).strip()[:60]} - confirm)"))
     return out
 
 
 def finish_brief(s, ch, ack=""):
-    """The brief is done: the full PDF, and the list of what's still missing to ask the client."""
+    """The brief is done: the full PDF, and the list of what's still missing to ask the client.
+
+    11 Nov 2026 (Andy): every way the brief gets built comes through here, so the rule is kept here once. With base
+    questions still open, the AM is asked "are you sure that's everything?" ONCE, naming them; their yes (or their
+    own "build it anyway") builds it, with the open ones listed as open points. Never built past open questions silently."""
     b = s["brief"]
+    sig = gaps_sig(b)
+    if sig and b.get("_gaps_ok") != sig:
+        b["_gaps_asked"], b["_asking"] = sig, ["_sure"]
+        save_session(s)
+        ch.ask(sure_question(b, ack), field="_sure", options=["Yes - build it now", "Let's answer them"])
+        return ch, s
     miss = missing_list(b)
     if ack.strip():
         ch.text(ack.strip())

@@ -716,6 +716,10 @@ def quick_questions(b, limit=3):
 
 
 SKIP = re.compile(r"\b(skip|just (give|send|make)|that'?s (all|enough)|enough|no more|good enough|pdf now|do it now)\b", re.I)
+# 11 Nov 2026: a yes to "are you sure that's everything?" - or the AM saying it is all they have / to build it anyway
+SURE_YES = re.compile(r"\b(yes|yeah|yep|yup|sure|correct|positive|that'?s (all|everything|it)|that is (all|everything)|"
+                      r"all (i|we) (have|know|'ve got|got)|build it|go ahead|do it|generate it|make it|anyway|as it is|"
+                      r"don'?t have (it|them|that|those|any more|the rest))\b", re.I)
 NOPE = re.compile(r"^\s*(no|not|n/?a|none|nope|nothing)\b", re.I)
 
 
@@ -2878,12 +2882,17 @@ def handle(number, name, text, image_path=None, voice=False, ch=None, new=False,
         moodboard.start(s)
     # A question they skipped is asked once more at most - a person doesn't ask "repeat or new?" five times.
     # (The picture's essentials are the exception: those keep coming until answered or assumed.)
+    # 11 Nov 2026 (Andy): it used to write "not known" here, which counted as answered - so the questions ran out and
+    # the brief was built with them never answered. Now it is only put to the back (not asked again in turn): still
+    # open on the checklist, and named in "are you sure that's everything?" before anything is built. A line said on
+    # a live call is not counted: the voice asks its own questions, so the last one asked here can be stale.
     asked = (b.get("_asking") or [None])[0]
-    if text and t_override is None and asked in FIELDS and asked not in NEED and not convo.real(b.get(asked)):
+    if text and t_override is None and not record_only and asked in FIELDS and asked not in NEED \
+            and not convo.real(b.get(asked)):
         n = b.setdefault("_askn", {})
         n[asked] = n.get(asked, 0) + 1
         if n[asked] >= 2:
-            b[asked] = convo.UNKNOWN
+            b["_deferred"] = sorted(set(b.get("_deferred") or []) | {asked})
     if b.get("client") and not had_client and b.get("_files"):
         convo.to_library(b["client"], b["_files"])
     adapted = convo.adapt(s)
@@ -2979,6 +2988,22 @@ def handle(number, name, text, image_path=None, voice=False, ch=None, new=False,
                 b["other_notes"] = ((b["other_notes"] + "; ") if b.get("other_notes") else "") + text[:600]
             t["reply"] = "Added that to the brief."
         intent = "finish"
+    # 11 Nov 2026: the answer to "are you sure that's everything? still open: ..." (convo.finish_brief). Yes - or
+    # "that's all I have", "build it anyway" - builds it with those as open points. Answers given instead are saved,
+    # and the questions carry on; the ones put to the back are asked again.
+    if t_override is None and asking == "_sure":
+        if SURE_YES.search(text or "") and not re.search(r"\b(not yet|let'?s answer|answer them|carry on|keep going)\b",
+                                                        text or "", re.I):
+            b["_gaps_ok"] = convo.gaps_sig(b)
+            intent = "finish"
+        else:
+            b.pop("_deferred", None)
+            b.pop("_askn", None)
+            if not (t.get("updates") or {}) and re.search(r"\b(no|not yet|let'?s answer|answer them|carry on|keep going)\b",
+                                                         text or "", re.I):
+                t["reply"] = "OK - let's go through them."
+            if intent == "finish":
+                intent = "answer"
     # "what's missing?" / "what can you do?": answered straight from the brief, never with the next template question
     if t_override is None and re.search(r"\bwhat('?s| is| else is)? (still )?(missing|left|outstanding)\b|\bwhat (else )?do you "
                                         r"(still )?need\b|\bwhat('?s| is) still needed\b", text or "", re.I):
@@ -3339,14 +3364,8 @@ def handle(number, name, text, image_path=None, voice=False, ch=None, new=False,
         return ch, s
 
     if intent == "finish":
-        left = len(convo.plan(b))
-        if left and not b.get("_finish_warned") and not SKIP.search(text or "") and not wants_pack_now(text):
-            b["_finish_warned"] = 1
-            save_session(s)
-            ch.ask((ack + "\n\n" if ack.strip() else "") + f"There are {left} questions left - about {max(1, left // 4)} minute"
-                   f"{'s' if left >= 8 else ''} if we keep going. Carry on, or build the brief now and list them as missing?",
-                   field="_finish", options=["Carry on", "Build it now"])
-            return ch, s
+        # 11 Nov 2026 (Andy): "that's all" and "...now" used to skip the only check. Every build goes through
+        # convo.finish_brief, which asks "are you sure that's everything?" once while base questions are open.
         return convo.finish_brief(s, ch, ack)
 
     # the AM's own words only - an uploaded GA file ("12148-01-GA1...") is not a request for a GA (27 Oct 2026)
@@ -4065,21 +4084,45 @@ def api_rt_tool():
         # 27 Oct 2026: the voice built the internal PDF with 5 questions still to go, and never asked "anything else?"
         st_ = convo.stage(s)
         last_ = _last_am_line(s["id"])
-        said_now = re.search(r"\b(now|as it is|skip|that'?s (all|enough)|no more questions|build it|finish)\b", last_, re.I)
+        # ("finish" alone was enough - "a matt black finish" counted as asking for the brief)
+        said_now = re.search(r"\b(now|as it is|skip|that'?s (all|enough)|no more questions|build it|finish (it|the brief|up))\b",
+                             last_, re.I)
         # 4 Nov 2026 (James): the AM decides the order - "build the internal brief now" works before the client pack too.
         # Only the AM's own words open it: the voice once built the PDF with questions still to go.
         asked_pdf = said_now and re.search(r"\b(brief|pdf|internal|8[- ]?page|job sheet|document)\b", last_, re.I)
+        # 11 Nov 2026: their yes to "are you sure that's everything?" - asked because they asked for the brief - is that ask
+        asked_pdf = asked_pdf or (s["brief"].get("_gaps_told") and SURE_YES.search(last_))
         if st_ in ("pack", "render_q", "route", "confirm", "render", "review") \
                 and (convo.pack_of(s["brief"]) or "both") in ("client", "both") and not asked_pdf:
             return jsonify({"slow": False, "output": json.dumps({"error": "Not yet: the AM didn't ask for the brief PDF. Carry on "
                                                                           "with the client pack (now_do: " + rt.NOW_DO.get(st_, "")
                                                                           + "). If they DO want the PDF now, they just say so."})})
-        if st_ == "internal_q" and not said_now:
-            left = [q for _, q, _ in convo.plan(s["brief"])]
-            return jsonify({"slow": False, "output": json.dumps({"error": f"Not yet: {len(left)} internal-brief questions are "
-                            "still open. Ask them one at a time first (unless the AM says to build it now).",
-                            "next_questions": left[:3]})})
-        if st_ in ("internal_q", "extra") and not s["brief"].get("_extra_asked"):
+        # 11 Nov 2026 (Andy: "it pushed ahead and generated the brief without ensuring that all the questions were
+        # answered"). With base questions open, the brief is built only after the AM has been asked ONCE "are you sure
+        # that's everything?" and has said yes - in a line said AFTER the voice was told to ask, so the "build it now"
+        # that started this can never count as the yes.
+        b_ = s["brief"]
+        sig_ = convo.gaps_sig(b_)
+        if sig_ and b_.get("_gaps_ok") != sig_:
+            if b_.get("_gaps_told") == sig_ and last_ != b_.get("_gaps_told_line") and SURE_YES.search(last_) \
+                    and not re.search(r"\b(not yet|let'?s answer|answer them|carry on|keep going)\b", last_, re.I):
+                b_["_gaps_ok"] = sig_
+                save_session(s)
+            else:
+                g_ = convo.gaps(b_)
+                open_ = [c["label"] for c in g_ if c["status"] == "open"]
+                guessed_ = [c["label"] for c in g_ if c["status"] == "assumed"]
+                b_["_gaps_told"], b_["_gaps_told_line"] = sig_, last_
+                save_session(s)
+                return jsonify({"slow": False, "output": json.dumps({"error": (
+                    f"Not built yet: {len(open_)} of the base questions are still open"
+                    + (f" and {len(guessed_)} were only assumed" if guessed_ else "") + ". If you haven't asked them, ask "
+                    "them one at a time now and record_answers each answer. If the AM says that's everything they have "
+                    "(or to build it anyway), ask them ONCE: 'Are you sure that's everything? Still open: "
+                    + ", ".join(open_[:4]) + ".' When they say yes, call finish_brief again with now=true - it builds, "
+                    "with these listed as open points to confirm with the client."),
+                    "still_open": open_[:12], "assumed": guessed_[:6]})})
+        if st_ in ("internal_q", "extra") and not s["brief"].get("_extra_asked") and not s["brief"].get("_gaps_ok"):
             s["brief"]["_extra_asked"] = 1
             save_session(s)
             return jsonify({"slow": False, "output": json.dumps({"error": "One more first: ask the AM 'Is there anything else "
@@ -5084,7 +5127,19 @@ def api_turn(jid):
         x["url"] = _url(r.get("path"))
         x["more"] = [_url(m) for m in r.get("more") or []]
         out.append(x)
-    return jsonify({"done": j["done"], "replies": out, "brief": j["brief"], "session": j["session"], "error": j["error"]})
+    return jsonify({"done": j["done"], "replies": out, "brief": _with_checklist(j["brief"]), "session": j["session"],
+                    "error": j["error"]})
+
+
+def _with_checklist(b):
+    """The brief as the page draws it, with its checklist of base questions (11 Nov 2026) - added here, never stored."""
+    if not isinstance(b, dict):
+        return b
+    try:
+        return {**b, "_checklist": convo.checklist(b)}
+    except Exception as e:
+        print("checklist:", str(e)[:160], flush=True)
+        return b
 
 
 @app.route("/api/upload", methods=["POST"])
@@ -5267,6 +5322,7 @@ def api_session(sid):
     s = dict(r)
     for k in ("brief", "refs", "visuals", "client_images"):
         s[k] = json.loads(s[k] or "[]")
+    s["brief"] = _with_checklist(s["brief"])
     for m in msgs:
         m["url"] = _url(m["media"]) if m.get("media") else None
     files = sorted((f for f in os.listdir(OUT) if sid in f and f.endswith(".pdf")), key=lambda f: os.path.getmtime(os.path.join(OUT, f)))

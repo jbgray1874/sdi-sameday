@@ -283,6 +283,15 @@ body.branded .side{border-left:3px solid var(--b1)}.ring{display:flex;gap:14px;a
  .crumb .ct2{font-size:15px;font-weight:700;color:var(--ink);order:1;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
  .mbrief{width:auto;padding:0 10px;gap:5px;grid-auto-flow:column;font-size:12px;font-weight:800;border:1.5px solid var(--line);height:34px;border-radius:99px}
  .mbrief.full{border-color:var(--green);color:var(--green)}
+ /* 11 Nov 2026: the base questions as a checklist (Andy: answered, ticked off, nothing built past them unasked) */
+ .chk h4 .cnt{float:right;font-weight:600;color:var(--muted);text-transform:none;letter-spacing:0}
+ .chk .ci{display:flex;gap:10px;align-items:flex-start;padding:7px 0;border-bottom:1px solid var(--line);font-size:13px;line-height:1.35}
+ .chk .ci:last-child{border-bottom:0}
+ .chk .ci i{flex:none;width:18px;height:18px;margin-top:1px;border-radius:50%;display:grid;place-items:center;font-style:normal;font-size:11px;font-weight:800;border:1.5px solid var(--line);color:var(--muted)}
+ .chk .ci.answered i{background:var(--green);border-color:var(--green);color:#fff}
+ .chk .ci.assumed i{border-color:#EBCC2A;color:#8a6d00;background:#FBF2C2}
+ .chk .ci.nk i{border-style:dashed}
+ .chk .ci span{flex:1;min-width:0;overflow-wrap:anywhere} .chk .ci small{display:block;color:var(--muted);font-size:11.5px}
  .mprog{display:block;position:absolute;left:0;right:0;bottom:-1px;height:2px;background:transparent}
  .mprog i{display:block;height:100%;background:var(--red);transition:width .4s;border-radius:0 2px 2px 0}
  /* conversation */
@@ -1110,6 +1119,7 @@ body:not(.branded) .vs-you.live p::after{background:var(--ink)}
    <text id="ringt" x="29" y="33.5" text-anchor="middle" font-size="13" font-weight="800" fill="var(--ink)">0/5</text></svg>
    <div><b id="btitle">New brief</b><small id="bsub">The 5 essentials unlock the visuals</small></div></div>
   <div class="ess" id="ess"></div>
+  <div class="det chk" id="chk"></div>
   <div class="det files" id="files"><h4>Client files <button id="addf">＋ Add</button></h4><div id="flist"></div>
    <div class="drop" id="drop">Drop product photos, artwork or the client's spec here - I read them before answering and use them for the concepts</div></div>
   <div class="det sidesp" id="sidesp"></div>
@@ -1327,6 +1337,11 @@ async function showBrand(name){name=(name||"").trim();if(name===brandNow)return;
 function showBrief(b){brief=b||{};sideSpaces(brief._spaces||[]);let have=0;
  $("#ess").innerHTML=NEED.map(([k,l])=>{const v=brief[k];if(v)have++;return `<div class="e ${v?"y":"n"}"><i>${v?"✓":""}</i><div><small>${l}</small><span>${esc(v||"needed")}</span></div></div>`}).join("");
  $("#ringc").style.strokeDashoffset=150.8*(1-have/5);briefHave=have;{const mb=$("#mbrief");if(mb){mb.textContent=`${have}/5`;mb.classList.toggle("full",have>=5)}}$("#ringc").style.stroke=have>=5?"var(--green)":"var(--red)";$("#ringt").textContent=`${have}/5`;
+ {const c=brief._checklist||[],el=$("#chk");if(el){const ok=c.filter(x=>x.status==="answered"||x.status==="not known").length;
+  const cls=x=>x.status==="answered"?"answered":x.status==="assumed"?"assumed":x.status==="not known"?"nk":"open";
+  const mark=x=>x.status==="answered"?"✓":x.status==="assumed"?"~":x.status==="not known"?"?":"";
+  const note=x=>x.status==="answered"?"":x.status==="assumed"?"assumed - to confirm":x.status==="not known"?"not known":x.skipped?"skipped for now - named before the brief is built":"to ask";
+  el.innerHTML=c.length?`<h4>Brief checklist <span class="cnt">${ok} of ${c.length}</span></h4>`+c.map(x=>`<div class="ci ${cls(x)}"><i>${mark(x)}</i><span>${esc(x.label)}${note(x)?`<small>${note(x)}</small>`:""}</span></div>`).join(""):""}}
  showBrand(brief.client);$("#btitle").textContent=brief.client?`${brief.client}${brief.unit_type?" · "+brief.unit_type:""}`:"New brief";
  $("#bsub").textContent=have<5?`${5-have} more to unlock the visuals`:"Ready for visuals";
  const rest=Object.entries(brief).filter(([k,v])=>!NEED.some(n=>n[0]===k)&&!k.startsWith("_")&&v);
@@ -1481,7 +1496,9 @@ async function rtHeard(tx,itemId){
  if(/^\W*(please\s+)?(stop|cancel|hold on)(\s+(it|this|that|the (render|drawing|pack|ga)|now|please|making it))*\W*$/i.test(tx)){if(stopAll()){if(sid)fetch("/api/rt/log",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({session:sid,role:"user",text:tx})}).catch(()=>{});return}}
  // 2 Nov 2026: "show me the client pack / GA / render / brief" -> scroll to what is already made
  {const m=/\b(show|see|open|where)\b.*\b(client pack|client sheet|pack|pdf|brief pdf|brief|document|doc|ga|render|drawing)\b/i.exec(tx);if(m&&!/\b(past|previous|before|history)\b/i.test(tx)){const k=m[2].toLowerCase();const els=[...log.querySelectorAll(k==="render"?".opt":/ga|drawing/.test(k)?".card.ga":".doc")].filter(e=>/pdf|pack|sheet|ga/i.test(k)?/pdf|pack|sheet|GA/i.test(e.textContent):true);const el=els[els.length-1];if(el){LS.showing=true;LS.past=true;lsBlur(false);el.scrollIntoView({behavior:"smooth",block:"center"});el.classList.add("spot");setTimeout(()=>el.classList.remove("spot"),4000)}}}
- if(FINISH.test(tx)&&tx.split(/\s+/).length<=8){rt.closing=true;
+ // 11 Nov 2026: "that's all the information I have" / "that's all, build it" is about the brief, not a goodbye - it goes
+ // to the voice, which asks "are you sure that's everything?" before building. Only a goodbye ends the call.
+ if(FINISH.test(tx)&&tx.split(/\s+/).length<=8&&!/\b(info|information|details|have|got|know|brief|pack|pdf|build|make|generate|render|document|questions?)\b/i.test(tx)){rt.closing=true;
   if(sid)fetch("/api/rt/log",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({session:sid,role:"user",text:tx})}).catch(()=>{});
   rtSay({type:"conversation.item.create",item:{type:"message",role:"user",content:[{type:"input_text",text:"[Showroom: the AM is finishing. Say one short, warm goodbye line (everything is saved in the chat) - nothing else, no question.]"}]}});
   rtSay({type:"response.create"});return}
