@@ -74,7 +74,9 @@ NOW_DO = {   # 4 Nov 2026: tightened with VOICE_RULES - each says only what this
              "job -> liked_job, then make_concepts with design_route past; new -> new; a bit of both -> mix.",
     "confirm": "Say the clash in check_with_am in one sentence, suggest what's usual, and ask: keep it as they said, or "
                "change it? Wait for a clear answer, record any change, then make_concepts.",
-    "render": "Call make_concepts now with the design_route they gave.",
+    # 11 Nov 2026 (Andy: "rather than you just create something off the bat"): one chance to add to it first
+    "render": "If you haven't yet, ask once: 'Anything else you'd like in it before I draw it?' and record what they add. "
+              "Then make_concepts with the design_route they gave.",
     # 4 Nov 2026: stage() returns "ga" for a GA-only brief, and there was no hint for it - NOW_DO["ga"] raised
     # KeyError in every tool result, so a voice call asking for only the GA broke at its next tool call
     "ga": "They want only the technical GA: call make_concepts with output 'GA only' - it's drawn from the brief's size "
@@ -82,10 +84,15 @@ NOW_DO = {   # 4 Nov 2026: tightened with VOICE_RULES - each says only what this
     "rendering": "It's being drawn. Say nothing more until it's on screen; if they speak, answer in a few words.",
     "finalising": "The GA and client pack are being made. Say once that they're on the way, then nothing until they're "
                   "on screen - never that they're done before then.",
-    "review": "Ask: any changes, or finalise this one and make its GA and the client pack? A change -> change_option, "
+    "review": "Ask once: any changes, or finalise this one and make its GA and the client pack? A change -> change_option, "
               "exactly what they said. Not happy -> ask 'changes, or a completely new design?'; a new design -> "
               "more_options n=1, never the same one redone. Finalise, 'that's the one', 'make its GA' -> choose_option. "
               "Ask again whenever a new option is on screen.",
+    # 11 Nov 2026 (Andy): asked after every line he said, "shall I finalise?" pushed him to finish. Once per option.
+    "review_open": "You've asked about finalising this option - don't ask again. Take in what they tell you and record it. "
+                   "When they want to see it ('show me', 'visualise it', 'present the visual'), call change_option on the "
+                   "latest option with everything new since it was drawn. Only they say it's final ('that's the one', "
+                   "'finalise', 'make its GA') -> choose_option.",
     "internal_q": "If the client pack has just been made, say in one line that it's done and the internal brief starts. "
                   "Then next_questions[0], worded for this job. If focus is internal, the render is waiting: when these "
                   "run out or they ask for it, call focus render.",
@@ -101,6 +108,8 @@ def stage_now(s):
         return "rendering"
     if busy == "choose_option":
         return "finalising"      # 27 Oct 2026: the voice told the AM it was done and moved on while the pack was still being made
+    if st == "review" and s["brief"].get("_final_asked") and s["brief"]["_final_asked"] == G["latest_option"](s):
+        return "review_open"     # 11 Nov 2026: asked once for this option - now it listens
     return st
 
 TOOLS = [
@@ -176,7 +185,7 @@ the SDI internal brief PDF - in a call that feels like talking to a sharp collea
 
 # Tone
 - Warm, unhurried, British English. One or two short sentences, then listen. Finish every sentence.
-- Contractions, and a brief reaction to what they said ("Got it, four shelves." "Ah, their new layout?"), never the
+- Contractions, and a brief reaction to what they said ("Got it, four shelves."), never the
   same one twice in a row. Shorter when they sound rushed. A light comment is fine; waffle is not.
 - Picture the unit as they talk. If it isn't a classic display (a jacket, a sign, a whole space), go with
   that - never force shelves or a stand - and if it's ambiguous ask the one question a designer would.
@@ -213,7 +222,7 @@ the SDI internal brief PDF - in a call that feels like talking to a sharp collea
 # Recording the brief
 - Call record_answers whenever they tell you anything for the brief - several fields at once is fine - in their own
   words, before your next question. If it comes back "Not saved", ask that question again. Saving is silent: call
-  record_answers straight away, saying nothing first - never "Got it, let me note that". Then speak once: a few words
+  record_answers straight away, saying nothing first - never "Got it, let me note that" or "let me think". Then speak once: a few words
   showing you heard it right, and the next question ("Black acrylic - and roughly what size?").
 - Size is the whole unit, height x width x depth. Never invent sizes, colours, materials, quantities or dates.
 - "Not powder coat" or "as last time" isn't a material or a colour: ask what it should be, with 2-3 choices (for
@@ -228,7 +237,7 @@ the SDI internal brief PDF - in a call that feels like talking to a sharp collea
    the client pack.
 2. Render. What it is and roughly its size ("you choose" is fine), then one question - a past SDI job or
    file to follow, or something new? Then make_concepts. Everything else is assumed, marked, and changed on the picture.
-3. Review. When it's on screen: "Any changes, or shall I finalise this one and make its GA and the client pack?"
+3. Review. When it's on screen, once: "Any changes, or shall I finalise this one and make its GA and the client pack?"
 4. Internal brief. next_questions one at a time, then "Anything else for the brief?", then finish_brief with now=true.
 
 # At any point

@@ -2241,3 +2241,72 @@ class NothingHurriesTheAMToFinishTests(unittest.TestCase):
         self.assertEqual(got["ended"], [True, True])
         self.assertEqual(got["kept"], [False, False, False])         # a question back is never the end
         self.assertNotIn("FINISH.test", PAGE)
+
+
+class AndysShowcaseCallTests(unittest.TestCase):
+    """11 November 2026, Andy's call (Fanatics, a showcase for Garbage Pail Kids cards). He said 420 x 297 x 50 three
+    times and the render used a typical 450 x 400 x 300; "shall I finalise this one?" came eight times in fifteen
+    minutes, after he'd said to hold off; "Photos laptop" (half-heard) became Option B; and he said "I'd like to expand
+    on the briefing now rather than you just create something off the bat"."""
+
+    def setUp(self):
+        self.client = L.app.test_client()
+        self.who = new_chat()
+        _, self.s = say(self.who, "Fanatics want a countertop showcase for trading cards",
+                        {"client": "Fanatics", "unit_type": "countertop showcase"})
+
+    def tool(self, name, args):
+        r = self.client.post("/api/rt/tool", json={"session": self.s["id"], "name": name, "arguments": args})
+        self.assertEqual(r.status_code, 200, r.data[:300])
+        return json.loads(r.get_json()["output"])
+
+    def with_option(self, label):
+        s = L._session_by_id(self.s["id"])
+        s["visuals"].append({"kind": "render", "label": label, "path": f"opt-{label}.png"})
+        L.save_session(s)
+        return L._session_by_id(self.s["id"])
+
+    def test_a_shallow_module_is_a_real_size(self):
+        for size in ("420 x 297 x 50 mm", "300 x 1330 x 50 mm", "50 x 420 x 297 mm"):
+            self.assertTrue(L.size_ok(size), size)
+        for size in ("40 x 30 x 20", "20000 x 30000 x 100", "1800 x 600", "5 x 420 x 297 mm"):
+            self.assertFalse(L.size_ok(size), size)                     # cm read as mm, an area, half a size, a slip
+        L.log_msg(self.s["id"], "in", "420 millimetres wide by 297 deep and about 50 high")
+        out = self.tool("record_answers", {"updates": {"size": "50 x 420 x 297 mm"}})
+        self.assertIn("size", out.get("saved_now") or [])
+        self.assertEqual(L._session_by_id(self.s["id"])["brief"].get("size"), "50 x 420 x 297 mm")
+
+    def test_a_size_the_app_drops_is_never_reported_saved(self):
+        L.log_msg(self.s["id"], "in", "20000 by 30000 by 100")
+        out = self.tool("record_answers", {"updates": {"size": "20000 x 30000 x 100 mm"}})
+        self.assertNotIn("size", out.get("saved_now") or [])
+        self.assertIn("size", out.get("not_saved") or {})
+        self.assertFalse(convo.real(L._session_by_id(self.s["id"])["brief"].get("size")))
+
+    def test_finalise_is_asked_once_per_option(self):
+        s = self.with_option("A")
+        self.assertEqual(rt.stage_now(s), "review")
+        self.assertIn("Ask once", rt.NOW_DO["review"])
+        self.client.post("/api/rt/log", json={"session": s["id"], "role": "assistant",
+                                              "text": "It's on screen now. Any changes, or shall I finalise this one and "
+                                                      "make its GA and the client pack?"})
+        s = L._session_by_id(self.s["id"])
+        self.assertEqual(rt.stage_now(s), "review_open")                # asked: now it listens
+        self.assertIn("don't ask again", rt.NOW_DO["review_open"])
+        self.assertIn("change_option", rt.NOW_DO["review_open"])       # "present the visual" draws what he added
+        self.assertEqual(rt.stage_now(self.with_option("B")), "review") # a new option on screen: asked once more
+
+    def test_a_half_heard_line_never_starts_a_change(self):
+        for line in ("Photos laptop", "Jump route", "Erm"):
+            self.assertTrue(L.half_heard_change(line), line)
+        for line in ("bigger header", "make it red", "yes please", "go ahead", "more metallic fleck on the inner part"):
+            self.assertFalse(L.half_heard_change(line), line)
+        self.with_option("A")
+        L.log_msg(self.s["id"], "in", "Photos laptop")
+        out = self.tool("change_option", {"label": "A", "change": "photos laptop"})
+        self.assertIn("Not changed", out.get("error", ""))
+        self.assertEqual([v["label"] for v in L._session_by_id(self.s["id"])["visuals"]], ["A"])
+
+    def test_they_can_add_to_it_before_the_first_drawing(self):
+        self.assertIn("Anything else you'd like in it before I draw it?", rt.NOW_DO["render"])
+        self.assertIn("let me think", rt.VOICE_RULES)                   # no "let me think about the next detail" filler

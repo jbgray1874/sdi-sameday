@@ -2100,10 +2100,12 @@ def wants(b):
 
 
 def size_ok(text):
-    """Complete H x W x D, each between 100 mm and 6 m - otherwise it's a typo, an area, or half an answer."""
+    """Complete H x W x D, each between 10 mm and 6 m and the largest at least 100 mm - otherwise it's a typo, an area,
+    centimetres read as mm, or half an answer. 11 Nov 2026 (Andy's call): every side had to be 100 mm or more, so his
+    420 x 297 x 50 mm showcase module was thrown away three times and the render used a typical 450 x 400 x 300."""
     import pdf_pack
     hwd = pdf_pack.parse_size(text)
-    return bool(hwd) and all(100 <= v <= 6000 for v in hwd)
+    return bool(hwd) and all(10 <= v <= 6000 for v in hwd) and max(hwd) >= 100
 
 
 def wants_pack_now(text):
@@ -4068,6 +4070,12 @@ def api_rt_tool():
         # 3 Nov 2026 (Andy's call): a Stop pressed minutes earlier silently blocked the client pack - its GA came out as the
         # plain code drawing and no HD render was made. Asking for something new ends the Stop.
         STOP_RENDERS.pop(s["id"], None)
+    if js.get("name") == "change_option":
+        last_ = _last_am_line(s["id"])
+        if half_heard_change(last_):
+            return jsonify({"slow": False, "output": _said(json.dumps({"error": (
+                f"Not changed: the AM's last words \"{last_[:60]}\" don't say what to change - probably half-heard. Say you "
+                "didn't quite catch that and ask what they'd like changed. Draw nothing until they say.")}))})
     if js.get("name") == "make_concepts" and convo.stage(s) == "confirm":
         # 27 Oct 2026: "change it" was heard as "Client" and the voice drew anyway - a clash needs a clear answer first
         last = _last_am_line(s["id"])
@@ -4265,9 +4273,17 @@ def api_rt_tool():
             break
         time.sleep(0.1)
     s = _session_by_id(s["id"]) or s
-    out_ = {"turn": jid, "slow": False, "output": rt.tool_result(
-        s, JOBS[jid]["ch"].out, saved_now=list(t.get("updates") or {}) if js.get("name") == "record_answers" else None,
-        not_saved=not_saved)}
+    saved_now = None
+    if js.get("name") == "record_answers":
+        # 11 Nov 2026 (Andy's call): the size was dropped as unreadable but the voice was told "saved size" and moved on
+        sent = list(t.get("updates") or {})
+        saved_now = [k for k in sent if convo.real(s["brief"].get(k))]
+        dropped = {k: ("not kept - the app couldn't use it as given. Ask what the replies say (for a size: height, width "
+                       "and depth).") for k in sent if k not in saved_now}
+        if dropped:
+            not_saved = {**(not_saved or {}), **dropped}
+    out_ = {"turn": jid, "slow": False, "output": rt.tool_result(s, JOBS[jid]["ch"].out, saved_now=saved_now,
+                                                                 not_saved=not_saved)}
     _told_direction(s)
     tr = rt.transcription(s, RT_LIVE.get(s["id"], True))
     if rt.hint_text(tr) not in RT_HINT.get(s["id"], []):     # 4 Nov 2026: the transcriber hears this brief's new names too
@@ -4331,6 +4347,11 @@ def api_rt_log():
         if convo.stage(s) == "pack" and re.search(r"\bpacks?\b", text, re.I) and re.search(r"\?", text):
             s["brief"]["_pack_asked"] = 1     # the voice asked it: once is enough - not answered = both (convo.stage)
             save_session(s)
+        if convo.stage(s) == "review" and FINAL_Q.search(text) and "?" in text:
+            # 11 Nov 2026 (Andy: "it was trying to finish up quickly"): "shall I finalise this one?" came after every
+            # line he said - eight times in fifteen minutes. Once per option; then it listens (rt.stage_now).
+            s["brief"]["_final_asked"] = latest_option(s)
+            save_session(s)
         return jsonify({"ok": True})
 
     log_msg(s["id"], "in", text)
@@ -4388,6 +4409,26 @@ def _told_direction(s):
     if s and s["brief"].get("_direction_new"):
         s["brief"].pop("_direction_new", None)
         save_session(s)
+
+
+FINAL_Q = re.compile(r"\bfinali[sz]e|\b(GA|client pack)\b.*\?|\bnext step\b", re.I)
+
+
+def latest_option(s):
+    """The label of the newest option on screen (A, B, C...)."""
+    return next((v.get("label") for v in reversed(s.get("visuals") or []) if v.get("kind") == "render"), None) or ""
+
+
+# 11 Nov 2026 (Andy's call): "Photos laptop" - two half-heard words - became Option B "with your changes", 2.5 minutes of
+# drawing nobody asked for. A change needs words that say what to change, or a yes to one read back.
+CHANGE_SAID = re.compile(r"\b(\w+er|more|less|add\w*|remove|without|with|no|colou?rs?|red|blue|green|black|white|gr[ae]y|gold|"
+                         r"silver|pink|purple|orange|yellow|brown|logo|header|shel(f|ves)|light\w*|graphics?|size|finish|matt|"
+                         r"gloss|wood|acrylic|metal|steel|glass|yes|yeah|yep|go|do it|please|ok(ay)?|sure|right)\b", re.I)
+
+
+def half_heard_change(line):
+    """Two words or fewer that don't say what to change ('Photos laptop', 'Jump route') - not a change to draw."""
+    return len(re.findall(r"[a-z']+", (line or "").lower())) <= 2 and not CHANGE_SAID.search(line or "")
 
 
 def _last_am_line(sid):
