@@ -118,6 +118,8 @@ TOOLS = [
                     "before you ask the next question. Returns what is still needed and the next template questions.",
      "parameters": {"type": "object", "properties": {
          "updates": {"type": "object", "description": "Field id -> value, only what the AM actually said. Several at once is fine. "
+                     "Anything about the job that no field covers (a feature, a second visual, a constraint, how it's used) "
+                     "goes in other_notes, in their words - it's added to the notes, never replaces them. Never drop it. "
                      "size is ALWAYS 'HEIGHT x WIDTH x DEPTH mm', height first: '1800 wide, 1200 high, 700 deep' -> '1200 x 1800 x 700 mm'."},
          "not_known": {"type": "array", "items": {"type": "string"}, "description": "Field ids the AM doesn't know (after you offered options)."}},
          "required": ["updates"]}},

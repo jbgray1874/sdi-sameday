@@ -2310,3 +2310,35 @@ class AndysShowcaseCallTests(unittest.TestCase):
     def test_they_can_add_to_it_before_the_first_drawing(self):
         self.assertIn("Anything else you'd like in it before I draw it?", rt.NOW_DO["render"])
         self.assertIn("let me think", rt.VOICE_RULES)                   # no "let me think about the next detail" filler
+
+
+class WhatTheyAddIsAlwaysKeptTests(unittest.TestCase):
+    """11 November 2026, James: "we need to ensure we capture everything.. the users may offer additional information
+    that we don't have a listed question for and this needs to be taken into account for the brief." Andy's call: a bank
+    of three modules, angled at 45 degrees, cards behind an acrylic lens - none of it a listed question."""
+
+    def test_both_readings_are_told_to_keep_what_has_no_question(self):
+        voice = next(t for t in rt.TOOLS if t["name"] == "record_answers")["parameters"]
+        for reader, schema in (("the call", voice), ("the typed chat", convo.CHAT_TOOL["input_schema"]),
+                               ("WhatsApp", L.TOOL["input_schema"])):
+            with self.subTest(reader=reader):
+                self.assertIn("goes in other_notes", schema["properties"]["updates"]["description"])
+
+    def test_extra_points_add_up_and_none_is_kept_twice(self):
+        who = new_chat()
+        say(who, "Fanatics want a countertop showcase", {"client": "Fanatics", "unit_type": "countertop showcase"})
+        say(who, "show a bank of three side by side", {"other_notes": "A separate visual of three modules side by side"})
+        say(who, "cards behind an acrylic lens", {"other_notes": "Cards behind a glass or acrylic lens"})
+        _, s = say(who, "and three side by side", {"other_notes": "a separate visual of three modules, side by side"})
+        notes = s["brief"]["other_notes"]
+        self.assertIn("three modules side by side", notes)
+        self.assertIn("acrylic lens", notes)
+        self.assertEqual(notes.lower().count("three modules"), 1)        # said twice, kept once
+
+    def test_the_drawing_follows_them(self):
+        b = {"client": "Fanatics", "unit_type": "countertop showcase", "size": "50 x 420 x 297 mm",
+             "other_notes": "Angled at 45 degrees on the counter; cards behind an acrylic lens"}
+        p = L.visual_prompt(b, "render")
+        self.assertIn("Angled at 45 degrees on the counter", p)
+        self.assertIn("acrylic lens", p)
+        self.assertNotIn("Other points from the AM", L.visual_prompt({**b, "other_notes": ""}, "render"))

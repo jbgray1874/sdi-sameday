@@ -715,7 +715,10 @@ CHAT_TOOL = {
         "type": "object",
         "properties": {
             "updates": {"type": "object", "description": "Brief fields this message answers, keyed by field id. Pull everything said or clearly "
-                        "implied, several fields at once if they gave several. Never guess sizes, colours, quantities or dates."},
+                        "implied, several fields at once if they gave several. Never guess sizes, colours, quantities or dates. "
+                        # 11 Nov 2026 (James): what they add that has no question of its own is part of the brief too
+                        "Anything about the job that no field covers - a feature, a second visual, a constraint, how it's used "
+                        "- goes in other_notes, in their words. Never drop it."},
             "not_known": {"type": "array", "items": {"type": "string"}, "description": "Field ids the AM says they don't know, AFTER options were "
                           "already offered for them (or they say skip / move on)."},
             "intent": {"type": "string", "enum": ["answer", "question", "change_visual", "approve_visual", "want_visuals", "want_ga_only", "brief_only",

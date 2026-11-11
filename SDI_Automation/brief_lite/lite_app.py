@@ -426,7 +426,9 @@ TOOL = {
         "type": "object",
         "properties": {
             "updates": {"type": "object", "description": "Brief fields this message answers, keyed by field id. Only what was said or clearly "
-                        "implied - never guess sizes, colours or dates. Combine with what is already there (e.g. size '1200 wide' + '1800 high')."},
+                        "implied - never guess sizes, colours or dates. Combine with what is already there (e.g. size '1200 wide' + '1800 high'). "
+                        "Anything about the job that no field covers - a feature, a second visual, a constraint, how it's used "
+                        "- goes in other_notes, in their words. Never drop it."},
             "intent": {"type": "string", "enum": ["brief", "change_visual", "approve_visual", "new_brief", "finish", "cancel", "question"],
                        "description": "change_visual: wants the concept image changed (colour, shape, more like a past job). "
                                       "approve_visual: happy with it. finish: wants the brief PDF now. new_brief: starting a different project."},
@@ -1072,6 +1074,18 @@ def pic_gaps(b):
     return [k for k in keys if not convo.real(b.get(k))]
 
 
+def add_note(notes, new):
+    """The extra points, with the new ones added - none twice (the voice and the typed reading can both send one)."""
+    have = [n.strip() for n in str(notes or "").split(";") if n.strip()]
+    plain = lambda x: re.sub(r"[^a-z0-9]+", " ", x.lower()).strip()
+    seen = " | ".join(plain(n) for n in have)
+    for n in (x.strip() for x in str(new or "").split(";")):
+        if n and plain(n) and plain(n) not in seen:
+            have.append(n)
+            seen += " | " + plain(n)
+    return "; ".join(have)
+
+
 def visual_prompt(b, kind, change=None, refs=None, said=""):
     size = b.get("size") if b.get("size") not in (None, "", "not known") else "a typical size for this kind of unit"
     # 27 Oct 2026: "not powder coated" isn't a material and "as we did last time" isn't a colour - the model guessed brown wood
@@ -1097,6 +1111,9 @@ def visual_prompt(b, kind, change=None, refs=None, said=""):
             f"It displays: {b.get('hero_products') or b.get('products_held') or 'the client products'}. "
             + (f"Lighting: {b['lighting']}. " if b.get("lighting") and not NOPE.match(str(b["lighting"])) else "")
             + (f"Fixing: {b['fixing']}. " if b.get("fixing") else "")
+            # 11 Nov 2026 (Andy's call): the points with no question of their own never reached the drawing
+            + (f"Other points from the AM - follow every one that changes how it looks: {b['other_notes']}. "
+               if convo.real(b.get("other_notes")) and b["other_notes"] != convo.UNKNOWN else "")
             + ("TWO-SIDED: products, shelves and graphics on BOTH faces - open through the middle (no solid back panel), "
                "drawn at a three-quarter angle so the second merchandised face is clearly visible too. "
                if re.search(r"two[- ]sided|double[- ]sided|both sides", " ".join(str(b.get(k) or "") for k in ("stability", "fixing", "unit_type", "other_notes")), re.I) else "")
@@ -2837,7 +2854,9 @@ def handle(number, name, text, image_path=None, voice=False, ch=None, new=False,
                           {"field": k, "assumed": b.get(k), "actual": v, "summary": f"{k.replace('_', ' ')}: {v}"})
             if said_before(b.get(k)) and k != "other_notes" and _plain(b.get(k)) != _plain(v):
                 changed.append((k, str(b.get(k)), v))
-            b[k] = (b["other_notes"] + "; " + v) if k == "other_notes" and b.get("other_notes") else v
+            if k == "other_notes" and b.get("other_notes"):
+                v = add_note(b["other_notes"], v)    # 11 Nov 2026: every extra point kept, none twice
+            b[k] = v
     direction = keep_track(b, changed, voice=t_override is not None or record_only,
                            drawn=any(v.get("kind") == "render" for v in s["visuals"]))
     if direction and t_override is None and not record_only:
@@ -2986,8 +3005,7 @@ def handle(number, name, text, image_path=None, voice=False, ch=None, new=False,
     if t_override is None and asking == "_extra_info":
         b["_extra_asked"] = b["_finish_warned"] = 1
         if text and not re.match(r"\W*(no|nope|nothing|none|that'?s (all|it|everything)|all good|n/?a)\b", text, re.I):
-            if text not in str(b.get("other_notes") or ""):
-                b["other_notes"] = ((b["other_notes"] + "; ") if b.get("other_notes") else "") + text[:600]
+            b["other_notes"] = add_note(b.get("other_notes"), text[:600])
             t["reply"] = "Added that to the brief."
         intent = "finish"
     # 11 Nov 2026: the answer to "are you sure that's everything? still open: ..." (convo.finish_brief). Yes - or
