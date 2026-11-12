@@ -2342,3 +2342,97 @@ class WhatTheyAddIsAlwaysKeptTests(unittest.TestCase):
         self.assertIn("Angled at 45 degrees on the counter", p)
         self.assertIn("acrylic lens", p)
         self.assertNotIn("Other points from the AM", L.visual_prompt({**b, "other_notes": ""}, "render"))
+
+
+class TheJobTheVoiceOffersIsTheJobTests(unittest.TestCase):
+    """11 November 2026, Muhammad's Meta Eyewear call. "I want you to follow the past jobs that SDI have done" found
+    11956 - AI Meta Glasses by the client's name; the voice offered 12429 - Asda Luxury Eyewear from SDI's past work;
+    "So yeah, go, make this a reference" wasn't read as a yes; then "Do you mean 11956?" - "No, not this one" let past
+    jobs go and a new design was drawn."""
+
+    JOBS = [("12429", "12429 - Asda Luxury Eyewear", "2025-03-01"), ("11956", "11956 - AI Meta Glasses", "2025-08-01")]
+    OFFER = ("We've only got one matching past eyewear reference available, 12429 - Asda Luxury Eyewear. Shall we base "
+             "the new render on that one and adapt it for Meta?")
+
+    def setUp(self):
+        import lite_search, sqlite3
+        self.S = lite_search
+        self.keep = {k: getattr(lite_search, k) for k in ("JOBS_DB", "ESTIMATES_DB", "PICTURES", "WALK_SECONDS")}
+        self.dir = Path(tempfile.mkdtemp(prefix="offeredjob-"))
+        _past_jobs_index(self.dir)
+        con = sqlite3.connect(self.dir / "projects.db")
+        con.executemany("INSERT INTO projects (job_no, name, brand, folder, first_date, last_date, n_drawings, n_images, "
+                        "n_renders) VALUES (?,?,?,?,?,?,0,0,0)",
+                        [(j, nm, "Meta", rf"W:\Meta\{j}", d, d) for j, nm, d in self.JOBS])
+        con.commit()
+        con.close()
+        self._fresh(JOBS_DB=str(self.dir / "projects.db"), ESTIMATES_DB=str(self.dir / "knowledge.db"),
+                    PICTURES=str(self.dir / "all_img_index.npz"))
+        self.client = L.app.test_client()
+        self.who = new_chat()
+        _, self.s = say(self.who, "Meta want an eyewear display", {"client": "Meta", "unit_type": "eyewear display"})
+        self.stub, L.ref_lookup = L.ref_lookup, REF_LOOKUP
+        self.brief(design_route="past", _ref_confirm={"label": "11956 - AI Meta Glasses (2025-08)", "hint": "", "others": []})
+
+    def _fresh(self, **attrs):
+        if self.S._state.get("con"):
+            self.S._state["con"].close()
+        for d in (self.S._state, self.S._pic, self.S._clip):
+            d.clear()
+        for k, v in attrs.items():
+            setattr(self.S, k, v)
+
+    def tearDown(self):
+        L.ref_lookup = self.stub
+        self._fresh(**self.keep)
+        shutil.rmtree(self.dir, ignore_errors=True)
+
+    def brief(self, **state):
+        s = L._session_by_id(self.s["id"])
+        s["brief"].update(state)
+        L.save_session(s)
+        return s["brief"]
+
+    def sdi_says(self, text):
+        self.client.post("/api/rt/log", json={"session": self.s["id"], "role": "assistant", "text": text})
+        return L._session_by_id(self.s["id"])["brief"]
+
+    def am_says(self, text):
+        L.log_msg(self.s["id"], "in", text)
+        L.handle(self.who, "Test", text, voice=True, record_only=True, sid=self.s["id"])
+        return L._session_by_id(self.s["id"])["brief"]
+
+    def test_the_job_offered_is_the_one_a_yes_follows(self):
+        b = self.sdi_says(self.OFFER)
+        self.assertTrue(b["_ref_confirm"]["label"].startswith("12429 - Asda Luxury Eyewear"))
+        self.assertIn("11956 - AI Meta Glasses (2025-08)", b["_ref_confirm"]["others"])   # kept, not lost
+        b = self.am_says("So yeah, go, make this a reference and go on with the client pack.")
+        self.assertEqual(b.get("_ref_job"), "12429")
+        self.assertEqual(b.get("design_route"), "past")
+
+    def test_a_job_mentioned_without_asking_changes_nothing(self):
+        b = self.sdi_says("SDI made 12429 - Asda Luxury Eyewear for them in 2025.")
+        self.assertTrue(b["_ref_confirm"]["label"].startswith("11956"))
+        b = self.sdi_says("Is it 12429 or 11956 you'd like to follow?")                # two read out: not one check
+        self.assertTrue(b["_ref_confirm"]["label"].startswith("11956"))
+
+    def test_a_yes_with_a_word_in_front(self):
+        for said in ("So yeah, go, make this a reference", "OK yes", "right, go ahead", "Yes, that one, but in black",
+                     "Yeah, use that"):
+            self.assertTrue(L.confirms(said), said)
+        for said in ("Yeah no", "yes, but not that one", "No, not this one", "a different job", "so what about the other one"):
+            self.assertFalse(L.confirms(said), said)
+
+    def test_not_this_one_asks_which_when_a_past_job_is_wanted(self):
+        b = self.am_says("No, not this one.")
+        self.assertIn("11956", b.get("_ref_declined") or [])
+        self.assertTrue(b.get("_ref_more"))                  # asked once which job - never straight to a new design
+        self.assertFalse(b.get("_ref_off"))
+        self.assertEqual(b.get("design_route"), "past")
+        L.log_msg(self.s["id"], "in", "No, not this one.")
+        out = json.loads(self.client.post("/api/rt/tool", json={"session": self.s["id"], "name": "make_concepts",
+                         "arguments": {"output": "3D render", "design_route": "past"}}).get_json()["output"])
+        self.assertIn("Ask once which one", out.get("error", ""))
+        b = self.am_says("no, I don't know")                 # asked once: now it's a new design
+        self.assertTrue(b.get("_ref_off"))
+        self.assertEqual(b.get("design_route"), "new")

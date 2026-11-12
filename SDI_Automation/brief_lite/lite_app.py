@@ -2459,6 +2459,50 @@ def drops_chosen(text):
 NO_ANSWER = re.compile(r"^\W*(no|nope|nah|neither|none|not really|i don'?t know|don'?t know|not sure|can'?t remember)\b", re.I)
 SAYS_YES = re.compile(r"^\W*(yes|yeah|yep|yup|ya|correct|exactly|spot on|that'?s (it|the one|right|correct)|that one)\b", re.I)
 NAMES_ONE = re.compile(r"\b(refer|job|drawing|file|called|the one|it was|was the|with the)\b", re.I)
+# 11 Nov 2026 (Muhammad: "So yeah, go, make this a reference and go on with the client pack"): a yes needn't come first
+CONFIRM_YES = re.compile(r"^\W*((so|ok(ay)?|right|well|um+|erm+|uh|and|alright|great|perfect|lovely|brilliant)\W+){0,3}"
+                         r"(yes|yeah|yep|yup|ya|correct|exactly|right|sure|spot on|that'?s (it|the one|right|correct)|that one|"
+                         r"go (with|for) (it|that)|go ahead|go on|do it|use (it|that)|base it on (it|that))\b", re.I)
+# a no to the JOB, not to part of the design ("yes, that one, but make the shutter something different" is a yes)
+NOT_THE_JOB = re.compile(r"\bnot (that|this|it|the (one|job))\b|\b(other|another|wrong|different) (one|job)\b|"
+                         r"\bdon'?t (want|use|follow|base)\b", re.I)
+
+
+def confirms(text):
+    """A yes to the job read back: 'yes', 'so yeah, go', 'OK, go ahead' - never 'yeah no' or 'yes, but not that one'."""
+    m = CONFIRM_YES.search(text or "")
+    return bool(m) and not re.match(r"\W*(no|nah|nope)\b", text[m.end():], re.I) and not NOT_THE_JOB.search(text)
+
+
+def offered_job(b, text):
+    """11 Nov 2026 (Muhammad's Meta Eyewear call). The voice offered '12429 - Asda Luxury Eyewear' from SDI's past work
+    while the app was checking 11956 (found from the client's name, Meta) - his yes went to a job he never heard, then
+    'no, not this one' let past jobs go and a new design was drawn. The one job the voice reads out and asks about is
+    the job being checked. Returns its number when it became the one, else None."""
+    if "?" not in (text or "") or not re.search(r"\b(base|basis|follow|reference|use|the one|that one|is that|do you mean|"
+                                                r"shall (we|i)|want|go with)\b", text or "", re.I):
+        return None
+    nums = list(dict.fromkeys(x["n"] for x in said_jobs(text) if not x["neg"]))
+    if len(nums) != 1:
+        return None                       # a list read out is the app's own (_ref_ask) - one job asked about is a check
+    n = nums[0]
+    conf = b.get("_ref_confirm") or {}
+    if n == str(b.get("_ref_job") or "") or n in (b.get("_ref_declined") or []) or _job_no(conf.get("label")) == n:
+        return None
+    try:
+        import lite_search
+        row = lite_search.project_rows([n]).get(n)
+    except Exception as e:
+        print("offered job:", str(e)[:160], flush=True)
+        return None
+    if not row:
+        return None
+    others = [conf.get("label")] + list(conf.get("others") or []) + list(b.get("_ref_ask") or []) + list(b.get("_ref_list") or [])
+    b["_ref_confirm"] = {"label": _label_of(n, row), "hint": "offered on the call",
+                         "others": list(dict.fromkeys(o for o in others if o and _job_no(o) != n))[:3]}
+    for k_ in ("_ref_ask", "_ref_more", "_ref_missing", "_ref_missing_told", "_ref_off"):
+        b.pop(k_, None)
+    return n
 
 
 def _plain_no(text):
@@ -2485,7 +2529,8 @@ def drop_ref(b):
         if "follow it closely" in str(b.get("liked_job") or ""):
             b.pop("liked_job", None)
     for k_ in ("_ref_confirm", "_ref_ask", "_ref_more", "_ref_list", "_ref_job", "_ref_hint", "_ref_redraw",
-               "_redraw_for_ref", "_size_from_ref", "_ref_weak", "_ref_missing", "_ref_missing_told", "_ref_said"):
+               "_redraw_for_ref", "_size_from_ref", "_ref_weak", "_ref_missing", "_ref_missing_told", "_ref_said",
+               "_ref_which"):
         b.pop(k_, None)
     b["_ref_declined"] = sorted(gone)
     b["_ref_off"] = 1
@@ -2535,7 +2580,7 @@ def _follow_job(b, label, hint):
         b["liked_job"] = f"{label} - the AM asked to follow it closely"
         b["_ref_redraw"] = 1
         b.pop("_ref_off", None)       # they chose one after all
-    for k_ in ("_ref_ask", "_ref_confirm", "_ref_more"):
+    for k_ in ("_ref_ask", "_ref_confirm", "_ref_more", "_ref_which"):
         b.pop(k_, None)
 
 
@@ -2653,8 +2698,7 @@ def ref_lookup(b, text):
             return
     if b.get("_ref_confirm"):
         rc = b["_ref_confirm"]
-        if re.search(r"^\W*(yes|yeah|yep|yup|ya|correct|exactly|right|sure|spot on|that'?s (it|the one|right|correct)|that one|"
-                     r"go (with|for) (it|that))\b", text or "", re.I):
+        if confirms(text):
             _ref_follow(rc["label"], rc.get("hint", ""))
             ref_done = True
         elif re.search(r"^\W*(no|nope|nah|not (that|this|it|the)|wrong|different|another)\b", text or "", re.I):
@@ -2668,6 +2712,11 @@ def ref_lookup(b, text):
             elif not names_one:
                 if b.get("_ref_job"):
                     return                  # not the other job they named - the one they chose stays
+                if b.get("design_route") == "past" and not b.get("_ref_which_asked"):
+                    # 11 Nov 2026 (Muhammad: "I want you to follow the past jobs SDI have done", then "no, not this one"
+                    # to a job he never named): a past job is still what he wants - ask once which, never a new design
+                    b["_ref_more"] = b["_ref_which"] = b["_ref_which_asked"] = 1
+                    return
                 drop_ref(b)                 # 4 Nov 2026 (Andy): no is no - it used to go on to ask for a job number
                 return
             ref_done = not names_one
@@ -4260,6 +4309,10 @@ def api_rt_tool():
                                 "Read these out and ask which one they mean: " + "; ".join(b_["_ref_ask"][:3]) + "."
                                 + way_out})})
         if b_.get("_ref_more") and not b_.get("_ref_job"):
+            if b_.get("_ref_which"):
+                return jsonify({"slow": False, "output": json.dumps({"error": "Not drawing yet - they turned that job down "
+                                "but want a past SDI job followed. Ask once which one: its job number or what it was. Never "
+                                "draw a new design unless they say so." + way_out})})
             return jsonify({"slow": False, "output": json.dumps({"error": "Not drawing yet - the past job they asked for wasn't "
                             "found. Ask once for its job number (digit by digit is fine). Never draw from a job they didn't "
                             "confirm." + way_out})})
@@ -4365,6 +4418,8 @@ def api_rt_log():
         if convo.stage(s) == "pack" and re.search(r"\bpacks?\b", text, re.I) and re.search(r"\?", text):
             s["brief"]["_pack_asked"] = 1     # the voice asked it: once is enough - not answered = both (convo.stage)
             save_session(s)
+        if offered_job(s["brief"], text):
+            save_session(s)               # the job the voice just asked about is the one a yes follows
         if convo.stage(s) == "review" and FINAL_Q.search(text) and "?" in text:
             # 11 Nov 2026 (Andy: "it was trying to finish up quickly"): "shall I finalise this one?" came after every
             # line he said - eight times in fifteen minutes. Once per option; then it listens (rt.stage_now).
