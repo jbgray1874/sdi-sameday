@@ -137,7 +137,9 @@ TOOLS = [
                     "required": ["on"]}},
     {"type": "function", "name": "show_past_work",
      "description": "Show on screen what SDI has made before for this client/unit, with quotes. ONLY when they ask for past or previous work. Never for 'show me the client pack / render / GA / PDF' - those are already in the chat.",
-     "parameters": {"type": "object", "properties": {}}},
+     "parameters": {"type": "object", "properties": {
+         "client": {"type": "string", "description": "Only when they ask about ANOTHER client's past work ('have we made "
+                    "this for Boots?'): that client, as they said it. Leave out for this brief's client."}}}},
     {"type": "function", "name": "make_concepts",
      "description": "Make the 3D concept render - only after the render questions and past / mix / new are answered (or the AM "
                     "says just make it). Takes 1-2 minutes; it appears on screen. While it's drawn, ask NOTHING - wait for it.",
@@ -456,7 +458,7 @@ def tool_intent(name, a):
         on = "internal" if str(a.get("on") or "").lower().startswith("int") else "render"
         return "", {"updates": {}, "intent": "answer", "focus": on, "reply": "", "no_auto": True}
     if name == "show_past_work":
-        return "", {"updates": {}, "intent": "show_past", "reply": ""}
+        return "", {"updates": {}, "intent": "show_past", "reply": "", "past_client": (a.get("client") or "").strip()}
     if name == "make_concepts":
         out = a.get("output") or "3D render"
         upd = {"output": out} if out == "GA only" else {}      # the client pack always carries the GA (set_pack)

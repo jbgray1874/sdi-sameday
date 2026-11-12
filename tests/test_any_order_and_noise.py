@@ -2436,3 +2436,48 @@ class TheJobTheVoiceOffersIsTheJobTests(unittest.TestCase):
         b = self.am_says("no, I don't know")                 # asked once: now it's a new design
         self.assertTrue(b.get("_ref_off"))
         self.assertEqual(b.get("design_route"), "new")
+
+    def test_muhammads_call_line_by_line(self):
+        """Chat be7baa8e74, 12:21-12:23, with what the app should have done at each line."""
+        self.brief(_ref_confirm=None, design_route=None, client="Meta Eyewear", unit_type="Eyewear glasses stands")
+        b = self.sdi_says("Meta blue and the brand logo, and no edge lighting, noted. For the concept direction, do you "
+                          "want to base it on an SDI past job, like 12429 - Asda Luxury Eyewear, or do something new?")
+        self.assertTrue(b["_ref_confirm"]["label"].startswith("12429"))      # offered: the one being checked
+        line = "Tell me other jobs other than one to four, two nine."
+        self.assertTrue(L.PAST_Q.search(line))                                # asking for past work
+        b = self.am_says(line)
+        self.assertFalse((b.get("_ref_confirm") or {}).get("label", "").startswith("12429"))   # "other than" is a no
+        self.assertIn("12429", b.get("_ref_declined") or [])
+        self.assertTrue(L.PAST_Q.search("Have we made any such thing for Boots?"))
+        b = self.am_says("I want you to follow the past jobs that SDI have done")
+        b = self.sdi_says(self.OFFER)                                          # offered again, after all
+        self.assertTrue(b["_ref_confirm"]["label"].startswith("12429"))
+        b = self.am_says("So yeah, go, make this a reference and go on with the client pack.")
+        self.assertEqual(b.get("_ref_job"), "12429")                           # his yes: followed
+        self.assertNotIn("12429", b.get("_ref_declined") or [])
+        self.assertFalse(L.ref_pending(b))                                     # nothing left to ask about
+        out = json.loads(self.client.post("/api/rt/tool", json={"session": self.s["id"], "name": "record_answers",
+                         "arguments": {"updates": {"liked_job": "12429 - Asda Luxury Eyewear"}}}).get_json()["output"])
+        self.assertIn("liked_job", out.get("saved_now") or [])                 # the number he said yes to is his
+
+    def test_general_words_never_swap_the_job_being_checked(self):
+        b = self.am_says("I want you to follow the past jobs that SDI have done")
+        self.assertTrue(b["_ref_confirm"]["label"].startswith("11956"))
+        self.assertTrue(L.generic_past("I want you to follow the past jobs that SDI have done"))
+        self.assertFalse(L.generic_past("follow the past job with the mirror on top"))
+
+    def test_the_voice_can_show_another_clients_past_work(self):
+        seen, keep = [], L.find_past
+        L.find_past = lambda s_: seen.append(s_["brief"]["client"]) or []
+        try:
+            L.log_msg(self.s["id"], "in", "Have we made any such thing for Boots?")
+            text, t = rt.tool_intent("show_past_work", {"client": "Boots"})
+            ch, _ = L.handle(self.who, "Test", text, t_override=t, sid=self.s["id"], voice=True)
+            L.log_msg(self.s["id"], "in", "show me what we've made before")
+            text, t = rt.tool_intent("show_past_work", {})
+            L.handle(self.who, "Test", text, t_override=t, sid=self.s["id"], voice=True)
+        finally:
+            L.find_past = keep
+        self.assertEqual(seen, ["Boots", "Meta"])                              # asked on the call: shown, both times
+        self.assertIn("made for Boots", " ".join(r.get("text") or "" for r in ch.out))
+        self.assertEqual(L._session_by_id(self.s["id"])["brief"]["client"], "Meta")   # the brief stays Meta's

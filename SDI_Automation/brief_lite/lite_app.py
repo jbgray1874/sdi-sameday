@@ -2237,7 +2237,9 @@ _NOT_JOB_AFTER = re.compile(r"^\s*(?:mm|cm|m\b|metres?|meters?|millimet|high|tal
 _JOB_WORD = re.compile(r"(?:\b(?:job|jobs|drawing|drawings|dwg|ga|project|ref|reference|referencing|refer(?:ring)? to|number|"
                        r"no\.?|follow|following|based on|base it on|use|using)|#)\W{0,3}$", re.I)
 _JOB_WORD_YEAR = re.compile(r"(?:\b(?:job|drawing|dwg|project|ref|reference|number|no\.?)|#)\W{0,3}$", re.I)
-_NEGATED = re.compile(r"\b(?:not|don'?t|do not|didn'?t|isn'?t|wasn'?t|never|without|forget|drop|ignore)\b[^.?!,;]{0,14}$", re.I)
+# 12 Nov 2026 (Muhammad: "tell me other jobs other than 12429" put 12429 up to confirm): "other than", "apart from"...
+_NEGATED = re.compile(r"\b(?:not|don'?t|do not|didn'?t|isn'?t|wasn'?t|never|without|forget|drop|ignore|other than|"
+                      r"apart from|aside from|besides|except(?: for)?|instead of|rather than|excluding)\b[^.?!,;]{0,14}$", re.I)
 REF_CTX = re.compile(r"\b(refer\w*|reference\w*|based? (it )?on|follow\w*|job|jobs|number|drawing|drawings|dwg|ga|project|"
                      r"past|previous|old one|same as|similar to|like (the|that|this|job|number)|"
                      r"(render|design|drawing|it|one|work|look)\s+(off|from)|the one|that one|this one|use|using)\b|#", re.I)
@@ -2468,10 +2470,28 @@ NOT_THE_JOB = re.compile(r"\bnot (that|this|it|the (one|job))\b|\b(other|another
                          r"\bdon'?t (want|use|follow|base)\b", re.I)
 
 
+OTHER_JOBS = re.compile(r"\b(other|different|more|another) (past |previous )?(jobs?|ones?|options?|references?|work)\b|"
+                        r"\bother than\b|\bany others?\b|\bsomething else\b", re.I)
+
+
 def confirms(text):
     """A yes to the job read back: 'yes', 'so yeah, go', 'OK, go ahead' - never 'yeah no' or 'yes, but not that one'."""
     m = CONFIRM_YES.search(text or "")
     return bool(m) and not re.match(r"\W*(no|nah|nope)\b", text[m.end():], re.I) and not NOT_THE_JOB.search(text)
+
+
+GENERIC_WORDS = set("i we you they want wanted would like to the a an that this those these sdi sdi's have has had done "
+                    "made did do make follow following base based basing on off from use using reference referencing refer "
+                    "past previous old existing earlier job jobs work works project projects one ones something real "
+                    "please can could go ahead let's lets just it for our your of and with as".split())
+
+
+def generic_past(text):
+    """Only general words about following past work ('I want you to follow the past jobs that SDI have done') -
+    nothing that names or describes a particular job."""
+    words = re.findall(r"[a-z0-9']+", (text or "").lower())
+    return bool(words) and bool(re.search(r"\b(past|previous|before|done|made)\b", text or "", re.I)) \
+        and not re.search(r"\d", text or "") and all(w in GENERIC_WORDS for w in words)
 
 
 def offered_job(b, text):
@@ -2487,8 +2507,8 @@ def offered_job(b, text):
         return None                       # a list read out is the app's own (_ref_ask) - one job asked about is a check
     n = nums[0]
     conf = b.get("_ref_confirm") or {}
-    if n == str(b.get("_ref_job") or "") or n in (b.get("_ref_declined") or []) or _job_no(conf.get("label")) == n:
-        return None
+    if n == str(b.get("_ref_job") or "") or _job_no(conf.get("label")) == n:
+        return None                       # (one they turned down earlier, offered again: their yes now decides)
     try:
         import lite_search
         row = lite_search.project_rows([n]).get(n)
@@ -2576,6 +2596,7 @@ def _job_label(b, job):
 def _follow_job(b, label, hint):
     m_ = re.match(r"\s*(\d{3,6})", label)
     if m_:
+        b["_ref_declined"] = [x for x in b.get("_ref_declined") or [] if x != m_.group(1)]   # their yes wins
         b["_ref_job"], b["design_route"], b["_ref_hint"] = m_.group(1), "past", hint
         b["liked_job"] = f"{label} - the AM asked to follow it closely"
         b["_ref_redraw"] = 1
@@ -2701,6 +2722,15 @@ def ref_lookup(b, text):
         if confirms(text):
             _ref_follow(rc["label"], rc.get("hint", ""))
             ref_done = True
+        elif OTHER_JOBS.search(text or "") and not re.search(r"^\W*(no|nope|nah)\b", text or "", re.I):
+            # 12 Nov 2026 (Muhammad: "tell me other jobs other than one to four, two nine" - the number not even read):
+            # asking for others while one is being checked is "not this one, what else is there?"
+            b.pop("_ref_confirm", None)
+            b["_ref_declined"] = sorted(set(b.get("_ref_declined") or []) | {_job_no(rc["label"])} - {None})
+            others = [x for x in rc.get("others") or [] if _job_no(x) not in b["_ref_declined"]]
+            if others:
+                b["_ref_ask"] = others
+            return
         elif re.search(r"^\W*(no|nope|nah|not (that|this|it|the)|wrong|different|another)\b", text or "", re.I):
             b.pop("_ref_confirm", None)
             b["_ref_declined"] = sorted(set(b.get("_ref_declined") or []) | {_job_no(rc["label"])} - {None})
@@ -2741,6 +2771,8 @@ def ref_lookup(b, text):
     if b.get("_ref_job") and not re.search(r"\b\d{3,6}\b", text or "") and not re.search(
             r"\b(different|another|instead|not (that|this)|wrong|other one|change the (job|reference))\b", text or "", re.I):
         return                            # 3 Nov 2026: 'follow that past job' - it's already chosen, nothing new to find
+    if b.get("_ref_confirm") and generic_past(text):
+        return                            # 12 Nov 2026: "follow the past jobs SDI have done" - the job being checked stays
     asking_ = re.match(r"\s*(what|which|when|who|how|have|did|do|is|was|were|are)\b", text or "", re.I) \
         and not re.search(r"\b(refer|reference|based? on|follow|use (it|that|the)|like that|same as)\b", text or "", re.I)
     # 4 Nov 2026: "like the" in its wanting sense ("I'd like the header lit", "they'd like the shelves in oak") set off a
@@ -3196,19 +3228,28 @@ def handle(number, name, text, image_path=None, voice=False, ch=None, new=False,
         rp = re.sub(r"[^.?!\n]*\b(repeat of|same specs?)\b[^.?!\n]*([.!]|\?(?=.*\?))", "", rp, flags=re.I | re.S)
     t["reply"] = re.sub(r"[ \t]{2,}", " ", rp).strip()
     ack = prefix + t["reply"]
-    # 3 Nov 2026 (Muhammad): show what they ask for, nothing else
+    # 3 Nov 2026 (Muhammad): show what they ask for, nothing else. 12 Nov 2026: on a call the tool brings no words of
+    # its own - the AM's last line is what they asked (it was checked against "", so the voice could never show past work)
+    asked_ = text if t_override is None else _last_am_line(s["id"])
     if intent == "show_past" and (
-            (text and SHOW_REF.search(text) and (b.get("_ref_confirm") or b.get("_ref_ask") or b.get("_ref_job")
-                                                 or b.get("_ref_more")
-                                                 or re.search(r"\d[\s:\-.,/]*\d[\s:\-.,/]*\d", spoken_digits(text))))
-            or not PAST_Q.search(text or "")):
+            (asked_ and SHOW_REF.search(asked_) and (b.get("_ref_confirm") or b.get("_ref_ask") or b.get("_ref_job")
+                                                     or b.get("_ref_more")
+                                                     or re.search(r"\d[\s:\-.,/]*\d[\s:\-.,/]*\d", spoken_digits(asked_))))
+            or not PAST_Q.search(asked_ or "")):
         intent = "question" if (text or "").rstrip().endswith("?") else "answer"
     if intent == "off_topic":
         save_session(s)
         return convo.ask_next(s, ch, t, ack=(t.get("reply") or "That's outside what I can help with - I'm just for SDI client briefs."))
     if intent == "show_past" and b.get("client"):
-        refs = find_past(s)
-        ch.text((ack.strip() + " " if ack.strip() else "") + "Here's what SDI has made before that's closest:")
+        other_ = str(t.get("past_client") or "").strip()
+        if other_ and other_.lower() != str(b.get("client") or "").lower():
+            # 12 Nov 2026 (Muhammad: "have we made any such thing for Boots?" on a Meta brief): another client's past
+            # work, looked up without changing this brief
+            refs = find_past({**s, "brief": {**b, "client": other_}})
+            ch.text((ack.strip() + " " if ack.strip() else "") + f"Here's what SDI has made for {other_} that's closest:")
+        else:
+            refs = find_past(s)
+            ch.text((ack.strip() + " " if ack.strip() else "") + "Here's what SDI has made before that's closest:")
         for i, r in enumerate(refs[:6], 1):
             if r["images"]:
                 ch.image(r["images"][0]["thumb"], ref_caption(i, r), role="ref", job=r["job_no"],
@@ -4418,8 +4459,20 @@ def api_rt_log():
         if convo.stage(s) == "pack" and re.search(r"\bpacks?\b", text, re.I) and re.search(r"\?", text):
             s["brief"]["_pack_asked"] = 1     # the voice asked it: once is enough - not answered = both (convo.stage)
             save_session(s)
-        if offered_job(s["brief"], text):
-            save_session(s)               # the job the voice just asked about is the one a yes follows
+        offered_ = offered_job(s["brief"], text)
+        if offered_:
+            # the job the voice just asked about is the one a yes follows - and it's on screen as it's asked
+            label_ = s["brief"]["_ref_confirm"]["label"]
+            s["brief"]["_ref_shown"] = label_
+            save_session(s)
+            sid_ = s["id"]
+
+            def show_it():
+                try:
+                    show_ref_files(Channel(sid_), _session_by_id(sid_)["brief"], [offered_], "", n=1)
+                except Exception as e:
+                    print("offered job pictures:", str(e)[:160], flush=True)
+            threading.Thread(target=show_it, daemon=True).start()
         if convo.stage(s) == "review" and FINAL_Q.search(text) and "?" in text:
             # 11 Nov 2026 (Andy: "it was trying to finish up quickly"): "shall I finalise this one?" came after every
             # line he said - eight times in fifteen minutes. Once per option; then it listens (rt.stage_now).
@@ -4619,6 +4672,11 @@ def _answers_not_heard(s, updates):
         if _date_field(k) and said_date:
             # "next Friday" -> "Fri 13 Nov 2026": the day and the year are the voice working the date out, not a guess
             nums_v -= {str(d) for d in range(1, 32)} | {str(this_year), str(this_year + 1), str(this_year + 2)}
+        if k in ("liked_job", "references", "repeat_of", "similar_projects"):
+            # 12 Nov 2026 (Muhammad: "So yeah, go" to "12429 - Asda Luxury Eyewear?"): the job read back to them and
+            # said yes to is theirs, though they never said its number
+            b_ = s["brief"]
+            nums_v -= {x for x in (str(b_.get("_ref_job") or ""), _job_no((b_.get("_ref_confirm") or {}).get("label"))) if x}
         if nums_v - said_n:   # every number saved must have been said (2 m -> 2000 mm, 120 cm -> 1200 mm are fine)
             bad[k] = (f"the numbers in '{v}' were not in what the AM said (\"{last[:80]}\"). Ask again for this one - "
                       "never guess numbers.")
@@ -4655,7 +4713,11 @@ PAST_Q = re.compile(r"\b(show|see|list|pull up|bring up|open|display)\b.{0,40}\b
                     # read jobs out instead of showing them. Other ways of asking, about SDI's work only.
                     r"|\b(check|look (at|through|up|into)|find|search|go through|dig out)\b.{0,40}\b(history|"
                     r"(past|previous|old) (work|jobs?|projects?|units?)|(sdi|we)('ve| have|'s| has)? (done|made|built))\b"
-                    r"|\bwhat (have|has) (we|sdi) (done|made|built)\b", re.I)
+                    r"|\bwhat (have|has) (we|sdi) (done|made|built)\b"
+                    # 12 Nov 2026 (Muhammad): "have we made any such thing for Boots?", "tell me other jobs other than..."
+                    r"|\b(have|has|did) (we|sdi) (ever |already )?(made|done|built|make|do|build)\b"
+                    r"|\b(tell|give|show|any|what|list|find)\b.{0,20}\b(other|more|different|similar) (past |previous )?"
+                    r"(jobs?|work|projects?|references?|options?|ones)\b", re.I)
 
 
 def _busy_until_done(sid, kind, jid):
