@@ -2524,3 +2524,36 @@ class LiveVoiceSaysWhyItDidNotStartTests(unittest.TestCase):
         self.assertIn("Weird", got["other"])
         self.assertNotIn("ABCDEFGH", got["sent"])                   # a key never reaches the log
         self.assertIn("sk-...", got["sent"])
+
+
+class TheAssistantIsCalledSidTests(unittest.TestCase):
+    """17 November 2026, James: the assistant is called Sid, and when he talks he says "Hi, Sid here". Until then he had
+    no name: the avatar said SDI and the voice never introduced itself."""
+
+    def test_the_voice_is_sid_and_says_so_once_in_the_greeting(self):
+        self.assertIn("You are Sid, a senior designer at SDI Displays", rt.VOICE_RULES)
+        self.assertIn("Sid here", rt.VOICE_RULES)
+        self.assertIn("never again", rt.VOICE_RULES)                  # once, not every turn
+        self.assertLess(len(rt.VOICE_RULES), 8500)
+
+    def test_a_new_call_opens_with_sid_here_and_so_does_a_call_on_an_open_brief(self):
+        who = new_chat()
+        s = L.get_session(who, "Test", new=True)                         # nothing said yet: a brand-new call
+        self.assertIn(", Sid here - good to hear from you. What's the client after?", rt.instructions(s))
+        _, s = say(who, "Boots want a counter unit", {"client": "Boots", "unit_type": "counter unit"})
+        self.assertIn("Open with 'Hi, Sid here'", rt.instructions(s))   # the same brief, picked up on a call
+        mid = rt.instructions(s, mid_call=True)                         # after each answer: no greeting again
+        self.assertNotIn("Open with 'Hi, Sid here'", mid)
+        self.assertNotIn(", Sid here - good to hear from you", mid)
+        self.assertIn("no greeting, no recap", mid)
+
+    def test_the_typed_replies_the_help_and_the_screen_say_sid(self):
+        src = (WORK / "brief_lite" / "convo_parts.py").read_text(encoding="utf-8")
+        self.assertIn("You are Sid, SDI Displays' briefing assistant", src)
+        self.assertIn("Sid here", src)
+        who = new_chat()
+        out, _ = say(who, "what can you do?", {})
+        self.assertIn("I'm Sid", " ".join(r.get("text") or "" for r in out))
+        self.assertNotIn('class="av">SDI<', PAGE)
+        self.assertIn('class="av">SID<', PAGE)
+        self.assertNotIn("<b>SDI</b>", PAGE)

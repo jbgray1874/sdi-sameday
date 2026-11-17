@@ -1207,7 +1207,7 @@ function vnAttach(d){if(!vnQueue.length)return;const text=vnPlain(vnQueue.join("
  // play replies one after another, the first straight away (like a voice-note thread)
  const go=()=>{v.setSrc(u);v.audio.play().catch(()=>{})};
  if(vnPlaying&&!vnPlaying.paused){const prev=vnPlaying;const old=prev.onended;prev.addEventListener("ended",go,{once:true});v.setSrc(u);v.audio.pause()}else go()}
-function row(html,me){const d=document.createElement("div");d.className="row"+(me?" me":"");d.innerHTML=(me?"":`<div class="av">SDI</div>`)+`<div class="bub">${html}</div>`;log.appendChild(d);if(!me&&vnReply)vnAttach(d);scrollEnd();return d}
+function row(html,me){const d=document.createElement("div");d.className="row"+(me?" me":"");d.innerHTML=(me?"":`<div class="av">SID</div>`)+`<div class="bub">${html}</div>`;log.appendChild(d);if(!me&&vnReply)vnAttach(d);scrollEnd();return d}
 function block(html){const d=document.createElement("div");d.className="block";d.innerHTML=html;log.appendChild(d);scrollEnd();return d}
 function zoomable(url,cap){gallery.push({url,cap});return gallery.length-1}
 // ---------- rendering each reply
@@ -1215,7 +1215,7 @@ function zoomable(url,cap){gallery.push({url,cap});return gallery.length-1}
 const LS={showing:false,timer:0,t0:0,label:"A"};
 function lsBlur(on){const m=$(".main");if(m)m.classList.toggle("live-blur",!!on&&!!rt)}
 function lsYou(t,live){const e=$("#vs-you");if(!e)return;e.innerHTML=t?`<b>You</b><p>${esc(String(t).slice(-260))}</p>`:"";e.classList.toggle("live",!!live)}
-function lsSdi(t){const e=$("#vs-sdi");if(!e)return;e.innerHTML=t?`<b>SDI</b><p>${esc(String(t).slice(-320))}</p>`:""}
+function lsSdi(t){const e=$("#vs-sdi");if(!e)return;e.innerHTML=t?`<b>Sid</b><p>${esc(String(t).slice(-320))}</p>`:""}
 function lsWork(on,title,sub,secs){const w=$("#vs-work");if(!w)return;clearInterval(LS.timer);w.classList.toggle("on",!!on);if(!on)return;
  $("#vs-work-t").textContent=title;$("#vs-work-s").textContent=sub;LS.t0=Date.now();const bar=$("#vs-bar");bar.style.width="3%";
  LS.timer=setInterval(()=>{bar.style.width=Math.min(94,(Date.now()-LS.t0)/1000/secs*100)+"%"},1000);
@@ -1371,7 +1371,7 @@ async function poll(turn,wait){let seen=0;
   wait.querySelector(".lbl").textContent=/technical GA|\bGA\b/.test(last.text||"")&&!/new design|render|concept/i.test(last.text||"")?"Drawing the technical GA…":/concept|minute|making|remaking/i.test(last.text||"")?"Making the concepts and checking them…":/history|built before/i.test(last.text||"")?"Looking through SDI's history…":"Thinking…";
   await new Promise(z=>setTimeout(z,1200))}
  busy=false;$("#send").disabled=false;loadHist();loadFiles();if(talkOn&&!rt)talkTurn()}
-function waiter(){const d=document.createElement("div");d.className="row";d.innerHTML=`<div class="av">SDI</div><div class="bub typing"><span class="sp"></span><span class="lbl">Thinking…</span><button class="stopr" title="Stop - nothing more is made, so no credit is spent">■ Stop</button></div>`;
+function waiter(){const d=document.createElement("div");d.className="row";d.innerHTML=`<div class="av">SID</div><div class="bub typing"><span class="sp"></span><span class="lbl">Thinking…</span><button class="stopr" title="Stop - nothing more is made, so no credit is spent">■ Stop</button></div>`;
  d.querySelector(".stopr").onclick=async e=>{const b=e.currentTarget;b.disabled=true;b.textContent="Stopped";d.dataset.stopped=1;
   if(sid)await fetch("/api/stop",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({session:sid})}).catch(()=>{});
   d.querySelector(".lbl").textContent="Stopped";stopSpeaking();if(vnPlaying)vnPlaying.pause();d.querySelector(".sp")?.remove();toast("Stopped - nothing new will be made")};
@@ -1764,7 +1764,7 @@ function orbLvl(x,src){const o=$("#vo-orb"),v=$("#vo");if(!o||!v)return;
  voPrev=voPrev*.55+Math.max(0,Math.min(1,x))*.45;o.style.setProperty("--lvl",voPrev.toFixed(3))}
 function voNote(t){const v=$("#vo");if(!v||!v.classList.contains("on")||(rt&&rt.paused))return;v.dataset.s="thinking";$("#vo-state").textContent=t}
 function voCap(t,who){if(who==="you")lsYou(t,false);else if(who==="sdi")lsSdi(t);else if(!t){lsYou("");lsSdi("")}
- const c=$("#vo-cap");if(!c)return;c.innerHTML=t?`<b>${who==="you"?"You":"SDI"}</b>${esc(String(t).slice(-320))}`:""}
+ const c=$("#vo-cap");if(!c)return;c.innerHTML=t?`<b>${who==="you"?"You":"Sid"}</b>${esc(String(t).slice(-320))}`:""}
 function fakeTalk(){if(voFake)return;const go=()=>{const v=$("#vo");if(!v||v.dataset.s!=="speaking"||rt){voFake=0;return}
   const t=performance.now()/1000;orbLvl(.35+.25*Math.sin(t*7.3)+.15*Math.sin(t*13.1),"out");voFake=requestAnimationFrame(go)};voFake=requestAnimationFrame(go)}
 let voCtx=null;

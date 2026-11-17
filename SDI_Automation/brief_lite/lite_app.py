@@ -3153,7 +3153,7 @@ def handle(number, name, text, image_path=None, voice=False, ch=None, new=False,
                                            "\"make a render\" any time you want to see it."))
     if t_override is None and re.search(r"\bwhat (can|do) you do\b|\bhow (does this|do you) work\b|\bwhat are you( for)?\b|^\s*help\s*\??$",
                                         text or "", re.I):
-        ch.text("I take a client brief from you - by text, voice note or files - and:\n"
+        ch.text("I'm Sid, SDI's design assistant. I take a client brief from you - by text, voice note or files - and:\n"
                 "• ask only the questions that matter for this kind of unit\n"
                 "• show SDI's past work for that client or unit type\n"
                 "• make concept renders (and a GA) you can change by just saying what you want\n"
