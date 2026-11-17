@@ -252,6 +252,18 @@ body.branded .side{border-left:3px solid var(--b1)}.ring{display:flex;gap:14px;a
 .modal .box2{background:var(--card);color:var(--ink);border-radius:18px;padding:22px 22px 18px;width:min(420px,92vw);box-shadow:var(--shadow2)}
 .modal h3{margin:0 0 8px;font-size:17px}.modal p{margin:0 0 18px;color:var(--ink2);font-size:14px}
 .modal .acts{justify-content:flex-end}
+/* 17 Nov 2026: the voice banner and the sound check */
+.vpbar{position:fixed;left:50%;bottom:132px;transform:translateX(-50%);z-index:60;width:min(760px,94vw);display:flex;flex-wrap:wrap;gap:6px 12px;
+ align-items:center;padding:10px 14px;border-radius:14px;background:var(--ambersoft);color:var(--ink);border:1px solid var(--amber);font-size:13.5px;
+ line-height:1.45;box-shadow:var(--shadow2)}
+.vpbar b{color:var(--amber)}.vpbar .vp-x{margin-left:auto;background:none;border:0;color:var(--muted);font-size:18px;line-height:1;cursor:pointer;padding:2px 6px}
+.vo-link{background:none;border:0;padding:2px 0;color:var(--blue);font:inherit;font-size:13px;font-weight:600;text-decoration:underline;cursor:pointer}
+.vo-sc{margin-top:4px}.vo-sc .vo-link{color:var(--muted);font-size:12px}
+.scb{border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:999px;padding:8px 14px;font:inherit;font-weight:600;cursor:pointer}
+.scb.p{background:var(--ink);color:var(--paper);border-color:transparent}
+.sc-bar{height:12px;background:var(--soft);border:1px solid var(--line);border-radius:7px;overflow:hidden;margin:6px 0 10px}
+.sc-bar i{display:block;height:100%;width:0;background:var(--green);transition:width .08s}
+.sc-ok{color:var(--green);font-weight:600}.sc-bad{color:var(--red);font-weight:600}
 .btn.danger{background:var(--red);border-color:var(--red);color:#fff}
 
 /* installed on a phone: room for the notch and the home bar, bigger tap targets */
@@ -1089,7 +1101,7 @@ body:not(.branded) .vs-you.live p::after{background:var(--ink)}
    <div class="vo-dock">
     <div class="vo-orb" id="vo-orb"><i></i><i></i><i></i><i></i></div>
     <div class="vo-txt"><div class="vo-row1"><span class="vo-state" id="vo-state">Connecting…</span><span class="vo-mode" id="vo-mode">Live</span></div>
-     <div class="vo-cap" id="vo-cap"></div></div>
+     <div class="vo-cap" id="vo-cap"></div><div class="vo-sc"><button class="vo-link" data-act="soundcheck" type="button">Can't hear it? Sound check</button></div></div>
     <div class="vo-ctrl">
     <div class="vo-c"><button class="vo-b" id="vo-ptt" title="Noisy room? Hold while you speak"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M19 10v1a7 7 0 0 1-14 0v-1"/><path d="M12 18v4"/></svg></button><span>Hold to talk</span></div>
     <div class="vo-c"><button class="vo-b" id="vo-skip" title="Stop it talking - your turn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 4 10 8-10 8z"/><path d="M19 5v14"/></svg></button><span>Skip</span></div>
@@ -1405,9 +1417,9 @@ async function rtStart(){if(!project){toast("Pick your name first");newBrief();r
  const j=await fetch("/api/rt/session",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({who,new:!sid,session:sid,project,mobile:/Android|iPhone|iPad|Mobile/i.test(navigator.userAgent)})}).then(r=>r.json()).catch(e=>({error:String(e)}));
  if(j.error){   // 2 Nov 2026: an expired OpenAI key silently dropped to the slow talk mode - say what is wrong instead
   const key=/expired|invalid|401|api key|OPENAI_API_KEY|incorrect/i.test(j.error),cap=/budget/i.test(j.error);
-  if(key||cap){talkOn=false;$("#talk").classList.remove("on");{const h=$(".hero");if(h)h.remove()}
+  if(key||cap){vpLog("live voice: "+(cap?"today's budget is used up":"the OpenAI key was refused"));talkOn=false;$("#talk").classList.remove("on");{const h=$(".hero");if(h)h.remove()}
    row(cap?"⚠ Today's AI budget is used up, so live voice, renders and voice notes are paused until tomorrow. Typing still works.":"⚠ Live voice can't start: the OpenAI key has expired or is wrong, so renders and voice won't work either. Ask Muhammad to update it. Typing still works.");return true}
-  toast("Using talk mode: I speak, you answer");return false}
+  voiceProblem("session",`The server wouldn't start a live voice session (${String(j.error).slice(0,90)}).`,j.error);return false}
  fresh=false;sid=j.session;rememberChat();if(j.brief)showBrief(j.brief);const h=$(".hero");if(h)h.remove();
  const tr0=j.transcription||null;
  const pc=new RTCPeerConnection(),audio=new Audio();audio.autoplay=true;pc.ontrack=e=>{audio.srcObject=e.streams[0];watchOut(e.streams[0])};
@@ -1415,18 +1427,21 @@ async function rtStart(){if(!project){toast("Pick your name first");newBrief();r
  // phone locked itself, and a locked phone pauses the page and drops the call. The screen now stays on for the call; a
  // call that dropped anyway is closed cleanly and the chat reloaded, so whatever was drawn meanwhile is on screen.
  pc.onconnectionstatechange=()=>{if(rt&&rt.pc===pc&&["failed","closed"].includes(pc.connectionState)){rtStop();toast("The call dropped - everything so far is in the chat. Press Talk to carry on.")}};
- let mic;try{mic=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:false}})}catch(e){toast("Microphone blocked - allow it from the padlock in the address bar");return false}
+ let mic;try{mic=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:false}})}catch(e){voiceProblem("microphone "+(e&&e.name),micAdvice(e),((e&&e.name)||"")+" "+((e&&e.message)||""));return false}
  pc.addTrack(mic.getTracks()[0]);
  const dc=pc.createDataChannel("oai-events");
  const told=t=>t?((t.prompt||"")+" "+(t.keywords||[]).join(", ")).trim():"";   // what the transcriber was told: prompt + keyword hints
  rt={pc,dc,mic,audio,bubble:null,userRow:null,talking:false,tr:tr0,hints:told(tr0)?[told(tr0)]:[]};
- dc.onopen=()=>{talkUI(true,"Live - just talk. Interrupt me any time.");keepAwake(true);dc.send(JSON.stringify({type:"response.create"}))};
+ dc.onopen=()=>{if(rt)rt.opened=1;talkUI(true,"Live - just talk. Interrupt me any time.");keepAwake(true);dc.send(JSON.stringify({type:"response.create"}));silentWatch()};
  dc.onmessage=e=>rtEvent(JSON.parse(e.data));
  meter(mic);
  const offer=await pc.createOffer();await pc.setLocalDescription(offer);
- const ans=await fetch("https://api.openai.com/v1/realtime/calls?model="+encodeURIComponent(j.model),{method:"POST",body:offer.sdp,headers:{Authorization:"Bearer "+j.key,"Content-Type":"application/sdp"}});
- if(!ans.ok){rtStop();talkOn=true;$("#talk").classList.add("on");toast("Live voice is resting - using talk mode: I speak, you answer");return false}
+ let ans;try{ans=await fetch("https://api.openai.com/v1/realtime/calls?model="+encodeURIComponent(j.model),{method:"POST",body:offer.sdp,headers:{Authorization:"Bearer "+j.key,"Content-Type":"application/sdp"}})}
+ catch(e){rtStop();talkOn=true;$("#talk").classList.add("on");voiceProblem("network","This computer couldn't reach OpenAI (api.openai.com). A firewall, VPN or proxy on this network may be blocking it - a phone on mobile data would still work.",e&&e.message);return false}
+ if(!ans.ok){const why=await ans.text().catch(()=>"");rtStop();talkOn=true;$("#talk").classList.add("on");voiceProblem("openai "+ans.status,`OpenAI refused the voice connection (error ${ans.status}).`,why.slice(0,120));return false}
  await pc.setRemoteDescription({type:"answer",sdp:await ans.text()});
+ // 17 Nov 2026: a connection that never opens said nothing - say so after 12 seconds
+ setTimeout(()=>{if(rt&&rt.pc===pc&&!rt.opened){rtStop();voiceProblem("no connection","The voice connection to OpenAI didn't open within 12 seconds (a firewall or VPN may be blocking it).",pc.connectionState+"/"+pc.iceConnectionState)}},12000);
  return true}
 let wake=null;
 async function keepAwake(on){try{if(on&&!wake&&"wakeLock" in navigator){wake=await navigator.wakeLock.request("screen");wake.addEventListener("release",()=>{wake=null})}
@@ -1435,6 +1450,72 @@ document.addEventListener("visibilitychange",()=>{if(document.visibilityState!==
  if(["failed","closed","disconnected"].includes(rt.pc&&rt.pc.connectionState)){rtStop();toast("The call stopped while the phone was locked - everything so far is in the chat. Press Talk to carry on.");return}
  keepAwake(true)});   // the browser lets go of the wake lock when the page is hidden: take it again
 function rtStop(){if(!rt)return;keepAwake(false);try{rt.dc.close()}catch(e){}try{rt.pc.close()}catch(e){}rt.mic.getTracks().forEach(t=>t.stop());rt=null;talkOn=false;talkUI(false);loadHist()}
+// 17 Nov 2026 (James: "it didn't speak to me today"): live voice that couldn't start fell back to talk mode with a toast
+// that was gone in seconds (the bar said "Talk mode" and nobody noticed), and one that connected but never spoke said
+// nothing. Each now says what happened, on the page, and tells the log - Check-SameDay-Call.ps1 prints "[page]" lines.
+function vpLog(what){try{fetch("/api/page-problem",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({chat:sid||"",
+ what:String(what).replace(/sk-[A-Za-z0-9_-]{6,}/g,"sk-...").slice(0,330)})}).catch(()=>{})}catch(e){}}
+function vpShow(html,tag){vpHide();const d=document.createElement("div");d.className="vpbar";d.id="vpbar";d.dataset.tag=tag||"";
+ d.innerHTML=`<span>${html}</span><button class="vp-x" type="button" aria-label="Close" data-act="vpclose">&times;</button>`;document.body.appendChild(d);return d}
+function vpHide(tag){const d=document.getElementById("vpbar");if(d&&(!tag||d.dataset.tag===tag))d.remove()}
+function browserTag(){return(navigator.userAgent.match(/(Edg|Chrome|Firefox|Safari)\/[\d.]+/g)||[]).slice(-1)[0]||"?"}
+function voiceProblem(code,plain,detail){
+ vpLog("live voice: "+code+(detail?" - "+String(detail).slice(0,150):"")+" | "+browserTag());
+ vpShow(`<b>Live voice didn't start.</b> ${esc(plain)} It has dropped to talk mode instead, where I speak and then you answer. <button class="vo-link" data-act="soundcheck" type="button">Test sound and microphone</button>`,"start")}
+function micAdvice(e){const n=(e&&e.name)||"";
+ if(n==="NotAllowedError"||n==="SecurityError")return"The browser has blocked the microphone. Click the padlock beside the address, set Microphone to Allow, then reload this page.";
+ if(n==="NotSupportedError"||n==="TypeError")return"The browser won't give this page the microphone. The office address (http://10.0.0.5...) never can: open SDI Live from the portal's https address instead. Otherwise click the padlock beside the address and allow the microphone.";
+ if(n==="NotFoundError"||n==="OverconstrainedError")return"No microphone was found. Plug one in, or check Windows Settings > System > Sound > Input.";
+ if(n==="NotReadableError"||n==="AbortError")return"Another app may be using the microphone, or Windows has switched it off. Close the other app and try again.";
+ return"The microphone couldn't start ("+(n||"unknown")+")."}
+function spokeNow(){if(!rt)return;rt.heard=true;clearTimeout(rt.silentT);vpHide("silent");
+ if(rt.audio&&!rt.audioChecked){rt.audioChecked=1;const a=rt.audio;
+  setTimeout(()=>{if(!rt||rt.audio!==a||!a.paused)return;
+   a.play().catch(e=>{vpLog("live voice: the browser blocked the sound ("+((e&&e.name)||"?")+") | "+browserTag());
+    vpShow(`<b>The browser is blocking SDI's voice.</b> Click anywhere on this page, then <button class="vo-link" data-act="hearagain" type="button">hear it again</button>.`,"silent")})},1500)}}
+function silentWatch(){if(!rt)return;clearTimeout(rt.silentT);
+ rt.silentT=setTimeout(()=>{if(!rt||rt.heard||rt.paused)return;
+  vpLog("live voice: connected but no speech in 9 s (connection "+(rt.pc&&rt.pc.connectionState)+", channel "+(rt.dc&&rt.dc.readyState)+") | "+browserTag());
+  vpShow(`<b>Connected, but SDI hasn't spoken yet.</b> If you can't hear it, check your sound. <button class="vo-link" data-act="hearagain" type="button">Hear it again</button> &middot; <button class="vo-link" data-act="soundcheck" type="button">Test sound and microphone</button>`,"silent")},9000)}
+document.addEventListener("click",e=>{const b=e.target.closest&&e.target.closest("[data-act]");if(!b)return;const a=b.dataset.act;
+ if(a==="soundcheck"){e.preventDefault();soundCheck()}
+ else if(a==="vpclose"){vpHide()}
+ else if(a==="hearagain"&&rt){e.preventDefault();vpHide("silent");rt.heard=false;rt.audioChecked=0;rtSay({type:"response.create"});silentWatch()}});
+function soundCheck(){if(document.getElementById("sndchk"))return;
+ const m=document.createElement("div");m.className="modal";m.id="sndchk";
+ m.innerHTML=`<div class="box2"><h3>Sound and microphone check</h3><div id="sc-b"></div><div class="acts" style="display:flex;justify-content:flex-end;margin-top:14px"><button class="scb" id="sc-x" type="button">Close</button></div></div>`;
+ document.body.appendChild(m);vpHide();
+ const B=m.querySelector("#sc-b"),res={speaker:"",mic:"",peak:0,device:""};let temp=null,ctx=null,raf=0,sent=0;
+ const report=()=>{if(sent||(!res.speaker&&!res.mic))return;sent=1;
+  vpLog(`sound check: speaker=${res.speaker||"skipped"} mic=${res.mic||"skipped"} peak=${res.peak.toFixed(3)} device=${res.device||"?"} | ${browserTag()}`)};
+ const done=()=>{report();cancelAnimationFrame(raf);if(temp)temp.getTracks().forEach(t=>t.stop());try{ctx&&ctx.close()}catch(e){}m.remove()};
+ m.querySelector("#sc-x").onclick=done;m.addEventListener("click",e=>{if(e.target===m)done()});
+ const line=(ok,t)=>`<p class="${ok?"sc-ok":"sc-bad"}">${ok?"&#10003;":"&#10007;"} ${esc(t)}</p>`;
+ const step3=why=>{const L=[];
+  if(res.speaker==="heard")L.push(line(true,"Speaker: you heard the test sound."));
+  else if(res.speaker)L.push(line(false,"Speaker: you didn't hear it. Turn the volume up, check the right playback device is chosen (the speaker icon at the bottom right of Windows) and that a headset isn't switched off. Then run this again."));
+  if(res.mic==="ok")L.push(line(true,"Microphone: I can hear you"+(res.device?" ("+res.device+")":"")+"."));
+  else L.push(line(false,why||"Microphone: no sound came from "+(res.device||"your microphone")+". Check Windows Settings > System > Sound > Input is the right device and its level moves when you speak, and that the padlock beside the address allows the microphone."));
+  if(res.speaker==="heard"&&res.mic==="ok")L.push(`<p>Both are fine. If SDI still doesn't speak or hear you, tell James the time it happened.</p>`);
+  B.innerHTML=L.join("");report()};
+ const step2=async()=>{B.innerHTML=`<p><b>2. Microphone.</b> Say <i>"testing, one two three"</i> now.</p><div class="sc-bar"><i id="sc-lv"></i></div>`;
+  let stream=(rt&&rt.mic&&rt.mic.getTracks().some(t=>t.readyState==="live"))?rt.mic:null;
+  if(!stream){try{stream=temp=await navigator.mediaDevices.getUserMedia({audio:true})}catch(e){res.mic="blocked "+((e&&e.name)||"");return step3(micAdvice(e))}}
+  const tr=stream.getAudioTracks()[0]||{};res.device=String(tr.label||"").slice(0,48);
+  ctx=ctx||new (window.AudioContext||window.webkitAudioContext)();ctx.resume&&ctx.resume();
+  const an=ctx.createAnalyser();an.fftSize=512;ctx.createMediaStreamSource(stream).connect(an);
+  const buf=new Float32Array(an.fftSize),lv=B.querySelector("#sc-lv"),t0=performance.now();
+  const tick=()=>{if(!document.getElementById("sndchk"))return;an.getFloatTimeDomainData(buf);let e=0;for(const v of buf)e+=v*v;const r=Math.sqrt(e/buf.length);
+   res.peak=Math.max(res.peak,r);lv.style.width=Math.min(100,r*500)+"%";
+   if(performance.now()-t0<5000){raf=requestAnimationFrame(tick);return}
+   res.mic=res.peak>=0.02?"ok":"silent";step3()};
+  tick()};
+ B.innerHTML=`<p><b>1. Speaker.</b> Turn your volume up, then play the sound.</p><p><button class="scb p" id="sc-play" type="button">&#9654; Play a test sound</button></p><p id="sc-q" style="display:none">Did you hear it? <button class="scb" data-a="y" type="button">Yes</button> <button class="scb" data-a="n" type="button">No</button></p>`;
+ B.querySelector("#sc-play").onclick=()=>{try{ctx=ctx||new (window.AudioContext||window.webkitAudioContext)();ctx.resume&&ctx.resume();
+  [[660,0],[880,.35]].forEach(([fr,t])=>{const o=ctx.createOscillator(),g=ctx.createGain(),at=ctx.currentTime+t;o.frequency.value=fr;
+   g.gain.setValueAtTime(0,at);g.gain.linearRampToValueAtTime(.25,at+.04);g.gain.linearRampToValueAtTime(0,at+.5);o.connect(g);g.connect(ctx.destination);o.start(at);o.stop(at+.55)})}catch(e){}
+  B.querySelector("#sc-q").style.display="block"};
+ B.addEventListener("click",e=>{const b=e.target.closest&&e.target.closest("[data-a]");if(!b)return;res.speaker=b.dataset.a==="y"?"heard":"not heard";step2()})}
 function meter(stream){const ctx=new (window.AudioContext||window.webkitAudioContext)(),an=ctx.createAnalyser();an.fftSize=512;ctx.createMediaStreamSource(stream).connect(an);
  const buf=new Float32Array(an.fftSize),bars=[...$("#wave").children];
  let loud=0;
@@ -1600,6 +1681,7 @@ function quietCheck(){if(!rt||!rt.noisy)return;const now=Date.now();if((rt.junk|
   setTimeout(()=>{rtSay({type:"input_audio_buffer.commit"});talkUI(true,"Thinking…");setTimeout(()=>{if(rt){rt.held=false;setTD(autoTD());if(rt.owed)owedLater()}},1500)},250)};
  ["pointerup","pointerleave","pointercancel"].forEach(ev=>b.addEventListener(ev,up))})();
 async function rtEvent(ev){const ty=ev.type||"";
+ if(rt&&!rt.heard&&/^(response\.created|response\.(output_)?audio_transcript\.delta|output_audio_buffer\.started)$/.test(ty))spokeNow();
  if(ty==="input_audio_buffer.speech_started"){clearTimeout(rt.replyT);rt.replyPending=false;clearTimeout(rt.owedT);clearTimeout(rt.againT);if(rt.speaking&&!rt.noisy&&(rt.lvl||0)>Math.max(0.05,(rt.floor||0)*4)){rtSay({type:"response.cancel"});rtSay({type:"output_audio_buffer.clear"});rt.pendingCreate=false}rt.inTurn=true;rt.peak=0;rt.speaking=false;talkUI(true,"Listening…");rt.youLive="";
   if(!rt.rendering){if(LS.past){LS.past=false;LS.showing=false}lsYou("…",true);if(!LS.showing)lsBlur(true)}if(rt.bubble&&!rt.bubble.dataset.done){rt.bubble.dataset.done=1}
   rt.userRow=row('<span style="opacity:.6">…</span>',true)}

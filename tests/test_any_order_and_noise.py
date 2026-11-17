@@ -2481,3 +2481,46 @@ class TheJobTheVoiceOffersIsTheJobTests(unittest.TestCase):
         self.assertEqual(seen, ["Boots", "Meta"])                              # asked on the call: shown, both times
         self.assertIn("made for Boots", " ".join(r.get("text") or "" for r in ch.out))
         self.assertEqual(L._session_by_id(self.s["id"])["brief"]["client"], "Meta")   # the brief stays Meta's
+
+
+class LiveVoiceSaysWhyItDidNotStartTests(unittest.TestCase):
+    """17 November 2026, James: "it didn't speak to me today". The call bar said "Talk mode" - live voice had not
+    connected and the page had quietly dropped to the older ask-and-answer mode, with a toast gone in seconds. And a
+    call that connected but never spoke said nothing at all. Now every way live voice can fail says so on the page and
+    in the log (Check-SameDay-Call.ps1 prints the "[page]" lines), and a sound check tells a deaf speaker from a deaf
+    microphone."""
+
+    def test_no_fallback_is_silent_any_more(self):
+        start = PAGE[PAGE.index("async function rtStart("):PAGE.index("let wake=null;")]
+        for old in ('toast("Using talk mode', "Live voice is resting", 'toast("Microphone blocked'):
+            with self.subTest(old=old):
+                self.assertNotIn(old, start)          # (the older talk-mode paths keep their own toasts)
+        for code in ('voiceProblem("session"', 'voiceProblem("network"', 'voiceProblem("openai "', 'voiceProblem("no connection"',
+                     'voiceProblem("microphone "'):
+            with self.subTest(code=code):
+                self.assertIn(code, start)
+
+    def test_the_call_bar_and_the_banner_lead_to_the_sound_check(self):
+        self.assertEqual(PAGE.count('data-act="soundcheck"') >= 3, True)
+        self.assertIn("Can't hear it? Sound check", PAGE)
+        self.assertIn("function soundCheck(", PAGE)
+        self.assertIn("function silentWatch(", PAGE)
+
+    @unittest.skipUnless(NODE, "node is not installed")
+    def test_the_microphone_advice_and_the_log_never_carry_a_key(self):
+        js = (page_fn("micAdvice") + "\n" + page_fn("vpLog") + "\n"
+              "const sent=[];global.fetch=(u,o)=>{sent.push(o.body);return Promise.resolve({})};global.sid='web:x';\n"
+              "const adv=n=>micAdvice({name:n});\n"
+              "vpLog('live voice: openai 401 - invalid key sk-proj-ABCDEFGH12345678 here');\n"
+              "console.log(JSON.stringify({allowed:adv('NotAllowedError'),http:adv('NotSupportedError'),none:adv('NotFoundError'),"
+              "busy:adv('NotReadableError'),other:adv('Weird'),sent:sent[0]}))")
+        r = subprocess.run([NODE, "-e", js], capture_output=True, text=True, timeout=30)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        got = json.loads(r.stdout)
+        self.assertIn("padlock", got["allowed"])
+        self.assertIn("https address", got["http"])                 # the office http address never has a microphone
+        self.assertIn("No microphone was found", got["none"])
+        self.assertIn("Another app", got["busy"])
+        self.assertIn("Weird", got["other"])
+        self.assertNotIn("ABCDEFGH", got["sent"])                   # a key never reaches the log
+        self.assertIn("sk-...", got["sent"])
