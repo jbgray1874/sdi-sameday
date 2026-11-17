@@ -1799,9 +1799,15 @@ function sidFallback(say,why){vpLog("talk mode: Sid's voice file failed - "+why+
   if(cur&&cur.dataset.tag==="start")cur.querySelector("span").insertAdjacentHTML("beforeend","<br>"+msg);   // keep the first, bigger problem on screen
   else vpShow(msg+` <button class="vo-link" data-act="soundcheck" type="button">Test sound and microphone</button>`,"tts")}
  let went=false;const go=()=>{if(went)return;went=true;if(talkOn)listen()};
- try{const u=new SpeechSynthesisUtterance(String(say).slice(0,600));u.lang="en-GB";u.rate=1.05;
-  const v=(speechSynthesis.getVoices()||[]).find(x=>/^en-GB/i.test(x.lang));if(v)u.voice=v;
+ try{const u=new SpeechSynthesisUtterance(String(say).slice(0,600));u.lang="en-GB";u.rate=1.03;
+  const v=sidVoice(speechSynthesis.getVoices()||[]);if(v)u.voice=v;
   u.onend=go;u.onerror=go;speechSynthesis.cancel();speechSynthesis.speak(u);setTimeout(go,Math.max(4000,say.length*90))}catch(e){go()}}
+// 17 Nov 2026 (James: "a very poor quality voice... it's a woman"): the browser's default voice is a generic female one. Sid is a
+// man: the best British male voice the browser has (Edge's online "Natural" voices are the good ones), else any English male.
+function sidVoice(list){const gb=list.filter(v=>/^en[-_]GB/i.test(v.lang||"")),en=list.filter(v=>/^en/i.test(v.lang||"")),
+  male=/\b(ryan|thomas|george|daniel|oliver|alfie|arthur|david|mark|guy|james|richard|brian|eric|liam|sean|paul|christopher|andrew|male)\b/i,natural=/natural|online/i,rank=v=>(male.test(v.name)?4:0)+(natural.test(v.name)?2:0)+(/^en[-_]GB/i.test(v.lang||"")?1:0);
+ const pool=(gb.some(v=>male.test(v.name))?gb:en.some(v=>male.test(v.name))?en:gb.length?gb:en).slice();
+ pool.sort((a,b)=>rank(b)-rank(a));return pool[0]||null}
 async function listen(){if(!talkOn||busy)return;
  let st;try{st=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true}})}catch(e){toast("Microphone blocked - allow it from the padlock in the address bar");talkOn=false;talkUI(false);return}
  const ctx=new (window.AudioContext||window.webkitAudioContext)(),src=ctx.createMediaStreamSource(st),an=ctx.createAnalyser();an.fftSize=1024;src.connect(an);

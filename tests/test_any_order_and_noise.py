@@ -2576,3 +2576,21 @@ class TalkModeIsNeverSilentTests(unittest.TestCase):
         self.assertIn("SpeechSynthesisUtterance", fb)
         self.assertIn("talk mode: Sid's voice file failed", fb)
         self.assertIn('insertAdjacentHTML("beforeend"', fb)               # the first, bigger problem is kept on screen
+
+    @unittest.skipUnless(NODE, "node is not installed")
+    def test_the_fallback_voice_is_a_british_man_where_there_is_one(self):
+        """James, 17 Nov: the fallback was a generic woman's voice of poor quality. Sid is a man."""
+        js = (page_fn("sidVoice") + "\n"
+              "const V=n=>({name:n,lang:n.includes('US')?'en-US':'en-GB'});\n"
+              "const a=sidVoice([V('Microsoft Hazel - English (United Kingdom)'),V('Microsoft Susan'),V('Microsoft George - English (United Kingdom)'),"
+              "V('Microsoft Ryan Online (Natural) - English (United Kingdom)')]);\n"
+              "const b=sidVoice([V('Microsoft Hazel - English (United Kingdom)'),V('Microsoft David - English (United States) US')]);\n"
+              "const c=sidVoice([V('Microsoft Hazel - English (United Kingdom)'),V('Microsoft Susan - English (United Kingdom)')]);\n"
+              "console.log(JSON.stringify({a:a&&a.name,b:b&&b.name,c:c&&c.name,none:sidVoice([])}))")
+        r = subprocess.run([NODE, "-e", js], capture_output=True, text=True, timeout=30)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        got = json.loads(r.stdout)
+        self.assertIn("Ryan Online (Natural)", got["a"])        # the natural British man beats the older British man
+        self.assertIn("David", got["b"])                          # no British man: an English man, not a British woman
+        self.assertIn("Hazel", got["c"])                          # no man at all: a British voice, rather than nothing
+        self.assertIsNone(got["none"])
