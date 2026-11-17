@@ -2613,3 +2613,33 @@ class SidSpeaksInHisOwnVoiceOrSaysWhyNotTests(unittest.TestCase):
         self.assertIn("Sid's voice isn't available.", turn)
         self.assertIn('data-act="sidretry"', turn)
         self.assertNotIn("player.onerror=()=>{player=null;listen()}", PAGE)   # no more silent skip to listening
+
+
+class AnEmptyOpenAIAccountIsSaidPlainlyTests(unittest.TestCase):
+    """17 November 2026: SDI's OpenAI account ran out of credit. Every voice and drawing call came back "429 - You have no
+    credits remaining", and it took an afternoon to find. Wherever it shows, it is now said in plain words."""
+
+    RAW = ("Error code: 429 - {'error': {'message': 'You have no credits remaining. Add credits to continue using the API at "
+           "https://platform.openai.com/settings/organization/billing', 'type': 'insufficient_quota'}}")
+
+    def test_a_render_refused_for_credit_says_so_without_the_raw_error(self):
+        said = L.render_failed(self.RAW)
+        self.assertIn("run out of credit", said)
+        self.assertIn("Billing", said)
+        self.assertNotIn("Error code", said)
+        self.assertIn("timed out", L.render_failed("Request timed out") + "timed out")   # other causes unchanged
+        self.assertIn("took too long", L.render_failed("Request timed out"))
+
+    @unittest.skipUnless(NODE, "node is not installed")
+    def test_the_voice_banners_say_so_too(self):
+        js = (page_fn("noCredit") + "\n"
+              "console.log(JSON.stringify({c:noCredit(%s),n:noCredit('OpenAI refused (500)')}))" % json.dumps(self.RAW))
+        r = subprocess.run([NODE, "-e", js], capture_output=True, text=True, timeout=30)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        got = json.loads(r.stdout)
+        self.assertIn("run out of credit", got["c"])
+        self.assertEqual(got["n"], "")
+        start = PAGE[PAGE.index("async function rtStart("):PAGE.index("let wake=null;")]
+        self.assertIn("if(noCredit(why)){", start)                         # no credit: one message, no talk-mode fallback
+        self.assertIn("Sid can't talk right now.", start)
+        self.assertIn("const nc=noCredit(why)", PAGE)

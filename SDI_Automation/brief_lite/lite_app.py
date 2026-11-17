@@ -322,6 +322,10 @@ def claude_create(timeout=None, **kw):
 def render_failed(why, what="the render"):
     """What the AM is told when a picture wasn't made: plainly, and what to do next - never a raw error."""
     w = str(why or "")
+    if re.search(r"no credits remaining|insufficient_quota|exceeded your current quota", w, re.I):
+        # 17 Nov 2026: OpenAI's account ran out - said plainly, never the raw 429
+        return (f"I can't make {what} right now: SDI's OpenAI account has run out of credit. It works again as soon as it's "
+                "topped up (platform.openai.com > Settings > Billing). Typing and the brief still work.")
     if w.startswith("stopped") or "budget" in w or "no OPENAI_API_KEY" in w or "refused" in w or "no credit" in w:
         return f"I can't make {what} yet ({w})."
     if re.search(r"timed? ?out|took too long|timeout", w, re.I):

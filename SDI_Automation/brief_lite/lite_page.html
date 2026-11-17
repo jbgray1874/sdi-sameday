@@ -1438,7 +1438,11 @@ async function rtStart(){if(!project){toast("Pick your name first");newBrief();r
  const offer=await pc.createOffer();await pc.setLocalDescription(offer);
  let ans;try{ans=await fetch("https://api.openai.com/v1/realtime/calls?model="+encodeURIComponent(j.model),{method:"POST",body:offer.sdp,headers:{Authorization:"Bearer "+j.key,"Content-Type":"application/sdp"}})}
  catch(e){rtStop();talkOn=true;$("#talk").classList.add("on");voiceProblem("network","This computer couldn't reach OpenAI (api.openai.com). A firewall, VPN or proxy on this network may be blocking it - a phone on mobile data would still work.",e&&e.message);return false}
- if(!ans.ok){const why=await ans.text().catch(()=>"");rtStop();talkOn=true;$("#talk").classList.add("on");voiceProblem("openai "+ans.status,`OpenAI refused the voice connection (error ${ans.status}).`,why.slice(0,120));return false}
+ if(!ans.ok){const why=await ans.text().catch(()=>"");rtStop();
+  if(noCredit(why)){   // talk mode uses the same OpenAI account, so it can't help: one plain message, no fallback
+   talkOn=false;$("#talk").classList.remove("on");vpLog("live voice: openai "+ans.status+" - no credit on SDI's OpenAI account | "+browserTag());
+   vpShow(`<b>Sid can't talk right now.</b> ${esc(noCredit(why))}`,"start");return true}
+  talkOn=true;$("#talk").classList.add("on");voiceProblem("openai "+ans.status,`OpenAI refused the voice connection (error ${ans.status}).`,why.slice(0,120));return false}
  await pc.setRemoteDescription({type:"answer",sdp:await ans.text()});
  // 17 Nov 2026: a connection that never opens said nothing - say so after 12 seconds
  setTimeout(()=>{if(rt&&rt.pc===pc&&!rt.opened){rtStop();voiceProblem("no connection","The voice connection to OpenAI didn't open within 12 seconds (a firewall or VPN may be blocking it).",pc.connectionState+"/"+pc.iceConnectionState)}},12000);
@@ -1462,6 +1466,10 @@ function browserTag(){return(navigator.userAgent.match(/(Edg|Chrome|Firefox|Safa
 function voiceProblem(code,plain,detail){
  vpLog("live voice: "+code+(detail?" - "+String(detail).slice(0,150):"")+" | "+browserTag());
  vpShow(`<b>Live voice didn't start.</b> ${esc(plain)} It has dropped to talk mode instead, where I speak and then you answer. <button class="vo-link" data-act="soundcheck" type="button">Test sound and microphone</button>`,"start")}
+// 17 Nov 2026: OpenAI's account ran out of credit and every voice and drawing call came back "429 - You have no credits
+// remaining". Said in plain words, so nobody chases their microphone or browser.
+function noCredit(t){return/no credits remaining|insufficient_quota|exceeded your current quota/i.test(String(t||""))?
+ "SDI's OpenAI account has run out of credit, so Sid's voice, renders and drawings are off until it is topped up (platform.openai.com > Settings > Billing). Typing still works.":""}
 function micAdvice(e){const n=(e&&e.name)||"";
  if(n==="NotAllowedError"||n==="SecurityError")return"The browser has blocked the microphone. Click the padlock beside the address, set Microphone to Allow, then reload this page.";
  if(n==="NotSupportedError"||n==="TypeError")return"The browser won't give this page the microphone. The office address (http://10.0.0.5...) never can: open SDI Live from the portal's https address instead. Otherwise click the padlock beside the address and allow the microphone.";
@@ -1803,7 +1811,7 @@ async function sidPlay(say,my,attempt){
  try{await a.play()}catch(e){if(player===a){player=null;fail("The browser blocked the sound ("+((e&&e.name)||"?")+")")}return}
  setTimeout(()=>{if(player===a&&!started&&a.paused){player=null;fail("The voice didn't start within 8 seconds")}},8000)}
 function sidVoiceDown(say,why){vpLog("talk mode: Sid's voice failed - "+why+" | "+browserTag());window.__sidSay=say;
- const msg=`<b>Sid's voice isn't available.</b> ${esc(String(why).replace(/\.$/,""))}. He can't speak, so nothing is read out. <button class="vo-link" data-act="sidretry" type="button">Try again</button> &middot; <button class="vo-link" data-act="soundcheck" type="button">Test sound and microphone</button>`,
+ const nc=noCredit(why),msg=`<b>Sid's voice isn't available.</b> ${esc(nc||String(why).replace(/\.$/,"")+". He can't speak, so nothing is read out")}${nc?"":"."} <button class="vo-link" data-act="sidretry" type="button">Try again</button> &middot; <button class="vo-link" data-act="soundcheck" type="button">Test sound and microphone</button>`,
   cur=document.getElementById("vpbar");
  if(cur&&cur.dataset.tag==="start")cur.querySelector("span").insertAdjacentHTML("beforeend","<br>"+msg);   // keep the first, bigger problem on screen
  else vpShow(msg,"tts")}
