@@ -1785,8 +1785,23 @@ $("#talkdone").onclick=()=>{if(rt){rtSay({type:"response.cancel"});rtSay({type:"
 function endTalk(){stopSpeaking();if(vad)vad.cancel();talkUI(false);toast("Talk mode off")}
 function talkTurn(){if(!talkOn)return;const say=(lastAsk||"").replace(/\n+/g," ").replace(/[*_]/g,"").slice(0,900);lastAsk="";
  if(!say){listen();return}
- talkUI(true,"Speaking…");player=new Audio("/api/tts?t="+encodeURIComponent(say));voCap(say,"sdi");
- player.onended=()=>{player=null;listen()};player.onerror=()=>{player=null;listen()};player.play().catch(()=>{player=null;listen()})}
+ talkUI(true,"Speaking…");const pl=player=new Audio("/api/tts?t="+encodeURIComponent(say));voCap(say,"sdi");
+ // 17 Nov 2026 (James: "no sound" in talk mode): when the voice file failed (the server's voice, or the browser blocking it)
+ // the page said nothing and went on to listening. Now it says so, tells the log, and speaks with the browser's own voice.
+ let played=false,failed=false;
+ const fail=why=>{if(failed||player!==pl)return;failed=true;player=null;sidFallback(say,why)};
+ pl.onplaying=()=>{played=true};
+ pl.onended=()=>{if(player===pl){player=null;listen()}};pl.onerror=()=>fail("the voice file didn't load");
+ pl.play().catch(e=>fail("the browser blocked it ("+((e&&e.name)||"?")+")"));
+ setTimeout(()=>{if(!played)fail("it didn't start within 8 seconds")},8000)}
+function sidFallback(say,why){vpLog("talk mode: Sid's voice file failed - "+why+" | "+browserTag());
+ {const msg=`<b>I couldn't play Sid's voice (${esc(why)}).</b> Using your browser's own voice instead.`,cur=document.getElementById("vpbar");
+  if(cur&&cur.dataset.tag==="start")cur.querySelector("span").insertAdjacentHTML("beforeend","<br>"+msg);   // keep the first, bigger problem on screen
+  else vpShow(msg+` <button class="vo-link" data-act="soundcheck" type="button">Test sound and microphone</button>`,"tts")}
+ let went=false;const go=()=>{if(went)return;went=true;if(talkOn)listen()};
+ try{const u=new SpeechSynthesisUtterance(String(say).slice(0,600));u.lang="en-GB";u.rate=1.05;
+  const v=(speechSynthesis.getVoices()||[]).find(x=>/^en-GB/i.test(x.lang));if(v)u.voice=v;
+  u.onend=go;u.onerror=go;speechSynthesis.cancel();speechSynthesis.speak(u);setTimeout(go,Math.max(4000,say.length*90))}catch(e){go()}}
 async function listen(){if(!talkOn||busy)return;
  let st;try{st=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true}})}catch(e){toast("Microphone blocked - allow it from the padlock in the address bar");talkOn=false;talkUI(false);return}
  const ctx=new (window.AudioContext||window.webkitAudioContext)(),src=ctx.createMediaStreamSource(st),an=ctx.createAnalyser();an.fftSize=1024;src.connect(an);

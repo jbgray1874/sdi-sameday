@@ -2557,3 +2557,22 @@ class TheAssistantIsCalledSidTests(unittest.TestCase):
         self.assertNotIn('class="av">SDI<', PAGE)
         self.assertIn('class="av">SID<', PAGE)
         self.assertNotIn("<b>SDI</b>", PAGE)
+
+
+class TalkModeIsNeverSilentTests(unittest.TestCase):
+    """17 November 2026, James: "talk mode isn't working... no sound". Talk mode plays Sid's voice as an audio file from
+    the server (OpenAI's voice, then a free one). If that failed, or the browser blocked it, the page said nothing and
+    went on to listening. Now it says so, tells the log, and speaks with the browser's own voice."""
+
+    def test_a_failed_voice_file_is_reported_and_spoken_another_way(self):
+        turn = PAGE[PAGE.index("function talkTurn("):PAGE.index("async function listen(")]
+        self.assertIn("sidFallback(say,why)", turn)
+        self.assertIn("pl.onerror=()=>fail(", turn)                       # the file didn't load (a server error)
+        self.assertIn("pl.play().catch(", turn)                           # the browser blocked it
+        self.assertIn("didn't start within 8 seconds", turn)              # it never began
+        self.assertNotIn("player.onerror=()=>{player=null;listen()}", PAGE)   # no more silent skip to listening
+        fb = PAGE[PAGE.index("function sidFallback("):PAGE.index("async function listen(")] if "function sidFallback(" in PAGE \
+            and PAGE.index("function sidFallback(") < PAGE.index("async function listen(") else PAGE[PAGE.index("function sidFallback("):][:900]
+        self.assertIn("SpeechSynthesisUtterance", fb)
+        self.assertIn("talk mode: Sid's voice file failed", fb)
+        self.assertIn('insertAdjacentHTML("beforeend"', fb)               # the first, bigger problem is kept on screen
