@@ -1480,6 +1480,7 @@ function silentWatch(){if(!rt)return;clearTimeout(rt.silentT);
 document.addEventListener("click",e=>{const b=e.target.closest&&e.target.closest("[data-act]");if(!b)return;const a=b.dataset.act;
  if(a==="soundcheck"){e.preventDefault();soundCheck()}
  else if(a==="vpclose"){vpHide()}
+ else if(a==="sidretry"){if(window.__sidSay){vpHide("tts");sidPlay(window.__sidSay,++ttsSeq,0)}}
  else if(a==="hearagain"&&rt){e.preventDefault();vpHide("silent");rt.heard=false;rt.audioChecked=0;rtSay({type:"response.create"});silentWatch()}});
 function soundCheck(){if(document.getElementById("sndchk"))return;
  const m=document.createElement("div");m.className="modal";m.id="sndchk";
@@ -1746,8 +1747,8 @@ async function pollQuiet(turn,wait,maxMs){let seen=0;const t0=Date.now();   // l
   if(r.done){wait.remove();break}await new Promise(z=>setTimeout(z,1200))}
  loadFiles()}
 // ---------- talk mode (fallback): I ask out loud, you answer out loud, hands free (like a voice call)
-let talkOn=false,lastAsk="",player=null,vad=null;
-function stopSpeaking(){if(player){player.pause();player=null}}
+let talkOn=false,lastAsk="",player=null,vad=null,ttsSeq=0;
+function stopSpeaking(){ttsSeq++;if(player){player.pause();player=null}}
 function talkUI(on,st){$("#talkbar").classList.toggle("on",on);$("#talk").classList.toggle("on",talkOn);if(st)$("#talkst").textContent=st;
  const v=$("#vo");if(!v)return;v.classList.toggle("on",!!on);$(".main").classList.toggle("voice-on",!!on);if(on)setTimeout(scrollEnd,60);
  if(!on){voCap("","");orbLvl(0,"x");{const a=$("#vdoc");if(a)a.classList.remove("on")}$(".main").classList.remove("live-blur");lsWork(false);$("#vchoice").classList.remove("on");return}
@@ -1785,29 +1786,27 @@ $("#talkdone").onclick=()=>{if(rt){rtSay({type:"response.cancel"});rtSay({type:"
 function endTalk(){stopSpeaking();if(vad)vad.cancel();talkUI(false);toast("Talk mode off")}
 function talkTurn(){if(!talkOn)return;const say=(lastAsk||"").replace(/\n+/g," ").replace(/[*_]/g,"").slice(0,900);lastAsk="";
  if(!say){listen();return}
- talkUI(true,"Speaking…");const pl=player=new Audio("/api/tts?t="+encodeURIComponent(say));voCap(say,"sdi");
- // 17 Nov 2026 (James: "no sound" in talk mode): when the voice file failed (the server's voice, or the browser blocking it)
- // the page said nothing and went on to listening. Now it says so, tells the log, and speaks with the browser's own voice.
- let played=false,failed=false;
- const fail=why=>{if(failed||player!==pl)return;failed=true;player=null;sidFallback(say,why)};
- pl.onplaying=()=>{played=true};
- pl.onended=()=>{if(player===pl){player=null;listen()}};pl.onerror=()=>fail("the voice file didn't load");
- pl.play().catch(e=>fail("the browser blocked it ("+((e&&e.name)||"?")+")"));
- setTimeout(()=>{if(!played)fail("it didn't start within 8 seconds")},8000)}
-function sidFallback(say,why){vpLog("talk mode: Sid's voice file failed - "+why+" | "+browserTag());
- {const msg=`<b>I couldn't play Sid's voice (${esc(why)}).</b> Using your browser's own voice instead.`,cur=document.getElementById("vpbar");
-  if(cur&&cur.dataset.tag==="start")cur.querySelector("span").insertAdjacentHTML("beforeend","<br>"+msg);   // keep the first, bigger problem on screen
-  else vpShow(msg+` <button class="vo-link" data-act="soundcheck" type="button">Test sound and microphone</button>`,"tts")}
- let went=false;const go=()=>{if(went)return;went=true;if(talkOn)listen()};
- try{const u=new SpeechSynthesisUtterance(String(say).slice(0,600));u.lang="en-GB";u.rate=1.03;
-  const v=sidVoice(speechSynthesis.getVoices()||[]);if(v)u.voice=v;
-  u.onend=go;u.onerror=go;speechSynthesis.cancel();speechSynthesis.speak(u);setTimeout(go,Math.max(4000,say.length*90))}catch(e){go()}}
-// 17 Nov 2026 (James: "a very poor quality voice... it's a woman"): the browser's default voice is a generic female one. Sid is a
-// man: the best British male voice the browser has (Edge's online "Natural" voices are the good ones), else any English male.
-function sidVoice(list){const gb=list.filter(v=>/^en[-_]GB/i.test(v.lang||"")),en=list.filter(v=>/^en/i.test(v.lang||"")),
-  male=/\b(ryan|thomas|george|daniel|oliver|alfie|arthur|david|mark|guy|james|richard|brian|eric|liam|sean|paul|christopher|andrew|male)\b/i,natural=/natural|online/i,rank=v=>(male.test(v.name)?4:0)+(natural.test(v.name)?2:0)+(/^en[-_]GB/i.test(v.lang||"")?1:0);
- const pool=(gb.some(v=>male.test(v.name))?gb:en.some(v=>male.test(v.name))?en:gb.length?gb:en).slice();
- pool.sort((a,b)=>rank(b)-rank(a));return pool[0]||null}
+ talkUI(true,"Speaking…");voCap(say,"sdi");sidPlay(say,++ttsSeq,0)}
+// 17 Nov 2026 (James: "we CANNOT fall back"): Sid speaks in Sid's voice or says plainly why he can't - never in another voice.
+// The file is fetched first so the server's own reason can be read, and tried twice before anything is said.
+async function sidPlay(say,my,attempt){
+ const gone=()=>my!==ttsSeq||!talkOn;
+ const fail=why=>{if(gone())return;if(attempt<1){setTimeout(()=>sidPlay(say,my,attempt+1),1200);return}sidVoiceDown(say,why)};
+ let r;try{r=await fetch("/api/tts?strict=1&t="+encodeURIComponent(say))}catch(e){return fail("The page couldn't reach the server ("+((e&&e.message)||"network")+")")}
+ if(!r.ok){let m="";try{m=(await r.json()).error||""}catch(e){}return fail(m||"The server answered "+r.status)}
+ let blob;try{blob=await r.blob()}catch(e){return fail("The voice file didn't download")}
+ if(gone())return;
+ const a=new Audio(URL.createObjectURL(blob));player=a;let started=false;
+ a.onplaying=()=>{started=true;vpHide("tts")};
+ a.onended=()=>{if(player===a){player=null;listen()}};
+ a.onerror=()=>{if(player===a){player=null;fail("The voice file wouldn't play")}};
+ try{await a.play()}catch(e){if(player===a){player=null;fail("The browser blocked the sound ("+((e&&e.name)||"?")+")")}return}
+ setTimeout(()=>{if(player===a&&!started&&a.paused){player=null;fail("The voice didn't start within 8 seconds")}},8000)}
+function sidVoiceDown(say,why){vpLog("talk mode: Sid's voice failed - "+why+" | "+browserTag());window.__sidSay=say;
+ const msg=`<b>Sid's voice isn't available.</b> ${esc(String(why).replace(/\.$/,""))}. He can't speak, so nothing is read out. <button class="vo-link" data-act="sidretry" type="button">Try again</button> &middot; <button class="vo-link" data-act="soundcheck" type="button">Test sound and microphone</button>`,
+  cur=document.getElementById("vpbar");
+ if(cur&&cur.dataset.tag==="start")cur.querySelector("span").insertAdjacentHTML("beforeend","<br>"+msg);   // keep the first, bigger problem on screen
+ else vpShow(msg,"tts")}
 async function listen(){if(!talkOn||busy)return;
  let st;try{st=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true}})}catch(e){toast("Microphone blocked - allow it from the padlock in the address bar");talkOn=false;talkUI(false);return}
  const ctx=new (window.AudioContext||window.webkitAudioContext)(),src=ctx.createMediaStreamSource(st),an=ctx.createAnalyser();an.fftSize=1024;src.connect(an);

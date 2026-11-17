@@ -2559,38 +2559,57 @@ class TheAssistantIsCalledSidTests(unittest.TestCase):
         self.assertNotIn("<b>SDI</b>", PAGE)
 
 
-class TalkModeIsNeverSilentTests(unittest.TestCase):
-    """17 November 2026, James: "talk mode isn't working... no sound". Talk mode plays Sid's voice as an audio file from
-    the server (OpenAI's voice, then a free one). If that failed, or the browser blocked it, the page said nothing and
-    went on to listening. Now it says so, tells the log, and speaks with the browser's own voice."""
+class SidSpeaksInHisOwnVoiceOrSaysWhyNotTests(unittest.TestCase):
+    """17 November 2026, James: "talk mode isn't working... no sound", then "a very poor quality voice... it's a woman... we
+    CANNOT fall back". Talk mode plays Sid's voice as a file from the server. A failure was silent, then (briefly) spoken in
+    the browser's generic woman's voice; and the server quietly swapped in a free Microsoft voice, or an offline one, when
+    OpenAI's failed. Now Sid speaks in his own voice or says plainly why he can't - no other voice, on either side."""
 
-    def test_a_failed_voice_file_is_reported_and_spoken_another_way(self):
+    def setUp(self):
+        self.client = L.app.test_client()
+        self.key = os.environ.pop("OPENAI_API_KEY", None)
+        self.free = []
+        self.keep = convo.tts_file
+
+        def free_voice(text, ext="mp3"):
+            self.free.append(text)
+            p = Path(tempfile.mkdtemp(prefix="tts-")) / "free.mp3"
+            p.write_bytes(b"ID3free")
+            return str(p)
+        convo.tts_file = free_voice
+
+    def tearDown(self):
+        convo.tts_file = self.keep
+        if self.key is not None:
+            os.environ["OPENAI_API_KEY"] = self.key
+
+    def test_talk_mode_is_strict_and_never_gets_the_free_voice(self):
+        r = self.client.get("/api/tts?strict=1&t=Hi%20James%2C%20Sid%20here%20" + str(time.time()).replace(".", ""))
+        self.assertEqual(r.status_code, 503)
+        self.assertIn("OPENAI_API_KEY", r.get_json()["error"])           # the reason, in words
+        self.assertEqual(self.free, [])                                   # no other voice was made
+
+    def test_a_failure_of_openais_voice_is_said_not_swapped(self):
+        os.environ["OPENAI_API_KEY"] = "sk-test-not-real"                 # a key, but no working OpenAI here
+        r = self.client.get("/api/tts?strict=1&t=Sid%20here%20again%20" + str(time.time()).replace(".", ""))
+        self.assertEqual(r.status_code, 503)
+        self.assertIn("OpenAI's voice failed", r.get_json()["error"])
+        self.assertEqual(self.free, [])
+
+    def test_whatsapp_voice_notes_keep_their_fallback(self):
+        r = self.client.get("/api/tts?t=A%20voice%20note%20" + str(time.time()).replace(".", ""))
+        self.assertEqual(r.status_code, 200)                              # a different voice is better than none there
+        self.assertEqual(len(self.free), 1)
+
+    def test_the_page_plays_the_file_or_says_why_and_never_speaks_another_way(self):
+        self.assertNotIn("SpeechSynthesis", PAGE)
+        self.assertNotIn("speechSynthesis", PAGE)
+        self.assertNotIn("function sidFallback(", PAGE)
         turn = PAGE[PAGE.index("function talkTurn("):PAGE.index("async function listen(")]
-        self.assertIn("sidFallback(say,why)", turn)
-        self.assertIn("pl.onerror=()=>fail(", turn)                       # the file didn't load (a server error)
-        self.assertIn("pl.play().catch(", turn)                           # the browser blocked it
-        self.assertIn("didn't start within 8 seconds", turn)              # it never began
+        self.assertIn("/api/tts?strict=1&t=", turn)
+        self.assertIn("if(attempt<1)", turn)                              # tried twice before anything is said
+        self.assertIn("The browser blocked the sound", turn)
+        self.assertIn("The voice didn't start within 8 seconds", turn)
+        self.assertIn("Sid's voice isn't available.", turn)
+        self.assertIn('data-act="sidretry"', turn)
         self.assertNotIn("player.onerror=()=>{player=null;listen()}", PAGE)   # no more silent skip to listening
-        fb = PAGE[PAGE.index("function sidFallback("):PAGE.index("async function listen(")] if "function sidFallback(" in PAGE \
-            and PAGE.index("function sidFallback(") < PAGE.index("async function listen(") else PAGE[PAGE.index("function sidFallback("):][:900]
-        self.assertIn("SpeechSynthesisUtterance", fb)
-        self.assertIn("talk mode: Sid's voice file failed", fb)
-        self.assertIn('insertAdjacentHTML("beforeend"', fb)               # the first, bigger problem is kept on screen
-
-    @unittest.skipUnless(NODE, "node is not installed")
-    def test_the_fallback_voice_is_a_british_man_where_there_is_one(self):
-        """James, 17 Nov: the fallback was a generic woman's voice of poor quality. Sid is a man."""
-        js = (page_fn("sidVoice") + "\n"
-              "const V=n=>({name:n,lang:n.includes('US')?'en-US':'en-GB'});\n"
-              "const a=sidVoice([V('Microsoft Hazel - English (United Kingdom)'),V('Microsoft Susan'),V('Microsoft George - English (United Kingdom)'),"
-              "V('Microsoft Ryan Online (Natural) - English (United Kingdom)')]);\n"
-              "const b=sidVoice([V('Microsoft Hazel - English (United Kingdom)'),V('Microsoft David - English (United States) US')]);\n"
-              "const c=sidVoice([V('Microsoft Hazel - English (United Kingdom)'),V('Microsoft Susan - English (United Kingdom)')]);\n"
-              "console.log(JSON.stringify({a:a&&a.name,b:b&&b.name,c:c&&c.name,none:sidVoice([])}))")
-        r = subprocess.run([NODE, "-e", js], capture_output=True, text=True, timeout=30)
-        self.assertEqual(r.returncode, 0, r.stderr)
-        got = json.loads(r.stdout)
-        self.assertIn("Ryan Online (Natural)", got["a"])        # the natural British man beats the older British man
-        self.assertIn("David", got["b"])                          # no British man: an English man, not a British woman
-        self.assertIn("Hazel", got["c"])                          # no man at all: a British voice, rather than nothing
-        self.assertIsNone(got["none"])

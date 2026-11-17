@@ -5348,10 +5348,12 @@ def api_tts():
     t = (request.args.get("t") or "").strip()[:1200]
     if not t:
         abort(400)
+    strict = request.args.get("strict") == "1"      # talk mode: Sid's own voice or an honest error - never a substitute
     try:
-        return send_file(natural_tts(t, request.args.get("session")), mimetype="audio/mpeg", max_age=86400)
+        return send_file(natural_tts(t, request.args.get("session"), strict=strict), mimetype="audio/mpeg", max_age=86400)
     except Exception as e:
-        return jsonify({"error": str(e)[:200]}), 500
+        print("tts failed:", str(e)[:200], flush=True)
+        return jsonify({"error": str(e)[:200]}), (503 if strict else 500)
 
 
 TTS_MODEL = os.environ.get("LITE_TTS_MODEL", "gpt-4o-mini-tts")
@@ -5360,7 +5362,7 @@ TTS_STYLE = ("A warm, natural British designer from London chatting to a colleag
              "friendly, contractions, no announcer voice, no robotic pauses.")
 
 
-def natural_tts(text, sid=None):
+def natural_tts(text, sid=None, strict=False):
     """29 Oct 2026 (Muhammad: 'the voice is really bad'): voice-note replies in OpenAI's natural British voice, about
     1.5c a minute, cached by text. Falls back to the free Microsoft voice if OpenAI fails or the daily cap is reached."""
     import hashlib
@@ -5370,16 +5372,32 @@ def natural_tts(text, sid=None):
     mp3 = os.path.join(d, "oa_" + hashlib.md5((TTS_VOICE + clean).encode()).hexdigest()[:16] + ".mp3")
     if os.path.exists(mp3):
         return mp3
+    # 17 Nov 2026 (James: "we CANNOT fall back"): talk mode asks with strict=1. Sid's voice is OpenAI's; if it can't be made
+    # the reason is said (retried once first) and no other voice is swapped in - the free Microsoft / Piper voices stay
+    # for WhatsApp voice notes only, where a different voice is better than none.
     try:
-        if os.environ.get("OPENAI_API_KEY") and spent_today() < daily_cap():
-            from openai import OpenAI
-            r = OpenAI(timeout=40, max_retries=1).audio.speech.create(model=TTS_MODEL, voice=TTS_VOICE, input=clean,
-                                                                      instructions=TTS_STYLE, response_format="mp3", speed=1.12)
-            open(mp3, "wb").write(r.content)
-            log_cost(sid, "tts", round(len(clean) / 900 * 0.015, 5))   # ~900 characters a minute, ~1.5c a minute
-            return mp3
+        if not os.environ.get("OPENAI_API_KEY"):
+            raise RuntimeError("no OPENAI_API_KEY on the server")
+        if spent_today() >= daily_cap():
+            raise RuntimeError("today's SDI Live AI budget is used up")
+        from openai import OpenAI
+        last = None
+        for attempt in (1, 2):
+            try:
+                r = OpenAI(timeout=40, max_retries=0).audio.speech.create(model=TTS_MODEL, voice=TTS_VOICE, input=clean,
+                                                                          instructions=TTS_STYLE, response_format="mp3", speed=1.12)
+                open(mp3, "wb").write(r.content)
+                log_cost(sid, "tts", round(len(clean) / 900 * 0.015, 5))   # ~900 characters a minute, ~1.5c a minute
+                return mp3
+            except Exception as e:
+                last = e
+                if attempt == 1:
+                    time.sleep(0.8)
+        raise last
     except Exception as e:
-        print("natural tts failed, free voice instead:", str(e)[:160], flush=True)
+        print("natural tts failed" + ("" if strict else ", free voice instead") + ":", str(e)[:160], flush=True)
+        if strict:
+            raise RuntimeError("OpenAI's voice failed: " + str(e)[:140])
     return convo.tts_file(clean, "mp3")
 
 
