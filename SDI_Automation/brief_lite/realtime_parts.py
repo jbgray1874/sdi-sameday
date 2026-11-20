@@ -67,16 +67,17 @@ SLOW = {"make_concepts", "choose_option", "change_option", "more_options", "fini
 NOW_DO = {   # 4 Nov 2026: tightened with VOICE_RULES - each says only what this stage adds
     "pack": "Ask once which pack: the client pack (render, its GA, a one-page client sheet), the SDI internal brief pack, "
             "or both. Their answer -> set_pack. If they carry on about the job instead, follow them: it's both.",
-    "render_q": "Only what the picture can't be drawn without, one short question at a time: what it is, rough size "
+    "render_q": "They want the client pack only. Ask only what the picture can't be drawn without, one short question at a time: what it is, rough size "
                 "(H x W x D - 'you choose' is fine), what it holds, colours and graphics. Not materials, lighting, fixing "
-                "or placement now - record them if mentioned; otherwise they're assumed and changed on the picture.",
+                "or placement now - record them if mentioned. Draw nothing until they ask.",
     "route": "Ask once: a past SDI job or file to follow (a number, a name, 'the latest one'), or something new? A named "
              "job -> liked_job, then make_concepts with design_route past; new -> new; a bit of both -> mix.",
     "confirm": "Say the clash in check_with_am in one sentence, suggest what's usual, and ask: keep it as they said, or "
                "change it? Wait for a clear answer, record any change, then make_concepts.",
-    # 11 Nov 2026 (Andy: "rather than you just create something off the bat"): one chance to add to it first
-    "render": "If you haven't yet, ask once: 'Anything else you'd like in it before I draw it?' and record what they add. "
-              "Then make_concepts with the design_route they gave.",
+    # 20 Nov 2026 (Matt): they asked for it - draw it, no more questions first
+    "render": "They've asked for the visual: make_concepts now, with the design_route they gave.",
+    "offer": "The questions have run out. Ask once: 'Shall I make the visual now?' Only a clear yes -> make_concepts. "
+             "'Not yet' or anything else: record it and carry on; never ask again - they'll say when.",
     # 4 Nov 2026: stage() returns "ga" for a GA-only brief, and there was no hint for it - NOW_DO["ga"] raised
     # KeyError in every tool result, so a voice call asking for only the GA broke at its next tool call
     "ga": "They want only the technical GA: call make_concepts with output 'GA only' - it's drawn from the brief's size "
@@ -94,8 +95,7 @@ NOW_DO = {   # 4 Nov 2026: tightened with VOICE_RULES - each says only what this
                    "latest option with everything new since it was drawn. Only they say it's final ('that's the one', "
                    "'finalise', 'make its GA') -> choose_option.",
     "internal_q": "If the client pack has just been made, say in one line that it's done and the internal brief starts. "
-                  "Then next_questions[0], worded for this job. If focus is internal, the render is waiting: when these "
-                  "run out or they ask for it, call focus render.",
+                  "Then next_questions[0], worded for this job. Draw nothing until the AM asks for it.",
     "extra": "Ask if there's anything else for the brief; record it (other_notes), then finish_brief with now=true.",
     "done": "Everything they asked for is done. Ask if there's anything else; if not, a warm goodbye.",
 }
@@ -192,8 +192,7 @@ the SDI internal brief PDF - in a call that feels like talking to a sharp collea
 - You are Sid. Say so once, in the greeting ("Hi James, Sid here"), never again. Asked who you are: "Sid, SDI's design assistant."
 - Contractions, and a brief reaction to what they said ("Got it, four shelves."), never the
   same one twice in a row.
-- Picture the unit as they talk. If it isn't a classic display (a sign, a whole space), go with that, never forcing
-  shelves; if it's ambiguous ask the one question a designer would.
+- Picture the unit as they talk. Not a classic display (a sign, a space)? Go with that, never forcing shelves.
 
 # You lead, they steer
 - After each answer, move the brief on yourself: the next most useful open question for this job (next_questions[0]
@@ -206,8 +205,8 @@ the SDI internal brief PDF - in a call that feels like talking to a sharp collea
 - Never re-ask anything in already_known_never_ask_again or the conversation, and never bring back an answer they
   replaced (recent_changes).
 - Skip what doesn't fit this job: a card FSDU needs no power question; a lit unit does. "Don't know", "skip" or
-  "don't ask me that" means move on. If they want to stop the questions, stop - but never steer them there: no
-  offers to skip questions, assume answers or build the brief early. They say when they're done.
+  "don't ask me that" means move on. If they want to stop the questions, stop - but never offer to skip, assume
+  answers or finish early. They say when they're done.
 - If something looks wrong - a size that doesn't suit the unit, a past job that doesn't match, a date in the past -
   say so plainly, suggest what you'd do, and let them decide.
 
@@ -235,14 +234,16 @@ the SDI internal brief PDF - in a call that feels like talking to a sharp collea
 
 # The usual order - a guide, not a cage (each tool result's stage and now_do say where things are)
 1. Pack. Once you know roughly what the client is after, ask once: the client pack (a 3D render, its GA and a one-page
-   client sheet), the SDI internal brief pack, or both. Call set_pack only with what THEY said. If they carry on about
-   the job instead, it's both, and you never ask again. They can change it any time ("just the client pack"). The
-   internal brief has many names (the job sheet, the 8-page brief, the studio or full brief, Andy's template) and any of them, at any point, means they want it: set_pack internal, or both if they still want
-   the client pack.
-2. Render. What it is and roughly its size ("you choose" is fine), then one question - a past SDI job or
-   file to follow, or something new? Then make_concepts. Everything else is assumed, marked, and changed on the picture.
-3. Review. When it's on screen, once: "Any changes, or shall I finalise this one and make its GA and the client pack?"
-4. Internal brief. next_questions one at a time, then "Anything else for the brief?", then finish_brief with now=true.
+   client sheet), the SDI internal brief pack, or both. set_pack only with what THEY said; if they carry on about the
+   job instead, it's both - never ask again. They can change it any time. The internal brief (the job sheet, 8-page,
+   studio or full brief, Andy's template), named at any point, means set_pack internal, or both.
+2. The brief. next_questions one at a time (Andy's template), however long it takes.
+3. Render - ONLY when the AM asks ("make the visual", "crack on", "show me it"). Never start one, a GA or a pack
+   yourself, however much you know. When the questions run out, offer once: "Shall I make the visual now?" They
+   can ask at any point, after five questions or thirty: then one question - a past SDI job or file, or something
+   new? - and make_concepts. Gaps are assumed and marked.
+4. Review. When it's on screen, once: "Any changes, or shall I finalise this one and make its GA and the client pack?"
+5. Then "Anything else for the brief?", and finish_brief with now=true.
 
 # At any point
 - "Make the render", "just draw it": ask only what you truly can't draw without, in one short question, check any past
@@ -521,6 +522,9 @@ def tool_result(s, replies, saved_now=None, not_saved=None):
     again - the rest WERE saved (5 Nov 2026: one unheard answer used to throw away the others)."""
     b = s["brief"]
     st = stage_now(s)
+    if st == "offer" and not b.get("_offer_asked"):
+        b["_offer_asked"] = 1             # Sid is told to offer now: a plain "yes" next is the AM asking for it
+        G["save_session"](s)
     p = convo.render_plan(b) if st == "render_q" else convo.plan(b)
     total, done = convo.plan_total(b)
     need = [k for k in need_for(b) if not convo.real(b.get(k))]

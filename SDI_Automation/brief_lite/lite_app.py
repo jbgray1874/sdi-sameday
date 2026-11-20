@@ -2978,7 +2978,7 @@ def handle(number, name, text, image_path=None, voice=False, ch=None, new=False,
         if convo.pack_of(b) == "both" and not (b.get("_client_done") or b.get("_sheet_pdf")):
             b["_focus"] = "internal"
     elif t.get("focus") == "render":
-        b.pop("_focus", None)
+        b["_focus"] = "render"            # 20 Nov 2026: the brief's questions come first by default; this puts the picture's first
     if text and t_override is None:          # a reason said anyway ("...because it looks cheap") belongs to the last decision
         craft.heard("showroom", who_of(s), s["id"], text)
     if b.get("client") and (b.get("hero_products") or b.get("products_held") or b.get("unit_type")) \
@@ -3180,10 +3180,14 @@ def handle(number, name, text, image_path=None, voice=False, ch=None, new=False,
     # "just make 2 renders now" / "give me the render first" / "I'll tell you later, render first": a render, now. Never
     # held back for template questions (project name, contact...) - those carry on after. The model's own reply is dropped
     # here, because it tends to invent conditions ("renders start once you give me...").
+    if b.get("_offer_asked") and not b.get("_render_asked") and NOT_YET.search(text or "") \
+            and not asks_for_visual(text, b):
+        b["_offer_declined"] = 1                              # "not yet": the brief carries on, the offer isn't repeated
     render_now = intent not in ("change_visual", "approve_visual") and t_override is None and (
-        intent_wants_render(t, text) or re.search(r"\b(render|visual|concept)s?\b.{0,20}\b(first|now|please|asap)\b|"
+        asks_for_visual(text, b) or re.search(r"\b(render|visual|concept)s?\b.{0,20}\b(first|now|please|asap)\b|"
                                                   r"\b(first|now)\b.{0,15}\b(render|visual|concept)", text or "", re.I))
     if render_now:
+        b["_render_asked"] = 1
         if re.search(r"\b(ga|g\.a\.|technical|drawing|both)\b", text or "", re.I):   # "render and GA" / "both" / "and the drawing"
             b["output"] = "3D render and technical GA"
         elif b.get("output") in (None, "", "Brief only"):
@@ -3202,7 +3206,7 @@ def handle(number, name, text, image_path=None, voice=False, ch=None, new=False,
     # anything to do with the picture brings the render back first (the internal questions wait where they were)
     if intent in ("want_visuals", "more_options", "change_visual", "approve_visual", "want_ga_only") or render_now \
             or FOCUS_RENDER.search(text or ""):
-        b.pop("_focus", None)
+        b["_focus"] = "render"
     # They asked for the render (or the voice model called make_concepts): no more render questions - any gaps are
     # filled sensibly and marked (assumed). Past / mix / new is still asked once, unless they said "just make it now".
     if b.get("_flow") and intent == "want_visuals" and (render_now or t.get("go")):
@@ -3968,6 +3972,25 @@ def intent_wants_render(t, text):
                 and re.search(r"\b(give|make|create|do|show|see|send|want|need|can|could|please)\b", text or "", re.I))
 
 
+# 20 Nov 2026 (Matt: "you should be able to say 'Sid, that's enough detail for now - crack on and generate me a visual
+# please'"): the AM's own words that start a picture. Nothing else does - not the model's reading of them.
+GO_VISUAL = re.compile(r"\b(crack on|cracking on|generate|visuali[sz]e|draw (it|one|me|something|that|this|up)|sketch|"
+                       r"let'?s see (it|one|a|the|what)|show me (it|one|a|the|what)|enough (detail|questions|info)|"
+                       r"(make|do|draw|give me|create|produce) (me )?(the|a|its|an?) ?(ga|technical|drawing|design|option))\b", re.I)
+NOT_YET = re.compile(r"^\W*((so|ok(ay)?|right|well|um+|erm+|uh)\W+){0,2}(no\b|nope|nah|not (yet|now|just yet)|later|"
+                     r"keep going|carry on|hold (off|on)|wait)", re.I)
+
+
+def asks_for_visual(text, b=None):
+    """Did the AM ask, in these words, for something to be drawn? A plain yes counts only straight after the offer."""
+    text = text or ""
+    if intent_wants_render({}, text) or GO_VISUAL.search(text) or GO_NOW.search(text) or FOCUS_RENDER.search(text) \
+            or re.search(r"\bnew (render|visual|concept|design)\b", text, re.I):
+        return True
+    return bool(b and b.get("_offer_asked") and not b.get("_render_asked") and CONFIRM_YES.search(text)
+                and not NOT_YET.search(text))
+
+
 TYPICAL_SIZE = [(r"gondola", "2000 x 1330 x 450 mm"), (r"wall ?bay|bay", "2100 x 1250 x 450 mm"), (r"fsdu|floor", "1600 x 600 x 400 mm"),
                 (r"counter|cdu|till", "450 x 400 x 300 mm"), (r"plinth|podium", "900 x 600 x 600 mm"), (r"totem", "1800 x 500 x 500 mm"),
                 (r"header", "300 x 1330 x 50 mm"), (r"window", "1800 x 1200 x 500 mm"), (r"shelf|shelving", "1800 x 900 x 400 mm")]
@@ -4182,6 +4205,20 @@ def api_rt_tool():
         # 3 Nov 2026 (Andy's call): a Stop pressed minutes earlier silently blocked the client pack - its GA came out as the
         # plain code drawing and no HD render was made. Asking for something new ends the Stop.
         STOP_RENDERS.pop(s["id"], None)
+    # The AM's ask is caught when it's said (Sid calls record_answers or set_pack straight after), and looked for again in
+    # their last few lines: Sid asks "a past job, or something new?" before drawing, so the ask is a line or two back.
+    if not s["brief"].get("_render_asked"):
+        heard = _am_lines(s["id"])[:5 if js.get("name") in ("make_concepts", "more_options") else 1]
+        # a plain "yes" is an ask only as the newest line, straight after Sid's offer - never an older yes
+        if any(asks_for_visual(x, s["brief"] if i == 0 else None) for i, x in enumerate(heard)):
+            s["brief"]["_render_asked"] = 1
+            save_session(s)
+    if js.get("name") in ("make_concepts", "more_options") and not s["brief"].get("_render_asked"):
+        last_ = _last_am_line(s["id"])
+        return jsonify({"slow": False, "output": _said(json.dumps({"error": (
+                f"Not drawn: the AM hasn't asked for a visual (their last words: \"{last_[:80]}\"). Never start one "
+                "yourself. Carry on with the brief; draw only when they ask ('make the visual', 'crack on', 'show me "
+                "it'), or say yes when you offer once the questions run out.")}))})
     if js.get("name") == "change_option":
         last_ = _last_am_line(s["id"])
         if half_heard_change(last_):
@@ -4212,7 +4249,7 @@ def api_rt_tool():
         asked_pdf = said_now and re.search(r"\b(brief|pdf|internal|8[- ]?page|job sheet|document)\b", last_, re.I)
         # 11 Nov 2026: their yes to "are you sure that's everything?" - asked because they asked for the brief - is that ask
         asked_pdf = asked_pdf or (s["brief"].get("_gaps_told") and SURE_YES.search(last_))
-        if st_ in ("pack", "render_q", "route", "confirm", "render", "review") \
+        if st_ in ("pack", "render_q", "route", "confirm", "render", "review", "offer", "internal_q") \
                 and (convo.pack_of(s["brief"]) or "both") in ("client", "both") and not asked_pdf:
             return jsonify({"slow": False, "output": json.dumps({"error": "Not yet: the AM didn't ask for the brief PDF. Carry on "
                                                                           "with the client pack (now_do: " + rt.NOW_DO.get(st_, "")
@@ -4505,7 +4542,7 @@ def api_rt_log():
     elif b.get("client") and PAST_Q.search(text):
         kind, t = "show_past", {"updates": {}, "intent": "show_past", "reply": ""}
     elif b.get("client") and b.get("output") != "Brief only" and not any(v.get("kind") == "render" for v in s["visuals"]) \
-            and intent_wants_render({}, text) and (ASSUME.search(text) or b.get("_assume")) \
+            and asks_for_visual(text, b) and (ASSUME.search(text) or b.get("_assume")) \
             and (not b.get("_flow") or (convo.pack_of(b) in ("client", "both") and b.get("design_route"))):
         kind, t = "make_concepts", {"updates": {}, "intent": "want_visuals", "assume": True, "reply": ""}
     if kind and not RT_BUSY.get(s["id"]):
@@ -4559,6 +4596,15 @@ CHANGE_SAID = re.compile(r"\b(\w+er|more|less|add\w*|remove|without|with|no|colo
 def half_heard_change(line):
     """Two words or fewer that don't say what to change ('Photos laptop', 'Jump route') - not a change to draw."""
     return len(re.findall(r"[a-z']+", (line or "").lower())) <= 2 and not CHANGE_SAID.search(line or "")
+
+
+def _am_lines(sid, n=5):
+    """The AM's last n lines, newest first."""
+    con = db()
+    rows = con.execute("SELECT text FROM messages WHERE session=? AND dir='in' AND text IS NOT NULL ORDER BY at DESC LIMIT ?",
+                       (sid, n)).fetchall()
+    con.close()
+    return [r["text"] or "" for r in rows]
 
 
 def _last_am_line(sid):

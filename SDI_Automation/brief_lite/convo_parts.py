@@ -146,6 +146,18 @@ def stage(s):
     if client_open:
         if any(v.get("kind") == "render" for v in s["visuals"]):
             return "review"
+        # 20 Nov 2026 (Matt: "by the time I've said Sainsburys and FSDU with some dimensions it gets straight into
+        # creating a render, without being prompted. It must wait for a prompt"): nothing is drawn until the AM asks.
+        # The brief's questions come first, the picture's own when it's the client pack alone; then one offer.
+        if not b.get("_render_asked"):
+            if pack == "both" and plan(b) and b.get("_focus") != "render":
+                return "internal_q"
+            if render_plan(b) and not b.get("_render_q_done"):
+                return "render_q"
+            if not b.get("_offer_declined"):
+                return "offer"
+            client_open = False            # "not yet": the brief carries on; they can still ask for it any time
+    if client_open:
         if render_plan(b) and (not b.get("_render_q_done") or any(not real(b.get(k)) for k in ("client", "unit_type"))):
             return "render_q"          # "just assume" fills the gaps, but a render can't start without e.g. the client
         if brief_conflicts(b) and int(b.get("_confirm_n", 0)) < 3 and not b.get("_conflict_ok"):
@@ -860,6 +872,19 @@ def converse(s, text, fast=False):
     return {"updates": {}, "intent": "answer", "reply": "Sorry, say that again?", "ask_field": "", "ask": ""}
 
 
+def ask_offer(s, ch, ack=""):
+    """Asked once, when the questions run out: the AM decides when anything is drawn (Matt, 20 Nov 2026)."""
+    b = s["brief"]
+    if b.get("_offer_asked"):
+        ch.text(((ack.strip() + " ") if ack.strip() else "") + "Say \"make the visual\" whenever you're ready.")
+        return ch, s
+    b["_offer_asked"], b["_asking"] = 1, ["_offer"]
+    save_session(s)
+    ch.ask(((ack.strip() + " ") if ack.strip() else "") + "That's the brief covered. Shall I make the visual now?",
+           field="_offer", options=["Yes, make the visual", "Not yet"])
+    return ch, s
+
+
 def ask_next(s, ch, t=None, ack=""):
     """Ask the one next question (the model's wording if it chose a field still open, else the template's), with options."""
     t = t or {}
@@ -879,11 +904,16 @@ def ask_next(s, ch, t=None, ack=""):
         return ask_final(s, ch, ack)
     if st == "extra":
         return ask_extra(s, ch, ack)
+    if st == "offer":
+        return ask_offer(s, ch, ack)
     if st in ("render", "ga"):             # nothing to ask - handle() draws it
         if ack.strip():
             ch.text(ack.strip())
         return ch, s
     if st == "done":
+        if pack_of(b) == "client" and not any(v.get("kind") == "render" for v in s["visuals"]):
+            ch.text(((ack.strip() + " ") if ack.strip() else "") + "Say \"make the visual\" whenever you want it.")
+            return ch, s
         if pack_of(b) == "client":
             ch.text(((ack.strip() + " ") if ack.strip() else "") + "That's the client pack done. Say \"internal pack\" any time if "
                     "you want the full SDI brief too.")

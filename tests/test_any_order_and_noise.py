@@ -151,7 +151,7 @@ class TheAmChoosesTheOrderTests(unittest.TestCase):
         who = self._started()
         say(who, "let's do the internal brief questions first")
         _, s = say(who, "ok back to the render")
-        self.assertFalse(s["brief"].get("_focus"))
+        self.assertEqual(s["brief"].get("_focus"), "render")            # 20 Nov 2026: the brief's questions are the default
         self.assertIn(convo.stage(s), ("render_q", "route", "confirm"))
 
     def test_when_the_internal_questions_run_out_the_render_is_next(self):
@@ -630,8 +630,8 @@ class TheTightenedInstructionsTests(unittest.TestCase):
         "never claim a render": "Never say a render is coming, being made or ready",
         "quiet while drawing": "then say nothing and ask nothing until it's on screen",
         "pack asked once": "ask once: the client pack",
-        "set_pack only on their word": "Call set_pack only with what THEY said",
-        "internal brief by any name": "any of them, at any point, means they want it",
+        "set_pack only on their word": "set_pack only with what THEY said",
+        "internal brief by any name": "named at any point, means set_pack internal",
         "Boots means both": '"Boots" or "booth" on its own means both',
         "never invent figures": "Never invent sizes, colours, materials, quantities or dates",
         "record before the next question": "before your next question",
@@ -681,7 +681,8 @@ class TheTightenedInstructionsTests(unittest.TestCase):
         """It had none: NOW_DO["ga"] raised KeyError, so every tool result of a GA-only voice call failed."""
         s = {"id": "g", "visuals": [], "brief": {"_flow": 2, "_pack": "client", "client": "Tesco", "unit_type": "gondola end",
                                                   "size": "1800 x 1200 x 600 mm", "output": "GA only", "_render_q_done": 1,
-                                                  "products_held": "drills", "colours_graphics": "red"}}
+                                                  "products_held": "drills", "colours_graphics": "red",
+                                                  "_render_asked": 1}}
         self.assertEqual(convo.stage(s), "ga")
         self.assertIn("GA only", json.loads(rt.tool_result(s, []))["now_do"])
 
@@ -831,6 +832,7 @@ class LettingGoOfAPastJobTests(unittest.TestCase):
         self.who = new_chat()
         _, self.s = say(self.who, "Tesco want a coal bunker", {"client": "Tesco", "unit_type": "coal bunker"})
         self.stub, L.ref_lookup = L.ref_lookup, REF_LOOKUP          # the real look-up, on the small job index
+        self.brief(_render_asked=1)       # 20 Nov 2026: these calls pick up after the AM asked for the visual
 
     def _fresh(self, **attrs):
         if self.S._state.get("con"):
@@ -1074,6 +1076,7 @@ class ASaidJobNumberIsTheJobTests(unittest.TestCase):
         self.who = new_chat()
         _, self.s = say(self.who, "Tesco want a gondola end", {"client": "Tesco", "unit_type": "gondola end"})
         self.stub, L.ref_lookup = L.ref_lookup, REF_LOOKUP          # the real look-up, on the small job index
+        self.brief(_render_asked=1)       # 20 Nov 2026: these calls pick up after the AM asked for the visual
 
     def _fresh(self, **attrs):
         if self.S._state.get("con"):
@@ -2194,7 +2197,7 @@ class NothingHurriesTheAMToFinishTests(unittest.TestCase):
 
     def test_the_voice_is_told_never_to_hurry_them(self):
         self.assertIn("Warm, unhurried", rt.VOICE_RULES)
-        self.assertIn("never steer them there", rt.VOICE_RULES)
+        self.assertIn("never offer to skip", rt.VOICE_RULES)
         self.assertIn("They say when they're done", rt.VOICE_RULES)
         self.assertNotIn("Keep it light", rt.VOICE_RULES)
         self.assertIn("If they want to stop the questions, stop", rt.VOICE_RULES)   # their choice still stands
@@ -2308,7 +2311,11 @@ class AndysShowcaseCallTests(unittest.TestCase):
         self.assertEqual([v["label"] for v in L._session_by_id(self.s["id"])["visuals"]], ["A"])
 
     def test_they_can_add_to_it_before_the_first_drawing(self):
-        self.assertIn("Anything else you'd like in it before I draw it?", rt.NOW_DO["render"])
+        # 20 Nov 2026 (Matt): nothing is drawn until they ask; once the questions run out Sid offers once, and when
+        # they ask, Sid draws - no further question first (Andy's "one chance to add" is the whole brief now)
+        self.assertIn("Shall I make the visual now?", rt.NOW_DO["offer"])
+        self.assertIn("never ask again", rt.NOW_DO["offer"])
+        self.assertIn("make_concepts now", rt.NOW_DO["render"])
         self.assertIn("let me think", rt.VOICE_RULES)                   # no "let me think about the next detail" filler
 
 
@@ -2373,6 +2380,7 @@ class TheJobTheVoiceOffersIsTheJobTests(unittest.TestCase):
         _, self.s = say(self.who, "Meta want an eyewear display", {"client": "Meta", "unit_type": "eyewear display"})
         self.stub, L.ref_lookup = L.ref_lookup, REF_LOOKUP
         self.brief(design_route="past", _ref_confirm={"label": "11956 - AI Meta Glasses (2025-08)", "hint": "", "others": []})
+        self.brief(_render_asked=1)       # 20 Nov 2026: these calls pick up after the AM asked for the visual
 
     def _fresh(self, **attrs):
         if self.S._state.get("con"):
@@ -2643,3 +2651,102 @@ class AnEmptyOpenAIAccountIsSaidPlainlyTests(unittest.TestCase):
         self.assertIn("if(noCredit(why)){", start)                         # no credit: one message, no talk-mode fallback
         self.assertIn("Sid can't talk right now.", start)
         self.assertIn("const nc=noCredit(why)", PAGE)
+
+
+class NothingIsDrawnUntilTheAMAsksTests(unittest.TestCase):
+    """20 Nov 2026 (Matt): "By the time I've said Sainsburys and FSDU with some dimensions it gets straight into
+    creating a render, without being prompted. It must wait for a prompt to start rendering or generating anything ...
+    if you get through say 15 questions and you just want to crack on, you should be able to say 'SID that's enough
+    detail for now - crack on and generate me a visual please'. It doesn't always need all 33 questions answering."""
+
+    def setUp(self):
+        self.drawn = []
+        self.keep = L.make_visual
+        L.make_visual = lambda s, kind, *a, **k: (self.drawn.append(kind), (None, "stopped (test)"))[1]
+        self.client = L.app.test_client()
+
+    def tearDown(self):
+        L.make_visual = self.keep
+
+    def matts_opening(self):
+        who = new_chat()
+        say(who, "Sainsburys want an FSDU", {"client": "Sainsburys", "unit_type": "FSDU"})
+        out, s = say(who, "about 1600 high, 600 wide and 400 deep", {"size": "1600 x 600 x 400 mm"})
+        return who, out, s
+
+    def test_sainsburys_an_fsdu_and_a_size_draws_nothing(self):
+        who, out, s = self.matts_opening()
+        self.assertEqual(self.drawn, [])
+        self.assertEqual(convo.stage(s), "internal_q")             # the brief's questions, not the render
+        self.assertFalse(s["brief"].get("_render_asked"))
+        out, s = say(who, "it holds the Taste the Difference range", {"products_held": "Taste the Difference range"})
+        self.assertEqual(self.drawn, [])
+
+    def test_crack_on_after_some_questions_starts_it(self):
+        who, out, s = self.matts_opening()
+        out, s = say(who, "Sid, that's enough detail for now - crack on and generate me a visual please")
+        self.assertTrue(s["brief"].get("_render_asked"))
+        self.assertIn(convo.stage(s), ("render_q", "route", "confirm", "render"))   # one question at most, then drawn
+
+    def test_the_words_that_ask_and_the_ones_that_dont(self):
+        for line in ("crack on and generate me a visual please", "make the visual", "show me it", "let's see it",
+                     "draw it up", "can I see a render", "that's enough detail, go ahead and visualise it",
+                     "ok back to the render", "make me the GA"):
+            self.assertTrue(L.asks_for_visual(line), line)
+        for line in ("Sainsburys want an FSDU", "about 1600 high, 600 wide and 400 deep", "yes", "four shelves",
+                     "it's a floor standing unit in the produce aisle", "no, something new", "the render should be red"):
+            self.assertFalse(L.asks_for_visual(line), line)
+
+    def test_a_plain_yes_counts_only_straight_after_the_offer(self):
+        self.assertFalse(L.asks_for_visual("yes please", {}))
+        self.assertTrue(L.asks_for_visual("yes please", {"_offer_asked": 1}))
+        self.assertFalse(L.asks_for_visual("not yet", {"_offer_asked": 1}))
+
+    def test_when_the_questions_run_out_it_offers_once(self):
+        s = {"id": "o", "visuals": [], "brief": {"_flow": 2, "_pack": "client", "client": "Sainsburys",
+                                                  "unit_type": "FSDU", "_render_q_done": 1}}
+        self.assertEqual(convo.stage(s), "offer")
+        s["brief"]["_offer_declined"] = 1
+        self.assertEqual(convo.stage(s), "done")                       # "not yet": never asked again
+        s["brief"]["_render_asked"] = 1
+        self.assertIn(convo.stage(s), ("route", "render"))             # they ask later: it's drawn then
+
+    def test_a_call_cannot_draw_on_its_own(self):
+        _, s = self.matts_opening()[1:]
+        L.log_msg(s["id"], "in", "about 1600 high, 600 wide and 400 deep")
+        out = json.loads(self.client.post("/api/rt/tool", json={"session": s["id"], "name": "make_concepts",
+                         "arguments": {"output": "3D render", "design_route": "new"}}).get_json()["output"])
+        self.assertIn("Not drawn: the AM hasn't asked for a visual", out.get("error", ""))
+
+    def test_on_a_call_the_ask_holds_through_the_past_or_new_question(self):
+        _, s = self.matts_opening()[1:]
+        L.log_msg(s["id"], "in", "that's enough detail, crack on and make me a visual")
+        L.log_msg(s["id"], "out", "A past SDI job to follow, or something new?")
+        L.log_msg(s["id"], "in", "something new")
+        keep = (L._start_turn, L._busy_until_done)
+        L._start_turn = lambda *a, **k: (L.JOBS.__setitem__("fake", {"ch": L.Channel("pending"), "done": True,
+                                          "session": s["id"], "brief": {}, "error": None}), "fake")[1]
+        L._busy_until_done = lambda *a: None
+        try:
+            out = json.loads(self.client.post("/api/rt/tool", json={"session": s["id"], "name": "make_concepts",
+                             "arguments": {"output": "3D render", "design_route": "new"}}).get_json()["output"])
+        finally:
+            L._start_turn, L._busy_until_done = keep
+        self.assertTrue(out.get("started"), out)
+        self.assertTrue(L._session_by_id(s["id"])["brief"].get("_render_asked"))
+
+    def test_an_older_yes_never_counts_as_the_ask(self):
+        _, s = self.matts_opening()[1:]
+        L.log_msg(s["id"], "in", "yes")
+        L.log_msg(s["id"], "in", "four shelves")
+        b = L._session_by_id(s["id"])
+        b["brief"]["_offer_asked"] = 1
+        L.save_session(b)
+        out = json.loads(self.client.post("/api/rt/tool", json={"session": s["id"], "name": "make_concepts",
+                         "arguments": {"output": "3D render", "design_route": "new"}}).get_json()["output"])
+        self.assertIn("Not drawn", out.get("error", ""))
+
+    def test_sid_is_told_to_wait(self):
+        self.assertIn("ONLY when the AM asks", rt.VOICE_RULES)
+        self.assertIn("Never start one", rt.VOICE_RULES)
+        self.assertLess(len(rt.VOICE_RULES), 8500)
