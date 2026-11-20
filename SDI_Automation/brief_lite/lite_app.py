@@ -3512,6 +3512,18 @@ def handle(number, name, text, image_path=None, voice=False, ch=None, new=False,
         return ch, s
 
     if intent == "change_visual" and s["visuals"] and not HD_ASK.search(text or ""):   # "make A HD" is the HD redraw below, not a change
+        # 20 Nov 2026 (Matt: "why have you changed the size on the latest render?"): "500mm x 500mm x 1500mm" with a
+        # change was read as 500 high and 1500 deep for an FSDU, and drawn. A new size that looks wrong for the unit is
+        # said back once first; said again the same way, it's drawn as said.
+        sz_ = str(b.get("size") or "")
+        clash_ = [c for c in convo.brief_conflicts(b) if re.search(r"\b(tall|high|wide|deep|size)\b", c)]
+        if (t.get("updates") or {}).get("size") and clash_ and b.get("_size_said_back") != sz_ \
+                and not re.search(r"\b(high|tall|height)\b", text or "", re.I):
+            b["_size_said_back"] = sz_
+            save_session(s)
+            ch.ask(f"Before I redraw it - I've read the new size as {sz_} (height x width x depth), but {'; and '.join(clash_)}. "
+                   "Which is the height? Say it as, for example, 1500 high x 500 wide x 500 deep.", field="size", options=[])
+            return ch, s
         base = pick_visual(s, (t.get("change_request") or "") + " " + (text or ""))
         chg = (t.get("change_request") or text or "").strip()
         craft.log("showroom", "change_requested", who_of(s), s["id"], craft.context_of(b),
@@ -4595,6 +4607,10 @@ CHANGE_SAID = re.compile(r"\b(\w+er|more|less|add\w*|remove|without|with|no|colo
 
 def half_heard_change(line):
     """Two words or fewer that don't say what to change ('Photos laptop', 'Jump route') - not a change to draw."""
+    # 20 Nov 2026 (Matt and Andy: "Show me." -> "Sorry, I didn't quite catch that"): Sid had told them to say "show
+    # me" to see what they'd added - it is the ask, and what to draw is what they said before it
+    if re.match(r"^\W*(ok(ay)?\W+)?(show me|let'?s see|visuali[sz]e|go on then)\b", line or "", re.I):
+        return False
     return len(re.findall(r"[a-z']+", (line or "").lower())) <= 2 and not CHANGE_SAID.search(line or "")
 
 
@@ -4767,7 +4783,11 @@ PAST_Q = re.compile(r"\b(show|see|list|pull up|bring up|open|display)\b.{0,40}\b
                     # 12 Nov 2026 (Muhammad): "have we made any such thing for Boots?", "tell me other jobs other than..."
                     r"|\b(have|has|did) (we|sdi) (ever |already )?(made|done|built|make|do|build)\b"
                     r"|\b(tell|give|show|any|what|list|find)\b.{0,20}\b(other|more|different|similar) (past |previous )?"
-                    r"(jobs?|work|projects?|references?|options?|ones)\b", re.I)
+                    r"(jobs?|work|projects?|references?|options?|ones)\b"
+                    # 18 Nov 2026 (Matt): "Can I see those?" / "have a look at what SDI files we have" - Sid said he
+                    # couldn't put them on screen
+                    r"|\b(can|could) (i|we) see (those|them|these)\b|\b(pull|bring) (those|them|these) up\b"
+                    r"|\blook at what\b.{0,30}\b(files?|jobs?|work|drawings?)\b", re.I)
 
 
 def _busy_until_done(sid, kind, jid):

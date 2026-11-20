@@ -626,7 +626,7 @@ class TheTightenedInstructionsTests(unittest.TestCase):
         "only the jobs offered by the app": "Offer only the jobs in which_past_job",
         "latest by date": "go by their dates",
         "past work answered in words": "answered in words from sdi_made_before",
-        "show_past_work only when asked": "Call show_past_work only when they ask to see it",
+        "show_past_work only when asked": "Asked to see them (\"can I see those?\"): show_past_work",
         "never claim a render": "Never say a render is coming, being made or ready",
         "quiet while drawing": "then say nothing and ask nothing until it's on screen",
         "pack asked once": "ask once: the client pack",
@@ -2750,3 +2750,44 @@ class NothingIsDrawnUntilTheAMAsksTests(unittest.TestCase):
         self.assertIn("ONLY when the AM asks", rt.VOICE_RULES)
         self.assertIn("Never start one", rt.VOICE_RULES)
         self.assertLess(len(rt.VOICE_RULES), 8500)
+
+
+class MattsAndAndysCallsTests(unittest.TestCase):
+    """18-20 Nov 2026 chats (Matt Evans, Andy Baxter): what else went wrong, line by line."""
+
+    def test_show_me_is_the_ask_not_a_half_heard_line(self):
+        # Sid: "say 'show me' and I'll update the latest option" -> AM: "Show me." -> "Sorry, I didn't quite catch that"
+        for line in ("Show me.", "Show me", "ok show me", "Let's see"):
+            self.assertFalse(L.half_heard_change(line), line)
+        for line in ("Photos laptop", "Jump route", "Erm"):
+            self.assertTrue(L.half_heard_change(line), line)
+
+    def test_can_i_see_those_shows_the_past_jobs(self):
+        for line in ("Can I see those?", "Can you have a look at what SDI files we have for gondola end?",
+                     "could we see them", "pull those up please"):
+            self.assertTrue(L.PAST_Q.search(line), line)
+        self.assertIn("never say you can't", rt.VOICE_RULES)
+
+    def test_after_goodbye_sid_says_nothing_more(self):
+        self.assertIn("then say nothing more", rt.NOW_DO["done"])
+
+    def test_a_new_size_that_reads_wrong_is_said_back_before_it_is_redrawn(self):
+        # Matt, 20 Nov: "I would like the FSDU to now be 500mm x 500mm x 1500mm" -> read 500 high, 1500 deep, and drawn
+        who = new_chat()
+        say(who, "Sainsburys want an FSDU", {"client": "Sainsburys", "unit_type": "FSDU"})
+        s = L._session_by_id(L.get_session(who)["id"])
+        s["brief"].update(size="1500 x 1000 x 500 mm", _render_asked=1)
+        s["visuals"].append({"kind": "render", "label": "A", "path": "a.png"})
+        L.save_session(s)
+        drawn = []
+        keep = L.make_visual
+        L.make_visual = lambda s_, kind, *a, **k: (drawn.append(kind), (None, "stopped (test)"))[1]
+        try:
+            line = "I would like the FSDU to now be 500mm x 500mm x 1500mm with acrylic risers"
+            out, s = say(who, line, {"size": "500 x 500 x 1500 mm"}, "change_visual")
+            self.assertEqual(drawn, [])
+            self.assertIn("Which is the height?", asked(out))
+            out, s = say(who, "1500 high x 500 wide x 500 deep", {"size": "1500 x 500 x 500 mm"}, "change_visual")
+            self.assertNotIn("Which is the height?", asked(out))
+        finally:
+            L.make_visual = keep

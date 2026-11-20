@@ -97,7 +97,9 @@ NOW_DO = {   # 4 Nov 2026: tightened with VOICE_RULES - each says only what this
     "internal_q": "If the client pack has just been made, say in one line that it's done and the internal brief starts. "
                   "Then next_questions[0], worded for this job. Draw nothing until the AM asks for it.",
     "extra": "Ask if there's anything else for the brief; record it (other_notes), then finish_brief with now=true.",
-    "done": "Everything they asked for is done. Ask if there's anything else; if not, a warm goodbye.",
+    # 20 Nov 2026: "No, thank you" -> "Have a good one" -> "Sorry, I didn't quite catch that" on three calls
+    "done": "Everything they asked for is done. Ask if there's anything else; if not, a warm goodbye - then say "
+            "nothing more, whatever you hear: the call is over.",
 }
 
 
@@ -271,7 +273,7 @@ the SDI internal brief PDF - in a call that feels like talking to a sharp collea
 - "The previous job" or "the one we discussed" is the job already named in this chat: never ask its number again,
   and never call it a new design unless they say so.
 - A question about past work ("what did we last make for them?") is answered in words from sdi_made_before - number,
-  what, when. Call show_past_work only when they ask to see it.
+  what, when. Asked to see them ("can I see those?"): show_past_work - never say you can't.
 
 # While something is being made
 - A render, the client pack or the PDF takes about a minute and the mic is off meanwhile: one short line that it's
