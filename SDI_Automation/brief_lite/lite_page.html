@@ -540,6 +540,7 @@ body.branded .side{border-left:3px solid var(--b1)}.ring{display:flex;gap:14px;a
 .vo-orb{--lvl:0;width:min(52vw,230px);aspect-ratio:1;border-radius:50%;position:relative;transform:scale(calc(.92 + var(--lvl)*.32));
  transition:transform .1s linear;box-shadow:0 30px 80px rgba(47,107,255,.25)}
 .vo-orb i{position:absolute;inset:0;border-radius:50%}
+.vo-face{position:absolute;inset:9%;width:82%;height:82%;border-radius:50%;object-fit:cover;z-index:2;box-shadow:0 0 0 4px rgba(255,255,255,.75),0 12px 40px rgba(0,0,0,.18)}
 .vo-orb i:nth-child(1){background:radial-gradient(circle at 34% 28%,#fff 0%,#d9e8ff 22%,#7fb0ff 58%,#2f6bff 100%)}
 .vo[data-s="paused"] .vo-orb{filter:grayscale(.85) brightness(1.05);opacity:.6;transform:scale(.9)}
 .vo[data-s="paused"] .vo-orb::before,.vo[data-s="paused"] .vo-orb::after,.vo[data-s="paused"] .vo-orb i{animation-play-state:paused}
@@ -1125,7 +1126,7 @@ body:not(.branded) .vs-you.live p::after{background:var(--ink)}
   <div class="vo" id="vo" data-s="connecting" aria-live="polite">
    <div class="vo-glow"></div>
    <div class="vo-dock">
-    <div class="vo-orb" id="vo-orb"><i></i><i></i><i></i><i></i></div>
+    <div class="vo-orb" id="vo-orb"><i></i><i></i><i></i><i></i><img class="vo-face" id="vo-face" alt="" hidden></div>
     <div class="vo-txt"><div class="vo-row1"><span class="vo-state" id="vo-state">Connecting…</span><span class="vo-mode" id="vo-mode">Live</span></div>
      <div class="vo-cap" id="vo-cap"></div><div class="vo-sc"><button class="vo-link" data-act="soundcheck" type="button">Can't hear it? Sound check</button></div></div>
     <div class="vo-ctrl">
@@ -1242,13 +1243,16 @@ const CHARS={sid:{name:"Sid",he:"he",tagline:"Sharp, quick, London designer",col
 let CH=(()=>{let k="sid";try{k=localStorage.getItem("sdi_char")||"sid"}catch(e){}return Object.assign({key:CHARS[k]?k:"sid"},CHARS[CHARS[k]?k:"sid"])})();
 function avHtml(k){const c=k?Object.assign({key:k},CHARS[k]):CH;const dark=c.key==="ray"||c.key==="isla";
  return `<div class="av av-${c.key}" style="background:${c.colour};color:${dark?"#fff":"#000"}"><img src="/api/avatar/${c.key}" alt="" onerror="this.remove()"><span>${c.name.slice(0,1)}</span></div>`}
-function pickChar(k){if(!CHARS[k])return;CH=Object.assign({key:k},CHARS[k]);try{localStorage.setItem("sdi_char",k)}catch(e){}drawChars();
+// the picked character's portrait in the middle of the call screen, the orb's glow round it; none yet = the orb alone
+function voFace(){const f=document.getElementById("vo-face");if(!f)return;f.hidden=true;f.onload=()=>{f.hidden=false};f.onerror=()=>{f.hidden=true};
+ f.alt=CH.name;f.src="/api/avatar/"+CH.key+"?v=1"}
+function pickChar(k){if(!CHARS[k])return;CH=Object.assign({key:k},CHARS[k]);try{localStorage.setItem("sdi_char",k)}catch(e){}drawChars();if(!(typeof rt!=="undefined"&&rt))voFace();
  if(typeof rt!=="undefined"&&rt)toast(CH.name+" takes over from your next call");else toast("You're talking to "+CH.name)}
 function drawChars(){const box=document.getElementById("chars");if(!box)return;
  // 21 Nov 2026: one row of four faces and one line for the one picked - the list of four pushed Spaces and Projects off
  box.innerHTML=`<div class="chrow">${Object.keys(CHARS).map(k=>`<button class="chr${k===CH.key?" on":""}" role="radio" aria-checked="${k===CH.key}" aria-label="${CHARS[k].name} - ${CHARS[k].tagline}" title="${CHARS[k].name} - ${CHARS[k].tagline}" data-char="${k}" type="button">${avHtml(k)}<span>${CHARS[k].name}</span></button>`).join("")}</div><div class="chsel">${CH.tagline}</div>`}
 document.addEventListener("click",e=>{const b=e.target.closest&&e.target.closest("[data-char]");if(b){e.preventDefault();pickChar(b.dataset.char)}});
-drawChars();document.addEventListener("DOMContentLoaded",drawChars);
+drawChars();voFace();document.addEventListener("DOMContentLoaded",()=>{drawChars();voFace()});
 // 21 Nov 2026 (James: "3 d visuals that can rotate"): the unit as boxes at the brief's exact sizes (model3d.py), drawn
 // here on a canvas - no library to download - turning slowly until touched; drag to turn it, double-tap to reset.
 // 21 Nov 2026 (Matt: "Can you bring some budget pricing into this?"): the internal guide price with its workings -
