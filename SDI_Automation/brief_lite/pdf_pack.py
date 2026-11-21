@@ -26,7 +26,13 @@ from reportlab.pdfgen import canvas
 from reportlab.platypus import KeepInFrame, Paragraph, Spacer, Table, TableStyle
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-LOGO = os.path.join(os.path.dirname(HERE), "logo.png")
+LOGO = os.path.join(os.path.dirname(HERE), "logo.png")       # the app's own icon (SDI Scout) - never on a document
+# 21 Nov 2026 (James: "branding wasn't always spot on"): the client sheet carried the SDI Scout app icon as SDI's logo,
+# under a red rule. Documents now carry SDI's own brand as wearesdi.com shows it: the black we.are.sdi wordmark, SDI
+# yellow, black and stone, and the contact line from the website.
+BRAND_LOGO = os.path.join(HERE, "brand", "wearesdi_wordmark_black.png")     # 1400 x 249, from logo_full_black.svg
+SDI_YELLOW, SDI_BLACK, SDI_STONE = (colors.HexColor(x) for x in ("#F6D946", "#000000", "#E1E1D5"))
+SDI_FOOTER = "we.are.sdi  |  Experiences. Designed & Made.  |  wearesdi.com  |  hello@wearesdi.com  |  +44 (0) 116 274 7040"
 RED, INK, MUTE, LINE, SOFT = (colors.HexColor(x) for x in
                             ("#c8102e", "#202733", "#626b78", "#dce0e5", "#f4f5f7"))
 RATE_GBP = 75
@@ -62,7 +68,7 @@ STAGES = {"creative": 2, "client sign-off": 1, "technical GA": 1,
           "manufacture UK": 5, "manufacture Europe": 7,
           "manufacture China": 6, "sea freight (China)": 6, "installation": 1}
 st = getSampleStyleSheet()
-H1 = ParagraphStyle("sdi_h1", parent=st["Heading1"], fontSize=19, leading=23, textColor=RED, spaceAfter=12)
+H1 = ParagraphStyle("sdi_h1", parent=st["Heading1"], fontSize=19, leading=23, textColor=SDI_BLACK, spaceAfter=12)
 H2 = ParagraphStyle("sdi_h2", parent=st["Heading2"], fontSize=11, leading=14, textColor=INK, spaceBefore=10, spaceAfter=5)
 P = ParagraphStyle("sdi_p", parent=st["BodyText"], fontSize=9, leading=12, textColor=INK, spaceAfter=4)
 SMALL = ParagraphStyle("sdi_small", parent=P, fontSize=7.5, leading=10, textColor=MUTE)
@@ -389,17 +395,19 @@ def _slug(value):
 
 def header_footer(c, doc, title):
     c.saveState()
-    if os.path.isfile(LOGO):
+    if os.path.isfile(BRAND_LOGO):
         try:
-            c.drawImage(LOGO, 18*mm, A4[1]-15*mm, width=26*mm, height=9*mm, preserveAspectRatio=True, mask="auto")
+            c.drawImage(BRAND_LOGO, 18*mm, A4[1]-14*mm, width=34*mm, height=6*mm, preserveAspectRatio=True, mask="auto",
+                        anchor="w")
         except (OSError, ValueError):
             pass
     c.setFillColor(MUTE)
     c.setFont("Helvetica", 7)
     c.drawRightString(A4[0]-18*mm, A4[1]-11*mm, str(title)[:88])
-    c.setStrokeColor(RED)
+    c.setStrokeColor(SDI_YELLOW)
+    c.setLineWidth(2)
     c.line(18*mm, A4[1]-19*mm, A4[0]-18*mm, A4[1]-19*mm)
-    c.drawString(18*mm, 10*mm, "SDI Displays | INTERNAL | Concept and planning information - not a quotation")
+    c.drawString(18*mm, 10*mm, "we.are.sdi | INTERNAL | Concept and planning information - not a quotation")
     c.drawRightString(A4[0]-18*mm, 10*mm, f"{doc.page} / 8")
     c.restoreState()
 
@@ -503,11 +511,12 @@ def client_sheet(session, visuals, out_dir):
     c = canvas.Canvas(path, pagesize=(width,height))
     c.setTitle(title)
     c.setAuthor("SDI Displays")
-    c.setStrokeColor(RED)
-    c.setLineWidth(2)
+    c.setStrokeColor(SDI_YELLOW)
+    c.setLineWidth(3)
     c.line(14*mm, height-18*mm, width-14*mm, height-18*mm)
-    if os.path.isfile(LOGO):
-        c.drawImage(LOGO, width-42*mm, height-15*mm, width=28*mm, height=10*mm, preserveAspectRatio=True, mask="auto")
+    if os.path.isfile(BRAND_LOGO):
+        c.drawImage(BRAND_LOGO, width-58*mm, height-14.5*mm, width=44*mm, height=7.8*mm, preserveAspectRatio=True,
+                    mask="auto", anchor="e")
     clogo = _client_logo(session)
     tx = 14*mm
     if clogo:      # the client's own logo, top left - it's their pack
@@ -532,7 +541,7 @@ def client_sheet(session, visuals, out_dir):
           14*mm, 25*mm, width-28*mm, 10*mm)
     c.setFont("Helvetica", 7.5)
     c.setFillColor(MUTE)
-    c.drawString(14*mm, 9*mm, f"SDI Displays | wearesdi.com | {today():%d %B %Y}")
+    c.drawString(14*mm, 9*mm, f"{SDI_FOOTER}  |  {today():%d %B %Y}")
     c.showPage()
     c.save()
     return path

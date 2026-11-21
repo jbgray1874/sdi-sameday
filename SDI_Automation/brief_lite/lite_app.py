@@ -1159,12 +1159,38 @@ LOGO_DIR = os.path.join(os.path.dirname(HERE), "studio_data", "brand_logos")
 BRAND_OF = {"tti": ["milwaukee"], "m&s": ["m-s"], "marks": ["m-s"], "mns": ["m-s"], "m and s": ["m-s"]}     # a client whose units carry its brands' logos
 
 
+def _poss(name):
+    name = str(name or "").strip()
+    return name + ("'" if name.lower().endswith("s") else "'s")
+
+
+def _named_brand(b):
+    """The brand whose colours the AM asked for, when it isn't the client: "No7 brand colours" on a Boots unit."""
+    said = " ".join(str(b.get(k) or "") for k in ("colours_graphics", "brand_assets"))
+    m = re.search(r"\b([A-Z0-9][\w&'.-]*(?:\s+[A-Z0-9][\w&'.-]*){0,2})(?:'s)?\s+(?:brand(?:ing)?\s+)?(?:colou?rs?|graphics|branding|look)\b",
+                  said)
+    if not m:
+        return ""
+    name = m.group(1).strip()
+    if _brand_slug(name) in ("", _brand_slug(b.get("client"))) or name.lower() in ("brand", "the", "their", "our", "client"):
+        return ""
+    return name
+
+
 def _brand_colour_note(b):
     """29 Oct 2026: the brand's real colours by hex, so the first render already looks like theirs."""
+    # 21 Nov 2026 (Matt's No7 gondola end for Boots): "No7 brand colours" got Boots' navy and blue - the client's colours
+    # always won. A brand the AM names is the one to follow; its own colours, by hex where SDI has them on file.
+    named = _named_brand(b)
+    if named:
+        look_ = BRAND_LOOK.get(_brand_slug(named))
+        return (f"Use {_poss(named)} own brand colours and look" + (f" ({look_[0]} main, {look_[1]} second)" if look_ else
+                " exactly as on its real packaging and in-store signage") + f" - not {_poss(b.get('client'))} - on the header, the "
+                "shelf edges and the graphics, as the account manager asked. ")
     look = BRAND_LOOK.get(_brand_slug(b.get("client")))
     if not look:
         return ""
-    return (f"{b.get('client')}'s brand colours are {look[0]} (main) and {look[1]} (second) - use them on the header, "
+    return (f"{_poss(b.get('client'))} brand colours are {look[0]} (main) and {look[1]} (second) - use them on the header, "
             "the shelf edges and the graphics so it reads as their unit at a glance. ")
 
 

@@ -2850,3 +2850,26 @@ class AVoiceCallDoesNotRebillItselfEveryLineTests(unittest.TestCase):
         self.assertIn("if(since<CTX_EVERY){rtContext(CTX_EVERY-since);return}", body)
         self.assertLess(body.index("since<CTX_EVERY"), body.index("session.update"))
         self.assertIn("r0.ctxSentAt=Date.now();rtSay({type:\"session.update\"", body)
+
+
+class SdiAndClientBrandingTests(unittest.TestCase):
+    """21 Nov 2026 (James: "branding wasn't always spot on", against wearesdi.com)."""
+
+    def test_documents_carry_we_are_sdi_not_the_app_icon(self):
+        import pdf_pack
+        self.assertTrue(pdf_pack.BRAND_LOGO.endswith("wearesdi_wordmark_black.png"))
+        self.assertTrue(os.path.isfile(pdf_pack.BRAND_LOGO))
+        src = (WORK / "brief_lite" / "pdf_pack.py").read_text(encoding="utf-8")
+        self.assertNotIn("drawImage(LOGO", src)                        # the SDI Scout icon is never on a document
+        self.assertIn("#F6D946", src)                                  # SDI yellow, as on the website
+        self.assertIn("hello@wearesdi.com", pdf_pack.SDI_FOOTER)
+        self.assertIn("+44 (0) 116 274 7040", pdf_pack.SDI_FOOTER)
+
+    def test_a_brand_the_am_names_wins_over_the_retailer(self):
+        note = L._brand_colour_note({"client": "Boots", "colours_graphics": "No7 brand colours"})
+        self.assertIn("No7's own brand colours", note)
+        self.assertIn("not Boots'", note)
+        self.assertNotIn("#05054B", note)
+        self.assertIn("#05054B", L._brand_colour_note({"client": "Boots", "colours_graphics": "Boots graphics all over"}))
+        self.assertIn("#00539F", L._brand_colour_note({"client": "Tesco", "colours_graphics": "Tesco brand colors"}))
+        self.assertIn("Colgate", L._brand_colour_note({"client": "Sainsburys", "colours_graphics": "Colgate branding on the header"}))
