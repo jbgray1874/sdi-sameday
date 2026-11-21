@@ -935,12 +935,14 @@ button,input,textarea,select{font-family:inherit}
 .bpf{font-size:12px;opacity:.65;margin-top:8px}
 .m3d canvas{width:100%;max-width:720px;aspect-ratio:4/3;border-radius:12px;touch-action:none;cursor:grab;display:block;margin-top:8px}
 .m3d canvas:active{cursor:grabbing}.m3dh{font-size:12px;opacity:.65;margin-top:6px}
-.chars{display:flex;flex-direction:column;gap:4px;margin:0 12px 12px}
-.chr{display:flex;gap:10px;align-items:center;padding:7px 9px;border:1px solid transparent;border-radius:12px;background:none;text-align:left;cursor:pointer;color:inherit}
+.chars{margin:0 12px 10px;flex:none}
+.chrow{display:flex;gap:4px;justify-content:space-between}
+.chr{display:flex;flex-direction:column;gap:3px;align-items:center;padding:5px 4px;border:1px solid transparent;border-radius:12px;background:none;cursor:pointer;color:inherit;flex:1;min-width:0;font-size:11.5px}
 .chr:hover{background:rgba(0,0,0,.04)}
-.chr.on{border-color:var(--ink);background:rgba(246,217,70,.18)}
+.chr.on{border-color:var(--ink);background:rgba(246,217,70,.18);font-weight:700}
 .chr .av{width:34px;height:34px;margin:0;font-size:13px}
-.chn{display:flex;flex-direction:column;line-height:1.2}.chn b{font-size:13.5px}.chn small{font-size:11.5px;opacity:.7}
+.chsel{font-size:11.5px;opacity:.7;text-align:center;margin-top:4px}
+.rail{overflow-y:auto}.rail>*{flex-shrink:0}.rail .hist{flex:1 0 auto;min-height:180px}
 .bub{border-radius:4px 20px 20px 20px;border-color:var(--line);box-shadow:none;padding:11px 16px;line-height:1.55}
 .me .bub{background:var(--ink);color:#fff;border-color:var(--ink);border-radius:20px 4px 20px 20px}
 .card{border-color:var(--line);border-radius:20px;box-shadow:var(--shadow)}
@@ -1243,7 +1245,8 @@ function avHtml(k){const c=k?Object.assign({key:k},CHARS[k]):CH;const dark=c.key
 function pickChar(k){if(!CHARS[k])return;CH=Object.assign({key:k},CHARS[k]);try{localStorage.setItem("sdi_char",k)}catch(e){}drawChars();
  if(typeof rt!=="undefined"&&rt)toast(CH.name+" takes over from your next call");else toast("You're talking to "+CH.name)}
 function drawChars(){const box=document.getElementById("chars");if(!box)return;
- box.innerHTML=Object.keys(CHARS).map(k=>`<button class="chr${k===CH.key?" on":""}" role="radio" aria-checked="${k===CH.key}" data-char="${k}" type="button">${avHtml(k)}<span class="chn"><b>${CHARS[k].name}</b><small>${CHARS[k].tagline}</small></span></button>`).join("")}
+ // 21 Nov 2026: one row of four faces and one line for the one picked - the list of four pushed Spaces and Projects off
+ box.innerHTML=`<div class="chrow">${Object.keys(CHARS).map(k=>`<button class="chr${k===CH.key?" on":""}" role="radio" aria-checked="${k===CH.key}" aria-label="${CHARS[k].name} - ${CHARS[k].tagline}" title="${CHARS[k].name} - ${CHARS[k].tagline}" data-char="${k}" type="button">${avHtml(k)}<span>${CHARS[k].name}</span></button>`).join("")}</div><div class="chsel">${CH.tagline}</div>`}
 document.addEventListener("click",e=>{const b=e.target.closest&&e.target.closest("[data-char]");if(b){e.preventDefault();pickChar(b.dataset.char)}});
 drawChars();document.addEventListener("DOMContentLoaded",drawChars);
 // 21 Nov 2026 (James: "3 d visuals that can rotate"): the unit as boxes at the brief's exact sizes (model3d.py), drawn
