@@ -2012,7 +2012,7 @@ class TheVoiceHasTheSavedChatTests(unittest.TestCase):
 
     @unittest.skipUnless(NODE, "node is not installed")
     def test_the_page_sends_it_on_time_however_often_lines_come(self):
-        src = ("let rt={},sid='s1';const sent=[];let calls=0;"
+        src = ("let rt={ctxEvery:0},sid='s1';const sent=[];let calls=0;"        # 21 Nov 2026: no wait between, for this test
                "const fetch=async u=>{calls++;return {json:async()=>(calls===3?{same:true}:{v:'v'+calls,instructions:'I'+calls})}};"
                "function rtSay(m){sent.push(m.session.instructions)}\n" + page_fn("rtContext") + "\n"
                "rtContext(80);rtContext(20);rtContext(150);"            # the soonest goes, then one more after it
@@ -2835,8 +2835,18 @@ class AVoiceCallDoesNotRebillItselfEveryLineTests(unittest.TestCase):
 
     def test_the_instructions_are_refreshed_at_most_every_four_minutes(self):
         page = (WORK / "brief_lite" / "lite_page.html").read_text(encoding="utf-8")
-        self.assertIn("const CTX_EVERY=240000;", page)
         body = page[page.index("function rtContext("):page.index("function rtLog(")]
+        self.assertIn("240000", body)
+        src = ("let rt={ctxEvery:300},sid='s1';const sent=[];let calls=0;"
+               "const fetch=async u=>{calls++;return {json:async()=>({v:'v'+calls,instructions:'I'+calls})}};"
+               "function rtSay(m){sent.push([Date.now(),m.session.instructions])}\n" + page_fn("rtContext") + "\n"
+               "const t0=Date.now();rtContext(0);setTimeout(()=>rtContext(0),50);setTimeout(()=>rtContext(0),100);"
+               "setTimeout(()=>console.log(JSON.stringify(sent.map(x=>[x[0]-t0,x[1]]))),700)")
+        r = subprocess.run([NODE, "-e", src], capture_output=True, text=True, timeout=30)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        got = json.loads(r.stdout)
+        self.assertEqual(len(got), 1, got)                                  # three lines in 100 ms: one update
+        self.assertGreaterEqual(got[0][0], 290, got)                        # and not before the interval
         self.assertIn("if(since<CTX_EVERY){rtContext(CTX_EVERY-since);return}", body)
         self.assertLess(body.index("since<CTX_EVERY"), body.index("session.update"))
         self.assertIn("r0.ctxSentAt=Date.now();rtSay({type:\"session.update\"", body)

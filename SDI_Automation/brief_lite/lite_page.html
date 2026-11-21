@@ -1623,8 +1623,8 @@ async function rtHeard(tx,itemId){
 // 5 Nov 2026 (James: "it needs to be saved as we go and the chat needs to have it readily available"): each line is
 // saved on the server as it is said; after every line and answer the voice is handed that saved record - the brief so
 // far and the chat so far - so nothing said drops out of what it knows in a long call. One update for a burst of lines.
-const CTX_EVERY=240000;   // the voice's instructions refreshed at most every 4 minutes (cost: see below)
-function rtContext(wait){if(!rt||!sid)return;const at=Date.now()+(wait||0);
+function rtContext(wait){const CTX_EVERY=rt&&rt.ctxEvery!=null?rt.ctxEvery:240000;   // instructions refreshed at most every 4 minutes (cost: see below)
+if(!rt||!sid)return;const at=Date.now()+(wait||0);
  if(rt.ctxT){if(rt.ctxAt<=at){rt.ctxMore=Math.max(rt.ctxMore||0,at);return}clearTimeout(rt.ctxT)}   // the soonest one goes; a later one after it
  rt.ctxAt=at;rt.ctxT=setTimeout(async()=>{const r0=rt;if(!r0||!sid)return;r0.ctxT=null;
   // 21 Nov 2026: new instructions at the head of the call make OpenAI bill the WHOLE call so far again at the full audio
