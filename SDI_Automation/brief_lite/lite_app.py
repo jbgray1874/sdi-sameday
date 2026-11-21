@@ -1432,6 +1432,93 @@ HD_PROMPT = ("Re-render THIS exact retail display concept at final client-presen
              "No added text, prices or people changes.")
 
 
+# 21 Nov 2026 (James: "Can we provide a number of renders and views"): the chosen option from other angles, each drawn
+# from that option's own render so it stays the same unit, design, materials and graphics. Only when the AM asks.
+VIEWS = {
+    "front": ("Front view", "a straight-on front elevation at the shopper's eye level, the whole unit square to the camera"),
+    "side": ("Side view", "a side view from the left, square on, showing the unit's full depth and its profile"),
+    "three-quarter": ("Three-quarter view", "a three-quarter view from the front right, slightly above eye level"),
+    "detail": ("Header close-up", "a close-up of the header and the top shelf, showing the materials, edges and finish"),
+    "back": ("Back view", "a view of the back of the unit, square on"),
+    "top": ("Top-down view", "a plan view looking straight down from above"),
+}
+VIEWS_ASK = re.compile(r"\b(more|other|different|extra|all( the)?|several|multiple|few)\s+(views?|angles?)\b|"
+                       r"\b(from|at) (the|a|another|different|other) (side|back|front|top|angle)\b|"
+                       r"\b(side|back|rear|top|front|plan|three[- ]quarter) (view|angle|on)\b|\bturn it (round|around)\b|"
+                       r"\bclose[- ]?up\b", re.I)
+
+
+def views_wanted(text):
+    """Which views the AM asked for ('the side and the back') - the usual four when they just say 'more views'."""
+    t = (text or "").lower()
+    picked = [k for k, w in (("front", r"\bfront\b"), ("side", r"\bside\b"), ("three-quarter", r"three[- ]quarter|angled"),
+                             ("detail", r"close[- ]?up|detail|header"), ("back", r"\bback\b|\brear\b"),
+                             ("top", r"\btop\b|\bplan\b|above")) if re.search(w, t)]
+    return picked or ["front", "side", "three-quarter", "detail"]
+
+
+def make_views(s, base, which):
+    """[(view key, path or None, why)] - each drawn from the option's own picture, several at once."""
+    from concurrent.futures import ThreadPoolExecutor
+    b = s["brief"]
+    src = base.get("hd_path") if base.get("hd_path") and os.path.exists(base.get("hd_path")) else base.get("path")
+
+    def one(k):
+        if stopped(s["id"]):
+            return k, None, "stopped"
+        cost = IMAGE_COST.get(CHANGE_QUALITY, 0.35)
+        if spent_today() + cost > daily_cap():
+            return k, None, "today's SDI Live AI budget is used up"
+        prompt = (f"This is a retail display unit SDI Displays has designed for {b.get('client') or 'the client'}. Show THIS "
+                  f"EXACT unit again - identical design, proportions ({b.get('size') or 'as shown'}), materials, colours, "
+                  f"graphics, logos and products - from a new camera position: {VIEWS[k][1]}. Change nothing about the unit "
+                  "itself; only the camera moves. Same lighting and the same quality as the picture given, photo-real.")
+        try:
+            with open(src, "rb") as fh:
+                r = draw_image(True, model=IMAGE_MODEL, image=[fh], prompt=prompt, size="1536x1024", quality=CHANGE_QUALITY)
+            data = base64.b64decode(r.data[0].b64_json)
+        except Exception as e:
+            return k, None, str(e)[:160]
+        log_cost(s["id"], "image-view", cost)
+        path = os.path.join(OUT, f"{s['id']}_{base.get('label') or 'A'}_view_{k}_{int(time.time())}.png")
+        open(path, "wb").write(data)
+        return k, path, ""
+    with ThreadPoolExecutor(max_workers=min(4, len(which))) as ex:
+        return list(ex.map(one, which))
+
+
+def views_turn(s, ch, text):
+    """The AM asked to see the design from other angles: the latest (or named) option, drawn from each view."""
+    renders = [v for v in s["visuals"] if v.get("kind") == "render"]
+    if not renders:
+        ch.text("There's nothing drawn yet to show from other angles - say \"make the visual\" when you're ready.")
+        return ch, s
+    base = pick_visual(s, text)
+    if base.get("kind") != "render":
+        base = renders[-1]
+    which = views_wanted(text)
+    lab = base.get("label") or "A"
+    ch.text(f"Drawing Option {lab} from {len(which)} more angle{'s' if len(which) != 1 else ''} - "
+            + ", ".join(VIEWS[k][0].lower() for k in which) + ". About a minute.")
+    got = make_views(s, base, which)
+    made = 0
+    for k, path, why in got:
+        if path:
+            made += 1
+            s["visuals"].append({"path": path, "kind": "view", "view": k, "label": f"{lab} {VIEWS[k][0]}",
+                                 "from_option": lab})
+            ch.image(path, f"Option {lab} - {VIEWS[k][0].lower()}.", role="view", label=lab, kind="view", from_option=lab)
+    save_session(s)
+    if not made:
+        why = next((w for _k, p, w in got if not p), "")
+        ch.text(render_failed(why, "the extra views"))
+    elif made < len(which):
+        ch.text(f"{made} of {len(which)} views made - say \"more views\" to try the rest again.")
+    else:
+        ch.text(f"Those views go on the client sheet with Option {lab}. Any changes, or shall I finalise it?")
+    return ch, s
+
+
 def make_hd(s, v):
     if stopped(s["id"]):
         return None, "stopped - as you asked, nothing more will be made"
@@ -3227,7 +3314,8 @@ def handle(number, name, text, image_path=None, voice=False, ch=None, new=False,
     if b.get("_offer_asked") and not b.get("_render_asked") and NOT_YET.search(text or "") \
             and not asks_for_visual(text, b):
         b["_offer_declined"] = 1                              # "not yet": the brief carries on, the offer isn't repeated
-    render_now = intent not in ("change_visual", "approve_visual") and t_override is None and (
+    asked_views = VIEWS_ASK.search(text or "") and any(v.get("kind") == "render" for v in s["visuals"])
+    render_now = intent not in ("change_visual", "approve_visual") and t_override is None and not asked_views and (
         asks_for_visual(text, b) or re.search(r"\b(render|visual|concept)s?\b.{0,20}\b(first|now|please|asap)\b|"
                                                   r"\b(first|now)\b.{0,15}\b(render|visual|concept)", text or "", re.I))
     if render_now:
@@ -3555,6 +3643,9 @@ def handle(number, name, text, image_path=None, voice=False, ch=None, new=False,
         save_session(s)
         return ch, s
 
+    if (t.get("intent") == "views" or (t_override is None and VIEWS_ASK.search(text or ""))) \
+            and any(v.get("kind") == "render" for v in s["visuals"]):
+        return views_turn(s, ch, (t.get("views_text") or "") + " " + (text or ""))
     if intent == "change_visual" and s["visuals"] and not HD_ASK.search(text or ""):   # "make A HD" is the HD redraw below, not a change
         # 20 Nov 2026 (Matt: "why have you changed the size on the latest render?"): "500mm x 500mm x 1500mm" with a
         # change was read as 500 high and 1500 deep for an FSDU, and drawn. A new size that looks wrong for the unit is
@@ -4479,12 +4570,12 @@ def api_rt_tool():
                                                                        "shortly. Just tell the AM it's coming and carry on."})})
     jid = _start_turn(s["number"], s.get("name") or "Web", text, t_override=t, lock=js.get("name") in rt.SLOW, quiet=True,
                       sid=s["id"], project=s.get("project"))
-    if js.get("name") in ("make_concepts", "show_past_work", "more_options", "change_option", "choose_option"):
+    if js.get("name") in ("make_concepts", "show_past_work", "more_options", "change_option", "choose_option", "show_views"):
         _busy_until_done(s["id"], js.get("name"), jid)
     JOBS[jid]["n_renders"] = sum(1 for v in s["visuals"] if v.get("kind") == "render")   # 29 Oct: was a render really made?
     JOBS[jid]["tool"] = js.get("name")
     if js.get("name") in rt.SLOW:
-        drawing = js.get("name") in ("make_concepts", "change_option", "more_options")
+        drawing = js.get("name") in ("make_concepts", "change_option", "more_options", "show_views")
         return jsonify({"turn": jid, "slow": True,
                         "output": json.dumps({"started": True, "note": (
                             gave_up_ref +

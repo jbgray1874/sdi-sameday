@@ -62,7 +62,7 @@ SESSION_MODEL = {}
 def model_for(project_name, demo=False):
     return RT_BIG   # 29 Oct 2026: everyone gets Andy's model (the mini one mishears and talks stiffly)
 
-SLOW = {"make_concepts", "choose_option", "change_option", "more_options", "finish_brief", "show_past_work"}
+SLOW = {"make_concepts", "choose_option", "change_option", "more_options", "finish_brief", "show_past_work", "show_views"}
 
 # 27 Oct 2026: what the voice model must do next, from where the brief is (convo_parts.stage) - sent with every tool result
 NOW_DO = {   # 4 Nov 2026: tightened with VOICE_RULES - each says only what this stage adds
@@ -86,7 +86,8 @@ NOW_DO = {   # 4 Nov 2026: tightened with VOICE_RULES - each says only what this
     "rendering": "It's being drawn. Say nothing more until it's on screen; if they speak, answer in a few words.",
     "finalising": "The GA and client pack are being made. Say once that they're on the way, then nothing until they're "
                   "on screen - never that they're done before then.",
-    "review": "Ask once: any changes, or finalise this one and make its GA and the client pack? A change -> change_option, "
+    "review": "Ask once: any changes, or finalise this one and make its GA and the client pack? Other angles -> show_views. "
+              "A change -> change_option, "
               "exactly what they said. Not happy -> ask 'changes, or a completely new design?'; a new design -> "
               "more_options n=1, never the same one redone. Finalise, 'that's the one', 'make its GA' -> choose_option. "
               "Ask again whenever a new option is on screen.",
@@ -126,6 +127,14 @@ TOOLS = [
                      "size is ALWAYS 'HEIGHT x WIDTH x DEPTH mm', height first: '1800 wide, 1200 high, 700 deep' -> '1200 x 1800 x 700 mm'."},
          "not_known": {"type": "array", "items": {"type": "string"}, "description": "Field ids the AM doesn't know (after you offered options)."}},
          "required": ["updates"]}},
+    {"type": "function", "name": "show_views",
+     "description": "The option on screen drawn from other angles - front, side, three-quarter, a close-up of the header, "
+                    "back or top - when the AM asks ('other angles', 'show me it from the side', 'more views'). The same "
+                    "design; nothing about it changes. Takes about a minute.",
+     "parameters": {"type": "object", "properties": {
+         "label": {"type": "string", "description": "The option letter; the latest if they don't say."},
+         "views": {"type": "array", "items": {"type": "string", "enum": ["front", "side", "three-quarter", "detail", "back", "top"]},
+                   "description": "Only the views they named; leave empty for the usual four."}}}},
     {"type": "function", "name": "set_pack",
      "description": "The pack the AM chose: 'client' (a 3D render, its GA and a one-page client sheet), 'internal' (the full SDI "
                     "brief - Andy's template) or 'both'. Call it as soon as they answer the pack question.",
@@ -481,6 +490,10 @@ def tool_intent(name, a):
         L = str(a.get("label") or "A").strip().upper()[:1]
         return f"Option {L}: {a.get('change', '')}", {"updates": {}, "intent": "change_visual",
                                                       "change_request": f"option {L}: {a.get('change', '')}", "reply": ""}
+    if name == "show_views":
+        return "more views " + " ".join(a.get("views") or []), {"updates": {}, "intent": "views", "reply": "",
+                                                                 "views_text": f"option {a.get('label') or ''} "
+                                                                               + " ".join(a.get("views") or [])}
     if name == "more_options":
         return "more options", {"updates": {}, "intent": "more_options", "n_options": int(a.get("n") or 3), "reply": ""}
     if name == "finish_brief":

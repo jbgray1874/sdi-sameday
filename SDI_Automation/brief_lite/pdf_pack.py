@@ -543,6 +543,31 @@ def client_sheet(session, visuals, out_dir):
     c.setFillColor(MUTE)
     c.drawString(14*mm, 9*mm, f"{SDI_FOOTER}  |  {today():%d %B %Y}")
     c.showPage()
+    # 21 Nov 2026: the views the AM asked for of this option - front, side, three-quarter, close-up - on a second page
+    shown_ = [lab for lab, _v in options if lab != "GA"]
+    views = [v for v in session.get("visuals", []) if v.get("kind") == "view" and shown_
+             and v.get("from_option") == (options[0][1].get("label") or shown_[0]) and os.path.isfile(v.get("path", ""))][-4:]
+    if views:
+        c.setStrokeColor(SDI_YELLOW)
+        c.setLineWidth(3)
+        c.line(14*mm, height-18*mm, width-14*mm, height-18*mm)
+        if os.path.isfile(BRAND_LOGO):
+            c.drawImage(BRAND_LOGO, width-58*mm, height-14.5*mm, width=44*mm, height=7.8*mm, preserveAspectRatio=True,
+                        mask="auto", anchor="e")
+        _flow(c, [_p(f"{title} - more views", H1, 250)], 14*mm, height-24*mm, width-28*mm, 17*mm)
+        cols = 2
+        gap = 6*mm
+        cw = (width-28*mm-gap)/cols
+        ch_ = (height-24*mm-45*mm-gap)/2
+        for i, v in enumerate(views):
+            x = 14*mm + (i % cols)*(cw+gap)
+            y = height-45*mm - (i//cols + 1)*ch_ - (i//cols)*gap
+            _flow(c, [_p(str(v.get("label") or "View").upper(), H2)], x, y+ch_-1*mm, cw, 8*mm)
+            _photo(c, v, x, y, cw, ch_-9*mm, "View unavailable")
+        c.setFont("Helvetica", 7.5)
+        c.setFillColor(MUTE)
+        c.drawString(14*mm, 9*mm, f"{SDI_FOOTER}  |  {today():%d %B %Y}")
+        c.showPage()
     c.save()
     return path
 

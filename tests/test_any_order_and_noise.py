@@ -2923,3 +2923,39 @@ class FourCharactersTests(unittest.TestCase):
         finally:
             L._start_turn = keep
         self.assertEqual(L.PENDING_CHARACTER.get("web:chartest"), "isla")
+
+
+class MoreViewsOfTheChosenDesignTests(unittest.TestCase):
+    """21 Nov 2026 (James): "a number of renders and views" - the option on screen from other angles, on request."""
+
+    def test_which_views_were_asked_for(self):
+        self.assertEqual(L.views_wanted("more views please"), ["front", "side", "three-quarter", "detail"])
+        self.assertEqual(L.views_wanted("can I see the side and the back"), ["side", "back"])
+        for line in ("show me it from the side", "other angles please", "more views", "a close-up of the header",
+                     "what does it look like from the back", "turn it round"):
+            self.assertTrue(L.VIEWS_ASK.search(line), line)
+        for line in ("make the visual", "four shelves", "add a side panel"):
+            self.assertFalse(L.VIEWS_ASK.search(line), line)
+
+    def test_typed_chat_draws_the_views_not_a_new_option(self):
+        who = new_chat()
+        say(who, "Boots want a gondola end", {"client": "Boots", "unit_type": "gondola end"})
+        s = L._session_by_id(L.get_session(who)["id"])
+        s["brief"]["_render_asked"] = 1
+        s["visuals"].append({"kind": "render", "label": "A", "path": "a.png"})
+        L.save_session(s)
+        made, keep_v, keep_m = [], L.make_views, L.make_visual
+        L.make_views = lambda s_, base, which: (made.append((base.get("label"), which)), [(k, None, "test") for k in which])[1]
+        L.make_visual = lambda *a, **k: (_ for _ in ()).throw(AssertionError("a new option was drawn"))
+        try:
+            say(who, "show me it from the side")
+        finally:
+            L.make_views, L.make_visual = keep_v, keep_m
+        self.assertEqual(made, [("A", ["side"])])
+
+    def test_on_a_call_it_is_a_tool_and_the_sheet_has_a_second_page(self):
+        self.assertIn("show_views", {t["name"] for t in rt.TOOLS})
+        self.assertIn("show_views", rt.SLOW)
+        self.assertEqual(rt.tool_intent("show_views", {"label": "B", "views": ["back"]})[1]["intent"], "views")
+        src = (WORK / "brief_lite" / "pdf_pack.py").read_text(encoding="utf-8")
+        self.assertIn('- more views", H1', src)

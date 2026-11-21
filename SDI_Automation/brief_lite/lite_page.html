@@ -1742,7 +1742,7 @@ async function rtEvent(ev){const ty=ev.type||"";
   talkUI(true,"Live - your turn");if(rt&&(rt.closing||(rt.maybeDone&&saidBye(rt.said))))setTimeout(()=>{if(rt){rtStop();toast("Call ended - everything is in the chat")}},1400)}
  else if(ty==="error"){console.warn("realtime",ev.error);if(ev.error&&/expired|session/i.test(ev.error.message||""))toast(ev.error.message)}}
 async function rtTool(call_id,name,args){
- const LBL={make_concepts:"Making the concepts and checking them…",choose_option:"Drawing the GA and the client sheet…",change_option:"Changing that option…",more_options:"Making more options…",finish_brief:"Building the full brief PDF…",show_past_work:"Looking through SDI's history…"};
+ const LBL={make_concepts:"Making the concepts and checking them…",choose_option:"Drawing the GA and the client sheet…",change_option:"Changing that option…",more_options:"Making more options…",finish_brief:"Building the full brief PDF…",show_past_work:"Looking through SDI's history…",show_views:"Drawing it from other angles…"};
  let j;try{j=await fetch("/api/rt/tool",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({session:sid,name,arguments:args})}).then(r=>r.json())}catch(e){j={output:JSON.stringify({error:String(e)})}}
  if(j.transcription&&j.transcription.prompt&&rt){rt.hints=[...(rt.hints||[]),((j.transcription.prompt||"")+" "+(j.transcription.keywords||[]).join(", ")).trim()].slice(-3);rt.tr=j.transcription;   // the brief named more: the transcriber listens for it too
   rtSay({type:"session.update",session:{type:"realtime",audio:{input:{transcription:j.transcription}}}})}
@@ -1752,7 +1752,7 @@ async function rtTool(call_id,name,args){
  if(rt.inResp)rt.pendingCreate=true;else if(!rt.spoke)rtSay({type:"response.create"});
  if(j.turn&&!j.slow){const r=await fetch("/api/turn/"+j.turn).then(r=>r.json()).catch(()=>null);if(r&&r.brief)showBrief(r.brief);return}
  if(j.turn){const w=waiter();w.querySelector(".lbl").textContent=LBL[name]||"Working…";
-  const drawing=["make_concepts","change_option","more_options","choose_option","finish_brief"].includes(name);
+  const drawing=["make_concepts","change_option","more_options","choose_option","finish_brief","show_views"].includes(name);
   const what={choose_option:"Making the client pack",finish_brief:"Building the brief PDF"}[name];
   let fin=false;if(drawing)setTimeout(()=>{if(!fin)rtRendering(true,what)},4000);   // after the voice's "it's on its way" line
   if(name==="choose_option")lsWork(true,"Making your client pack…","your render and its GA on the one-page sheet",40);
