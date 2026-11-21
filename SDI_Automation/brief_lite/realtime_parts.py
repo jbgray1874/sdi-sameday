@@ -127,6 +127,11 @@ TOOLS = [
                      "size is ALWAYS 'HEIGHT x WIDTH x DEPTH mm', height first: '1800 wide, 1200 high, 700 deep' -> '1200 x 1800 x 700 mm'."},
          "not_known": {"type": "array", "items": {"type": "string"}, "description": "Field ids the AM doesn't know (after you offered options)."}},
          "required": ["updates"]}},
+    {"type": "function", "name": "ballpark",
+     "description": "An INTERNAL guide price per unit, worked out from SDI's past quotes for the closest jobs - when the AM "
+                    "asks about budget, pricing, a ballpark or how much it'll cost. Say it's an internal guide only, never "
+                    "for the client, and how sure it is. It is not a quote: for a priced breakdown offer Estimate Lite.",
+     "parameters": {"type": "object", "properties": {}}},
     {"type": "function", "name": "show_3d",
      "description": "Put a 3D model of the unit on screen that the AM can drag to turn round - made from the brief's "
                     "size and make-up, instantly and free - when they ask ('show me it in 3D', 'can I spin it', "
@@ -495,6 +500,8 @@ def tool_intent(name, a):
         L = str(a.get("label") or "A").strip().upper()[:1]
         return f"Option {L}: {a.get('change', '')}", {"updates": {}, "intent": "change_visual",
                                                       "change_request": f"option {L}: {a.get('change', '')}", "reply": ""}
+    if name == "ballpark":
+        return "", {"updates": {}, "intent": "ballpark", "reply": ""}
     if name == "show_views":
         return "more views " + " ".join(a.get("views") or []), {"updates": {}, "intent": "views", "reply": "",
                                                                  "views_text": f"option {a.get('label') or ''} "

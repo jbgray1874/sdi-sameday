@@ -1448,6 +1448,42 @@ VIEWS_ASK = re.compile(r"\b(more|other|different|extra|all( the)?|several|multip
                        r"\bclose[- ]?up\b", re.I)
 
 
+PRICE_ASK = re.compile(r"\b(budget(ary)? (price|pricing|cost|figure|number)s?|ballpark|guide price|rough (price|cost)|"
+                       r"indicative (price|cost)|(any|some) (budget )?pricing|how much (would|will|does|might) (it|this|that|one|"
+                       r"each|they) (cost|be)|what (would|will|does|might) (it|this|that|each) cost|cost per unit|"
+                       r"price per unit|unit (price|cost))\b", re.I)
+
+
+def ballpark_for(s):
+    """An internal guide price from SDI's past quotes for the jobs matched to this brief (ballpark.py), or None."""
+    import ballpark
+    b = s["brief"]
+    quotes, seen = [], set()
+    for r in s.get("refs") or []:
+        e = r.get("estimate") or {}
+        if e.get("unit_cost") and r.get("job_no") not in seen:
+            seen.add(r.get("job_no"))
+            quotes.append({"job": str(r.get("job_no")), "name": (r.get("name") or "")[:60], "unit_cost": e["unit_cost"],
+                           "qty": e.get("qty"), "date": e.get("date") or r.get("last") or r.get("first")})
+    renders = [v for v in s.get("visuals", []) if v.get("kind") == "render"]
+    lab = (renders[-1].get("label") if renders else None) or "A"
+    band = ((b.get("_dirs") or {}).get(lab) or {}).get("cost", "") if isinstance(b.get("_dirs"), dict) else ""
+    return ballpark.work_out(quotes[:5], ballpark._qty(b.get("volume_qty")), band)
+
+
+def ballpark_turn(s, ch):
+    import ballpark
+    bp = ballpark_for(s)
+    if not bp:
+        ch.text("I haven't got a past SDI quote close enough to give a guide price for this one. Estimate Lite can price "
+                "it part by part from the concept - say \"Estimate Lite\" when there's a design on screen.")
+        return ch, s
+    s["brief"]["_ballpark"] = {k: v for k, v in bp.items() if k != "basis"}
+    save_session(s)
+    ch.ballpark(bp, ballpark.say(bp))
+    return ch, s
+
+
 MODEL3D_ASK = re.compile(r"\b(3d|three[- ]d) (model|view|version)\b|\bspin (it|round|around)\b|\brotat(e|able|ing)\b|"
                          r"\bturn(table| it round in 3d)\b|\b360\b", re.I)
 
@@ -2133,6 +2169,14 @@ class Channel:
             self.choices(body, ch)
             return
         wa_post({"type": "text", "text": {"body": t[:4000]}}, self.number)
+
+    def ballpark(self, bp, line):
+        """The internal guide price, with its workings - a card on the page, the line on WhatsApp."""
+        self.flush()
+        self.out.append({"type": "text", "role": "ballpark", "text": line, "ballpark": bp})
+        log_msg(self.sid, "out", line)
+        if self.number:
+            wa_post({"type": "text", "text": {"body": line}}, self.number)
 
     def model3d(self, model, caption=""):
         """A 3D model the page draws and the AM can turn (model3d.py). WhatsApp gets the caption only."""
@@ -3347,6 +3391,8 @@ def handle(number, name, text, image_path=None, voice=False, ch=None, new=False,
         b["_offer_declined"] = 1                              # "not yet": the brief carries on, the offer isn't repeated
     if t_override is None and MODEL3D_ASK.search(text or "") and b.get("size"):
         return model3d_turn(s, ch)
+    if (t_override is None and PRICE_ASK.search(text or "")) or t.get("intent") == "ballpark":
+        return ballpark_turn(s, ch)
     asked_views = VIEWS_ASK.search(text or "") and any(v.get("kind") == "render" for v in s["visuals"])
     render_now = intent not in ("change_visual", "approve_visual") and t_override is None and not asked_views and (
         asks_for_visual(text, b) or re.search(r"\b(render|visual|concept)s?\b.{0,20}\b(first|now|please|asap)\b|"
@@ -4409,6 +4455,19 @@ def api_rt_tool():
                 f"Not drawn: the AM hasn't asked for a visual (their last words: \"{last_[:80]}\"). Never start one "
                 "yourself. Carry on with the brief; draw only when they ask ('make the visual', 'crack on', 'show me "
                 "it'), or say yes when you offer once the questions run out.")}))})
+    if js.get("name") == "ballpark":
+        import ballpark as bp_
+        bp = ballpark_for(s)
+        if not bp:
+            return jsonify({"slow": False, "output": _said(json.dumps({"none": True, "say": (
+                "No past SDI quote is close enough for a guide price. Offer Estimate Lite - priced part by part from the "
+                "concept.")}))})
+        s["brief"]["_ballpark"] = {k: v for k, v in bp.items() if k != "basis"}
+        save_session(s)
+        log_msg(s["id"], "out", bp_.say(bp))
+        return jsonify({"slow": False, "ballpark": bp, "output": _said(json.dumps({"say": bp_.say(bp), "note": (
+            "Say it in your own words: an internal guide, never for the client, how sure it is, and that Estimate Lite "
+            "gives a priced breakdown. The card with the workings is on screen.")}))})
     if js.get("name") == "show_3d":
         m = model3d_for(s)
         if not m:

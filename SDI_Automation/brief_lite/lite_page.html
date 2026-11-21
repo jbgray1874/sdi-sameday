@@ -920,6 +920,10 @@ button,input,textarea,select{font-family:inherit}
 .steps .mbar.mbrief{border-radius:999px;border-color:var(--line);font-weight:600}
 .av{border-radius:50%;background:var(--y);color:var(--ink);font-size:11px;font-weight:700;letter-spacing:.02em;position:relative;overflow:hidden}
 .av img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.bp .bpn{font-size:26px;font-weight:700;margin:8px 0 6px;display:flex;flex-wrap:wrap;gap:10px;align-items:baseline}
+.bp .bpn span{font-size:14px;font-weight:500;opacity:.75}.bpc{font-style:normal;font-size:12px;font-weight:600;padding:3px 9px;border-radius:999px;background:#E1E1D5}
+.bpc-high{background:#C9E7C1}.bpc-low{background:#F6D946}.bpw{font-size:13px;opacity:.85}.bpw ul{margin:4px 0 6px 18px;padding:0}
+.bpf{font-size:12px;opacity:.65;margin-top:8px}
 .m3d canvas{width:100%;max-width:720px;aspect-ratio:4/3;border-radius:12px;touch-action:none;cursor:grab;display:block;margin-top:8px}
 .m3d canvas:active{cursor:grabbing}.m3dh{font-size:12px;opacity:.65;margin-top:6px}
 .chars{display:flex;flex-direction:column;gap:4px;margin:0 12px 12px}
@@ -1235,6 +1239,15 @@ document.addEventListener("click",e=>{const b=e.target.closest&&e.target.closest
 drawChars();document.addEventListener("DOMContentLoaded",drawChars);
 // 21 Nov 2026 (James: "3 d visuals that can rotate"): the unit as boxes at the brief's exact sizes (model3d.py), drawn
 // here on a canvas - no library to download - turning slowly until touched; drag to turn it, double-tap to reset.
+// 21 Nov 2026 (Matt: "Can you bring some budget pricing into this?"): the internal guide price with its workings -
+// which past quotes, what was adjusted, how sure. Never on the client sheet.
+function bpCard(bp){if(!bp)return null;const gbp=v=>"£"+Math.round(+v).toLocaleString("en-GB");
+ const conf=String(bp.confidence||"").split(" - ")[0];
+ const rows=(bp.basis||[]).map(u=>`<li><b>${esc(u.job)}</b> ${esc(u.name||"")} - ${gbp(u.unit_cost)} a unit${u.qty?" for "+esc(u.qty):""}${u.date?" ("+esc(String(u.date).slice(0,4))+")":""} &rarr; ${gbp(u.today)} today${bp.qty?" at "+esc(bp.qty):""}</li>`).join("");
+ return block(`<div class="card bp"><div class="ch"><span class="ico">💷</span><b>Internal guide price - not for the client</b></div>
+  <div class="bpn">${gbp(bp.low)} - ${gbp(bp.high)} <span>a unit${bp.qty?" at "+esc(bp.qty)+" units":""}</span><i class="bpc bpc-${esc(conf)}">${esc(conf)} confidence</i></div>
+  <div class="bpw">Worked out from:<ul>${rows}</ul>${esc(bp.method||"")}${bp.director?`<br>The design director's reading for this design: ${esc(bp.director)}`:""}</div>
+  <div class="bpf">A guide from SDI's past prices, not an estimate. For a priced breakdown of this design, ask for <b>Estimate Lite</b>.</div></div>`)}
 function m3dCard(m,cap){if(!m||!m.parts)return null;const id="m3d"+Math.random().toString(36).slice(2,8);
  const el=block(`<div class="card m3d"><div class="ch"><span class="ico">🧊</span>${md(cap||"3D model")}</div><canvas id="${id}" width="720" height="540" aria-label="3D model of the unit - drag to turn it"></canvas><div class="m3dh">Drag to turn it &middot; double-tap to reset</div></div>`);
  setTimeout(()=>m3dRun(document.getElementById(id),m),0);return el}
@@ -1299,6 +1312,7 @@ function render(x){
  if(x.type==="text"){
   if(x.role==="history")return historyCard(x.text);
   if(x.role==="model3d")return m3dCard(x.model,x.text);
+  if(x.role==="ballpark")return bpCard(x.ballpark);
   if(x.role==="dirs"){const it=x.items||[];return block(`<div class="card dirs"><div class="ch"><span class="ico">💡</span>${md(x.text.split("\n")[0])}</div>
    <div class="dgrid">${it.map(d=>`<div class="dir1"><div class="dl"><span>${esc(d.label)}</span><b>${esc(d.name)}</b></div><p class="di">${esc(d.idea)}</p>
     <dl><dt>Build</dt><dd>${esc(d.build)}</dd><dt>Products</dt><dd>${esc(d.products)}</dd><dt>Header</dt><dd>${esc(d.header)}</dd><dt>Why yes</dt><dd>${esc(d.why)}</dd></dl>
@@ -1782,6 +1796,7 @@ async function rtTool(call_id,name,args){
  // answered. If that reply already said something, the tool's answer is noted silently - no second reply.
  if(rt.inResp)rt.pendingCreate=true;else if(!rt.spoke)rtSay({type:"response.create"});
  if(j.model3d)m3dCard(j.model3d,"3D model - drag it to turn it.");
+ if(j.ballpark)bpCard(j.ballpark);
  if(j.turn&&!j.slow){const r=await fetch("/api/turn/"+j.turn).then(r=>r.json()).catch(()=>null);if(r&&r.brief)showBrief(r.brief);return}
  if(j.turn){const w=waiter();w.querySelector(".lbl").textContent=LBL[name]||"Working…";
   const drawing=["make_concepts","change_option","more_options","choose_option","finish_brief","show_views"].includes(name);

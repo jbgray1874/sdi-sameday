@@ -2994,3 +2994,40 @@ class ARotatable3DModelTests(unittest.TestCase):
         self.assertTrue(j.get("model3d"))
         self.assertIn("function m3dRun(", PAGE)
         self.assertIn('x.role==="model3d"', PAGE)
+
+
+class AnInternalGuidePriceTests(unittest.TestCase):
+    """21 Nov 2026 (Matt, 18 Nov: "Can you bring some budget pricing into this?" - Sid said he couldn't)."""
+
+    def test_worked_out_in_the_open_from_past_quotes(self):
+        import ballpark
+        from datetime import date
+        q = [{"job": "88328", "name": "Gondola End", "unit_cost": 225, "qty": 10, "date": "2024-01-01"},
+             {"job": "10987", "name": "A2 Gondola End", "unit_cost": 260, "qty": 10, "date": "2024-06-01"},
+             {"job": "10961", "name": "Gondola end mirror", "unit_cost": 240, "qty": 20, "date": "2025-01-01"}]
+        bp = ballpark.work_out(q, 100, "", date(2026, 11, 21))
+        self.assertEqual((bp["low"], bp["high"]), (170, 240))
+        self.assertTrue(bp["confidence"].startswith("high"))
+        one = ballpark.work_out(q[:1], None, "", date(2026, 11, 21))
+        self.assertTrue(one["confidence"].startswith("low"))
+        self.assertGreater(one["high"] - one["low"], bp["high"] - bp["low"])     # one quote: a wider band
+        self.assertIn("not for the client", ballpark.say(bp))
+        self.assertIsNone(ballpark.work_out([], 10))
+
+    def test_asked_for_in_typed_chat_and_on_a_call(self):
+        for line in ("can you bring some budget pricing into this", "what would it cost per unit", "give me a ballpark",
+                     "how much would it cost"):
+            self.assertTrue(L.PRICE_ASK.search(line), line)
+        for line in ("the target budget is 95 to 125 pounds", "how much stock on each shelf", "it holds 300 grams"):
+            self.assertFalse(L.PRICE_ASK.search(line), line)
+        self.assertIn("ballpark", {t["name"] for t in rt.TOOLS})
+        who = new_chat()
+        say(who, "Boots want a gondola end", {"client": "Boots", "unit_type": "gondola end"})
+        s = L._session_by_id(L.get_session(who)["id"])
+        s["refs"] = [{"job_no": 88328, "name": "Gondola End", "estimate": {"unit_cost": 225, "qty": 10, "date": "2024-01-01"}}]
+        L.save_session(s)
+        out, s = say(who, "can you give me a ballpark price")
+        card = [r for r in out if r.get("role") == "ballpark"]
+        self.assertTrue(card and card[0]["ballpark"]["basis"][0]["job"] == "88328")
+        self.assertIn("function bpCard(", PAGE)
+        self.assertNotIn("_ballpark", (WORK / "brief_lite" / "pdf_pack.py").read_text(encoding="utf-8"))   # never on the client sheet
