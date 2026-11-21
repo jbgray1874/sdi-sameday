@@ -1496,6 +1496,60 @@ def quick_estimate_for(s):
     return ballpark.quick(b, s.get("_quotes") or [], ask, ballpark._qty(b.get("volume_qty")))
 
 
+AI_ESTIMATE_ASK = re.compile(r"\b(ai|a\.i\.|llm|claude|frontier( model)?|model'?s?) (estimate|costing|price|pricing)\b|"
+                             r"\bcost (it|this) (line by line|part by part)\b", re.I)
+
+
+def ai_estimate_for(s):
+    """The frontier model's line-by-line costing of the design on screen (ai_estimate.py), or (None, why)."""
+    import ai_estimate
+    import ballpark
+    renders = [v for v in s.get("visuals", []) if v.get("kind") == "render"]
+    if not renders:
+        return None, "there's no design on screen yet to cost - make the visual first"
+    base = renders[-1]
+    img = base.get("hd_path") if base.get("hd_path") and os.path.exists(base.get("hd_path")) else base.get("path")
+    bp = ballpark_for(s)
+    quotes = (bp or {}).get("basis") or []
+    b = s["brief"]
+
+    def ask(prompt, img_b64):
+        try:
+            budget_gate("claude")
+        except BudgetStop:
+            return ""
+        content = ([{"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": img_b64}}]
+                   if img_b64 else []) + [{"type": "text", "text": prompt}]
+        r = claude_create(timeout=120, model=DIRECTOR_MODEL, max_tokens=3000, output_config={"effort": "low"},
+                          messages=[{"role": "user", "content": content}])
+        try:
+            log_cost(s["id"], "ai-estimate", usd(DIRECTOR_MODEL, r.usage))
+        except Exception:                                    # noqa: BLE001
+            pass
+        return "".join(getattr(x, "text", "") for x in r.content)
+    try:
+        e = ai_estimate.estimate(b, img if img and os.path.exists(img) else None, quotes, ask,
+                                 ballpark._qty(b.get("volume_qty")))
+    except Exception as ex:                                  # noqa: BLE001
+        return None, f"the model didn't answer ({type(ex).__name__})"
+    return (e, "") if e else (None, "the model gave no costed lines")
+
+
+def ai_estimate_turn(s, ch):
+    import ai_estimate
+    ch.text("Costing it line by line with the AI model - about 30-60 seconds.", role="status")
+    e, why = ai_estimate_for(s)
+    if not e:
+        ch.text(f"I couldn't do the AI estimate: {why}.")
+        return ch, s
+    renders = [v for v in s.get("visuals", []) if v.get("kind") == "render"]
+    e["label"] = (renders[-1].get("label") if renders else None) or "A"
+    s["brief"]["_ai_estimate"] = {k: e[k] for k in ("prices", "unit_variable", "setup_total", "confidence", "label")}
+    save_session(s)
+    ch.ai_estimate(e, ai_estimate.say(e))
+    return ch, s
+
+
 def ballpark_turn(s, ch):
     import ballpark
     q = quick_estimate_for(s)
@@ -2256,6 +2310,13 @@ class Channel:
     def estimate_lite(self, rec, line):
         self.flush()
         self.out.append({"type": "text", "role": "estimate_lite", "text": line, "estimate_lite": rec})
+        log_msg(self.sid, "out", line)
+        if self.number:
+            wa_post({"type": "text", "text": {"body": line}}, self.number)
+
+    def ai_estimate(self, e, line):
+        self.flush()
+        self.out.append({"type": "text", "role": "ai_estimate", "text": line, "ai_estimate": e})
         log_msg(self.sid, "out", line)
         if self.number:
             wa_post({"type": "text", "text": {"body": line}}, self.number)
@@ -3488,6 +3549,8 @@ def handle(number, name, text, image_path=None, voice=False, ch=None, new=False,
         b["_offer_declined"] = 1                              # "not yet": the brief carries on, the offer isn't repeated
     if t_override is None and MODEL3D_ASK.search(text or "") and b.get("size"):
         return model3d_turn(s, ch)
+    if (t_override is None and AI_ESTIMATE_ASK.search(text or "")) or t.get("intent") == "ai_estimate":
+        return ai_estimate_turn(s, ch)
     if (t_override is None and ESTIMATE_ASK.search(text or "")) or t.get("intent") == "estimate_lite":
         return estimate_lite_turn(s, ch)
     if (t_override is None and PRICE_ASK.search(text or "")) or t.get("intent") == "ballpark":
@@ -4562,6 +4625,15 @@ def api_rt_tool():
                 f"Not drawn: the AM hasn't asked for a visual (their last words: \"{last_[:80]}\"). Never start one "
                 "yourself. Carry on with the brief; draw only when they ask ('make the visual', 'crack on', 'show me "
                 "it'), or say yes when you offer once the questions run out.")}))})
+    if js.get("name") == "ai_estimate":
+        import ai_estimate as ae_
+        e, why = ai_estimate_for(s)
+        if not e:
+            return jsonify({"slow": False, "output": _said(json.dumps({"error": f"Not done: {why}. Tell the AM in one line."}))})
+        log_msg(s["id"], "out", ae_.say(e))
+        return jsonify({"slow": False, "ai_estimate": e, "output": _said(json.dumps({"say": ae_.say(e), "note": (
+            "Say it in your own words: internal only, never for the client; the cost to make each and the one-off setup; "
+            "the biggest cost; how sure it is. The card with every line is on screen.")}))})
     if js.get("name") == "estimate_lite":
         rec, why = estimate_lite_start(s)
         if not rec:

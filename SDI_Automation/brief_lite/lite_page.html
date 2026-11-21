@@ -920,8 +920,12 @@ button,input,textarea,select{font-family:inherit}
 .steps .mbar.mbrief{border-radius:999px;border-color:var(--line);font-weight:600}
 .av{border-radius:50%;background:var(--y);color:var(--ink);font-size:11px;font-weight:700;letter-spacing:.02em;position:relative;overflow:hidden}
 .av img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.aibar{display:flex;gap:2px;height:22px;border-radius:6px;overflow:hidden;margin:8px 0;font-size:11px}
+.aibar span{background:#E1E1D5;display:flex;align-items:center;padding:0 6px;white-space:nowrap;overflow:hidden;min-width:0}
+.aibar span:nth-child(1){background:#F6D946}.aibar span:nth-child(2){background:#282928;color:#fff}.aibar span:nth-child(3){background:#71716B;color:#fff}
 .qet{border-collapse:collapse;width:100%;margin:8px 0;font-size:13.5px}.qet td{padding:5px 0;border-bottom:1px solid rgba(0,0,0,.07);vertical-align:top}
 .qet td:last-child{text-align:right;white-space:nowrap;padding:5px 14px 5px 12px;font-weight:600}.qet small{display:block;opacity:.65;font-size:12px}
+.qet tr.qg td{text-align:left;padding-top:10px;font-weight:400}
 .qet .qtot td{font-size:16px;font-weight:700;border-bottom:0;padding-top:8px}
 .elt{border-collapse:collapse;margin:8px 0;font-size:14px}.elt th,.elt td{padding:5px 14px 5px 0;text-align:left;border-bottom:1px solid rgba(0,0,0,.08)}
 .elf{font-size:12px;opacity:.75;margin-top:6px}.elf a{font-weight:600}
@@ -1265,6 +1269,20 @@ function elCard(rec){if(!rec)return null;const el=block(`<div class="card elc">$
   setTimeout(tick,20000)};
  if(!["done","error","failed","cancelled","abandoned","timeout"].includes(String(rec.status)))setTimeout(tick,20000);return el}
 // 21 Nov 2026 (James): the QUICK estimate - SDI's closest past job's own estimate, adjusted to suit, every adjustment shown.
+// 21 Nov 2026 (James: "a third option - an LLM lookup through this frontier model"): the model costs it line by line;
+// the totals are worked out on the server.
+function aiCard(e){if(!e||!e.prices)return null;const gbp=v=>"£"+(+v).toLocaleString("en-GB",{maximumFractionDigits:0});
+ const conf=String(e.confidence||"").split(" - ")[0],G={"materials":"Materials","labour":"Labour","bought-in":"Bought-in","finish":"Finish","packing":"Packing"};
+ const groups=Object.keys(G).filter(g=>(e.per_unit||[]).some(x=>x.group===g));
+ const tot=Object.values(e.split||{}).reduce((a,b)=>a+b,0)||1;
+ return block(`<div class="card bp qe"><div class="ch"><span class="ico">🤖</span><b>AI estimate - internal, not for the client</b></div>
+  <div class="aibar">${groups.map(g=>`<span style="flex:${(e.split[g]||0)/tot}" title="${G[g]} ${gbp(e.split[g]||0)}">${G[g]} ${Math.round(100*(e.split[g]||0)/tot)}%</span>`).join("")}</div>
+  <table class="qet">${groups.map(g=>`<tr class="qg"><td colspan="2"><b>${G[g]}</b></td></tr>`+(e.per_unit||[]).filter(x=>x.group===g).map(x=>`<tr><td>${esc(x.what)}</td><td>${gbp(x.gbp)}</td></tr>`).join("")).join("")}
+  <tr class="qtot"><td>To make, per unit</td><td>${gbp(e.unit_variable)}</td></tr>
+  ${(e.setup||[]).length?`<tr class="qg"><td colspan="2"><b>One-off setup</b> (paid once, shared over the order)</td></tr>${e.setup.map(x=>`<tr><td>${esc(x.what)}</td><td>${gbp(x.gbp)}</td></tr>`).join("")}<tr class="qtot"><td>Setup</td><td>${gbp(e.setup_total)}</td></tr>`:""}</table>
+  <div class="bpn" style="font-size:15px">${e.prices.map(p=>`<span>${gbp(p.unit_gbp)} a unit at ${esc(p.qty)}</span>`).join(" · ")}<i class="bpc bpc-${esc(conf)}">${esc(conf)} confidence</i></div>
+  ${(e.assumptions||[]).length?`<div class="bpw">Assumed: ${e.assumptions.map(esc).join("; ")}</div>`:""}${e.risk?`<div class="bpw">Biggest risk: ${esc(e.risk)}</div>`:""}
+  <div class="bpf">Costed by the AI model from the render and brief${e.yardstick?`, against SDI's ${esc(e.yardstick.job)} (${gbp(e.yardstick.today)} a unit today)`:""}. For the estimating engine's figure, ask for <b>Estimate Lite</b>.</div></div>`)}
 function qeCard(q){if(!q||!q.base)return null;const gbp=v=>"£"+Math.round(+v).toLocaleString("en-GB");const sg=v=>(v<0?"−":"+")+gbp(Math.abs(v));
  const conf=String(q.confidence||"").split(" - ")[0],b=q.base;
  return block(`<div class="card bp qe"><div class="ch"><span class="ico">⚡</span><b>Quick estimate - internal, not for the client</b></div>
@@ -1273,7 +1291,7 @@ function qeCard(q){if(!q||!q.base)return null;const gbp=v=>"£"+Math.round(+v).t
   <tr class="qtot"><td>Per unit at ${esc(b.qty)}</td><td>${gbp(q.unit_gbp)}</td></tr></table>
   <div class="bpn" style="font-size:15px">${(q.prices||[]).map(p=>`<span>${gbp(p.unit_gbp)} at ${esc(p.qty)}</span>`).join(" · ")}<i class="bpc bpc-${esc(conf)}">${esc(conf)} confidence</i></div>
   ${(q.assumptions||[]).length?`<div class="bpw">Assumed: ${q.assumptions.map(esc).join("; ")}</div>`:""}
-  <div class="bpf">Past jobs in range: ${gbp(q.band.low)}-${gbp(q.band.high)} (${esc(q.band.n)} quote${q.band.n==1?"":"s"}). For the estimating engine's priced breakdown, ask for <b>Estimate Lite</b> - 5-15 minutes.</div></div>`)}
+  <div class="bpf">Past jobs in range: ${gbp(q.band.low)}-${gbp(q.band.high)} (${esc(q.band.n)} quote${q.band.n==1?"":"s"}). More: the <b>AI estimate</b> costs it line by line (about a minute); <b>Estimate Lite</b> is the estimating engine (5-15 minutes).</div></div>`)}
 function bpCard(bp){if(!bp)return null;const gbp=v=>"£"+Math.round(+v).toLocaleString("en-GB");
  const conf=String(bp.confidence||"").split(" - ")[0];
  const rows=(bp.basis||[]).map(u=>`<li><b>${esc(u.job)}</b> ${esc(u.name||"")} - ${gbp(u.unit_cost)} a unit${u.qty?" for "+esc(u.qty):""}${u.date?" ("+esc(String(u.date).slice(0,4))+")":""} &rarr; ${gbp(u.today)} today${bp.qty?" at "+esc(bp.qty):""}</li>`).join("");
@@ -1347,6 +1365,7 @@ function render(x){
   if(x.role==="model3d")return m3dCard(x.model,x.text);
   if(x.role==="ballpark")return bpCard(x.ballpark);
   if(x.role==="quick_estimate")return qeCard(x.quick);
+  if(x.role==="ai_estimate")return aiCard(x.ai_estimate);
   if(x.role==="estimate_lite")return elCard(x.estimate_lite);
   if(x.role==="dirs"){const it=x.items||[];return block(`<div class="card dirs"><div class="ch"><span class="ico">💡</span>${md(x.text.split("\n")[0])}</div>
    <div class="dgrid">${it.map(d=>`<div class="dir1"><div class="dl"><span>${esc(d.label)}</span><b>${esc(d.name)}</b></div><p class="di">${esc(d.idea)}</p>
@@ -1833,6 +1852,7 @@ async function rtTool(call_id,name,args){
  if(j.model3d)m3dCard(j.model3d,"3D model - drag it to turn it.");
  if(j.ballpark)bpCard(j.ballpark);
  if(j.quick_estimate)qeCard(j.quick_estimate);
+ if(j.ai_estimate)aiCard(j.ai_estimate);
  if(j.estimate_lite)elCard(j.estimate_lite);
  if(j.turn&&!j.slow){const r=await fetch("/api/turn/"+j.turn).then(r=>r.json()).catch(()=>null);if(r&&r.brief)showBrief(r.brief);return}
  if(j.turn){const w=waiter();w.querySelector(".lbl").textContent=LBL[name]||"Working…";

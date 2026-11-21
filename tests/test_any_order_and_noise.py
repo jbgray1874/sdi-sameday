@@ -3143,3 +3143,46 @@ class QuickEstimateAndAndysChangeTests(unittest.TestCase):
             L.make_visual = keep
         self.assertNotIn("couldn't find the past job", " ".join(r.get("text") or "" for r in out))
         self.assertTrue(drawn)
+
+
+class AIEstimateTests(unittest.TestCase):
+    """21 Nov 2026 (James: "a third option - an LLM lookup ... through this frontier llm model")."""
+
+    def test_the_model_lists_lines_and_the_sums_are_done_here(self):
+        import ai_estimate
+        got = {"per_unit": [{"group": "materials", "what": "steel", "gbp": 58}, {"group": "labour", "what": "weld", "gbp": 72},
+                            {"group": "bought-in", "what": "LED", "gbp": 52}, {"group": "nonsense", "what": "x", "gbp": 8},
+                            {"group": "materials", "what": "no price", "gbp": "?"}],
+               "setup": [{"what": "drawings", "gbp": 450}, {"what": "programming", "gbp": 150}], "assumptions": ["mild steel"]}
+        e = ai_estimate.work_out(got, 100, {"job": "88328", "today": 200.0, "qty": 10})
+        self.assertEqual(e["unit_variable"], 190.0)                          # 58 + 72 + 52 + 8 (an unknown group is materials)
+        self.assertEqual(e["setup_total"], 600.0)
+        self.assertEqual([(p["qty"], p["unit_gbp"]) for p in e["prices"]], [(1, 790.0), (10, 250.0), (100, 196.0)])
+        self.assertTrue(e["confidence"].startswith("medium"))
+        far = ai_estimate.work_out({"per_unit": [{"what": "x", "gbp": 2000}]}, None, {"job": "1", "today": 100.0, "qty": 1})
+        self.assertTrue(far["confidence"].startswith("low"))
+        self.assertIsNone(ai_estimate.work_out({"per_unit": []}))
+        self.assertIn("not for the client", ai_estimate.say(e))
+
+    def test_the_render_goes_to_the_model_with_the_brief_and_past_quotes(self):
+        import ai_estimate
+        img = Path(tempfile.mkdtemp()) / "r.png"
+        img.write_bytes(b"\\x89PNG")
+        seen = {}
+
+        def ask(prompt, b64):
+            seen.update(prompt=prompt, img=b64)
+            return json.dumps({"per_unit": [{"group": "materials", "what": "steel", "gbp": 50}], "setup": []})
+        e = ai_estimate.estimate({"client": "Sainsburys", "size": "1500 x 500 x 500 mm"}, str(img),
+                                 [{"job": "402190", "name": "metal stand", "today": 236.0, "qty": 10}], ask)
+        self.assertTrue(seen["img"])
+        self.assertIn("1500 x 500 x 500 mm", seen["prompt"])
+        self.assertIn("402190", seen["prompt"])
+        self.assertEqual(e["unit_variable"], 50.0)
+
+    def test_asked_for_by_name(self):
+        for line in ("can I have the AI estimate", "do an LLM estimate", "cost it line by line"):
+            self.assertTrue(L.AI_ESTIMATE_ASK.search(line), line)
+        self.assertFalse(L.AI_ESTIMATE_ASK.search("price it up"))              # that's the quick one
+        self.assertIn("ai_estimate", {t["name"] for t in rt.TOOLS})
+        self.assertIn("function aiCard(", PAGE)

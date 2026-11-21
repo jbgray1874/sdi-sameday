@@ -133,6 +133,12 @@ TOOLS = [
                     "and appears on screen. Call it only when the AM asks for Estimate Lite or a full / proper / detailed "
                     "estimate (otherwise call ballpark). Provisional, from a concept: never a quote for the client.",
      "parameters": {"type": "object", "properties": {}}},
+    {"type": "function", "name": "ai_estimate",
+     "description": "The AI estimate, about 30-60 seconds: the AI model costs the design on screen line by line from its "
+                    "render and the brief - each part's material, each process's time, bought-in items and one-off setup - "
+                    "checked against SDI's past quotes. Call it when the AM asks for the AI estimate or to cost it line by "
+                    "line. Internal only, never for the client.",
+     "parameters": {"type": "object", "properties": {}}},
     {"type": "function", "name": "ballpark",
      "description": "The QUICK estimate, in seconds: SDI's closest past job's own estimate (from K:), brought to today and "
                     "adjusted for what's different about this design - each adjustment with its £ and reason. Call it when "
@@ -507,6 +513,8 @@ def tool_intent(name, a):
         L = str(a.get("label") or "A").strip().upper()[:1]
         return f"Option {L}: {a.get('change', '')}", {"updates": {}, "intent": "change_visual",
                                                       "change_request": f"option {L}: {a.get('change', '')}", "reply": ""}
+    if name == "ai_estimate":
+        return "", {"updates": {}, "intent": "ai_estimate", "reply": ""}
     if name == "estimate_lite":
         return "", {"updates": {}, "intent": "estimate_lite", "reply": ""}
     if name == "ballpark":
