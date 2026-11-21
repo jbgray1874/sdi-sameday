@@ -6160,7 +6160,7 @@ def api_tts():
 
 TTS_MODEL = os.environ.get("LITE_TTS_MODEL", "gpt-4o-mini-tts")
 TTS_VOICE = os.environ.get("LITE_TTS_VOICE", "fable")
-TTS_STYLE = ("A warm, natural British designer from London chatting to a colleague. Relaxed but brisk pace, light and "
+TTS_STYLE = ("A warm, natural British designer chatting to a colleague. Relaxed but brisk pace, light and "
              "friendly, contractions, no announcer voice, no robotic pauses.")
 
 

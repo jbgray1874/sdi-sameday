@@ -16,11 +16,11 @@ import re
 
 CHARACTERS = {
     "sid": {
-        "name": "Sid", "he": "he", "tagline": "Sharp, quick, London designer",
+        "name": "Sid", "he": "he", "tagline": "Sharp, quick, UK designer",
         "rt_voice": "cedar", "tts_voice": "fable",
         "manner": "Warm, unhurried, British English.",
         "accent": "",            # Sid is as he was: no change to the voice that is already live
-        "tts_style": ("A warm, natural British designer from London chatting to a colleague. Relaxed but brisk pace, "
+        "tts_style": ("A warm, natural British designer chatting to a colleague. Relaxed but brisk pace, "
                       "light and friendly, contractions, no announcer voice, no robotic pauses."),
         "colour": "#F6D946",
     },

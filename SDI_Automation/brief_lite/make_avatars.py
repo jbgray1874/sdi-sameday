@@ -32,7 +32,7 @@ STYLE = ("A bold, characterful cartoon avatar - the face of a design studio's AI
          "it crops cleanly into a circle and still reads at thumbnail size. No text, no logo, no frame, no hands. A "
          "made-up character, not a real person. The character: {who}")
 PEOPLE = {
-    "sid": "Sid - a sharp, quick-witted London designer in his thirties: short dark hair with a neat fade, light stubble, "
+    "sid": "Sid - a sharp, quick-witted UK designer in his thirties: short dark hair with a neat fade, light stubble, "
            "a black crew-neck jumper, a yellow pencil tucked behind one ear, one eyebrow raised in a knowing half-smile - "
            "the clever one with a plan.",
     "beth": "Beth - a polished, elegant English account director in her forties: sleek shoulder-length fair hair, a "
