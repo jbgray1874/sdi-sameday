@@ -4159,10 +4159,8 @@ def handle(number, name, text, image_path=None, voice=False, ch=None, new=False,
         sheet = pdf_pack.client_sheet(s, [shown] + ([ga] if ga else []), OUT, estimate=est_,
                                       markup_pct=pack_cfg["markup"], story=(b.get("_dirs") or {}).get(label)
                                       if isinstance(b.get("_dirs"), dict) else None, model=m3_)
-        if est_ and pack_cfg["markup"] is None and not b.get("_markup_told"):
-            b["_markup_told"] = 1
-            ch.text("The pack has no budget page yet: SDI's estimates are a cost to make, so the client's indicative "
-                    "budget needs SDI's markup set first (client_pack_markup_pct).")
+        # 21 Nov 2026 (James: "don't want that on a client statement ... leave the estimate as is"): no budget page -
+        # the estimate stays internal, in the chat; the pack's budget page exists only if a markup is ever set
         save_session(s)
         b["_sheet_sig"], b["_sheet_pdf"] = sig, sheet
         save_session(s)
