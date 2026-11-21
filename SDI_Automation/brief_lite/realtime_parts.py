@@ -127,6 +127,12 @@ TOOLS = [
                      "size is ALWAYS 'HEIGHT x WIDTH x DEPTH mm', height first: '1800 wide, 1200 high, 700 deep' -> '1200 x 1800 x 700 mm'."},
          "not_known": {"type": "array", "items": {"type": "string"}, "description": "Field ids the AM doesn't know (after you offered options)."}},
          "required": ["updates"]}},
+    {"type": "function", "name": "estimate_lite",
+     "description": "Estimate Lite: SDI's estimating engine prices the design on screen part by part from its render and "
+                    "the brief - materials, labour and bought-in - at 1, 10 and the brief's quantity. Takes 5-15 minutes "
+                    "and appears on screen. Call it when the AM asks for Estimate Lite, a proper estimate or to price it "
+                    "up. Provisional, from a concept: never a quote for the client.",
+     "parameters": {"type": "object", "properties": {}}},
     {"type": "function", "name": "ballpark",
      "description": "An INTERNAL guide price per unit, worked out from SDI's past quotes for the closest jobs - when the AM "
                     "asks about budget, pricing, a ballpark or how much it'll cost. Say it's an internal guide only, never "
@@ -500,6 +506,8 @@ def tool_intent(name, a):
         L = str(a.get("label") or "A").strip().upper()[:1]
         return f"Option {L}: {a.get('change', '')}", {"updates": {}, "intent": "change_visual",
                                                       "change_request": f"option {L}: {a.get('change', '')}", "reply": ""}
+    if name == "estimate_lite":
+        return "", {"updates": {}, "intent": "estimate_lite", "reply": ""}
     if name == "ballpark":
         return "", {"updates": {}, "intent": "ballpark", "reply": ""}
     if name == "show_views":

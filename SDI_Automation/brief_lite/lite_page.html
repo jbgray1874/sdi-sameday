@@ -920,6 +920,8 @@ button,input,textarea,select{font-family:inherit}
 .steps .mbar.mbrief{border-radius:999px;border-color:var(--line);font-weight:600}
 .av{border-radius:50%;background:var(--y);color:var(--ink);font-size:11px;font-weight:700;letter-spacing:.02em;position:relative;overflow:hidden}
 .av img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.elt{border-collapse:collapse;margin:8px 0;font-size:14px}.elt th,.elt td{padding:5px 14px 5px 0;text-align:left;border-bottom:1px solid rgba(0,0,0,.08)}
+.elf{font-size:12px;opacity:.75;margin-top:6px}.elf a{font-weight:600}
 .bp .bpn{font-size:26px;font-weight:700;margin:8px 0 6px;display:flex;flex-wrap:wrap;gap:10px;align-items:baseline}
 .bp .bpn span{font-size:14px;font-weight:500;opacity:.75}.bpc{font-style:normal;font-size:12px;font-weight:600;padding:3px 9px;border-radius:999px;background:#E1E1D5}
 .bpc-high{background:#C9E7C1}.bpc-low{background:#F6D946}.bpw{font-size:13px;opacity:.85}.bpw ul{margin:4px 0 6px 18px;padding:0}
@@ -1241,6 +1243,24 @@ drawChars();document.addEventListener("DOMContentLoaded",drawChars);
 // here on a canvas - no library to download - turning slowly until touched; drag to turn it, double-tap to reset.
 // 21 Nov 2026 (Matt: "Can you bring some budget pricing into this?"): the internal guide price with its workings -
 // which past quotes, what was adjusted, how sure. Never on the client sheet.
+// 21 Nov 2026: Estimate Lite - the estimating engine's provisional price for the design on screen. The card follows
+// the run (every 20 s) and shows the price per unit at each quantity, with the DRAFT workbook, when it's done.
+function elInner(r){const gbp=v=>"£"+(+v).toLocaleString("en-GB",{minimumFractionDigits:2,maximumFractionDigits:2});
+ if(!r)return "";const st=String(r.status||"queued");
+ if(st==="done"){const ps=(r.result&&r.result.prices)||[];
+  return `<div class="ch"><span class="ico">📊</span><b>Estimate Lite - Option ${esc(r.label||"A")} - provisional, from the concept (not drawings)</b></div>`+
+   (ps.length?`<table class="elt"><tr><th>Quantity</th><th>£ per unit</th></tr>${ps.map(p=>`<tr><td>${esc(p.qty)}</td><td><b>${gbp(p.unit_gbp)}</b></td></tr>`).join("")}</table>`:"<p>It finished without a unit price - the workbook says why.</p>")+
+   `<div class="elf">Priced by SDI's estimating engine part by part from the render and the brief - a measurement, not a quote. Run ${esc(r.run_id)}.`+
+   (r.result&&r.result.workbook?` <a href="/api/estimate-lite/${esc(sid)}/workbook">Download the DRAFT workbook</a>`:"")+`</div>`}
+ if(["error","failed","cancelled","abandoned","timeout"].includes(st))
+  return `<div class="ch"><span class="ico">📊</span><b>Estimate Lite didn't finish</b></div><p>${esc(r.error||st)}. Ask again to retry, or open run ${esc(r.run_id)} on Grid Control.</p>`;
+ return `<div class="mstat"><span class="spin"></span>Estimate Lite for Option ${esc(r.label||"A")}: ${esc(st==="queued"?"waiting for an estimating runner":"being priced")}… usually 5-15 minutes. Run ${esc(r.run_id)}.</div>`}
+function elCard(rec){if(!rec)return null;const el=block(`<div class="card elc">${elInner(rec)}</div>`);const box=el.querySelector(".elc");
+ const chat=sid;let n=0;const tick=async()=>{if(!box.isConnected||sid!==chat||++n>200)return;
+  const j=await fetch("/api/estimate-lite/"+chat).then(r=>r.json()).catch(()=>null);const r=j&&j.record;
+  if(r&&r.run_id===rec.run_id){box.innerHTML=elInner(r);if(["done","error","failed","cancelled","abandoned","timeout"].includes(r.status))return}
+  setTimeout(tick,20000)};
+ if(!["done","error","failed","cancelled","abandoned","timeout"].includes(String(rec.status)))setTimeout(tick,20000);return el}
 function bpCard(bp){if(!bp)return null;const gbp=v=>"£"+Math.round(+v).toLocaleString("en-GB");
  const conf=String(bp.confidence||"").split(" - ")[0];
  const rows=(bp.basis||[]).map(u=>`<li><b>${esc(u.job)}</b> ${esc(u.name||"")} - ${gbp(u.unit_cost)} a unit${u.qty?" for "+esc(u.qty):""}${u.date?" ("+esc(String(u.date).slice(0,4))+")":""} &rarr; ${gbp(u.today)} today${bp.qty?" at "+esc(bp.qty):""}</li>`).join("");
@@ -1313,6 +1333,7 @@ function render(x){
   if(x.role==="history")return historyCard(x.text);
   if(x.role==="model3d")return m3dCard(x.model,x.text);
   if(x.role==="ballpark")return bpCard(x.ballpark);
+  if(x.role==="estimate_lite")return elCard(x.estimate_lite);
   if(x.role==="dirs"){const it=x.items||[];return block(`<div class="card dirs"><div class="ch"><span class="ico">💡</span>${md(x.text.split("\n")[0])}</div>
    <div class="dgrid">${it.map(d=>`<div class="dir1"><div class="dl"><span>${esc(d.label)}</span><b>${esc(d.name)}</b></div><p class="di">${esc(d.idea)}</p>
     <dl><dt>Build</dt><dd>${esc(d.build)}</dd><dt>Products</dt><dd>${esc(d.products)}</dd><dt>Header</dt><dd>${esc(d.header)}</dd><dt>Why yes</dt><dd>${esc(d.why)}</dd></dl>
@@ -1797,6 +1818,7 @@ async function rtTool(call_id,name,args){
  if(rt.inResp)rt.pendingCreate=true;else if(!rt.spoke)rtSay({type:"response.create"});
  if(j.model3d)m3dCard(j.model3d,"3D model - drag it to turn it.");
  if(j.ballpark)bpCard(j.ballpark);
+ if(j.estimate_lite)elCard(j.estimate_lite);
  if(j.turn&&!j.slow){const r=await fetch("/api/turn/"+j.turn).then(r=>r.json()).catch(()=>null);if(r&&r.brief)showBrief(r.brief);return}
  if(j.turn){const w=waiter();w.querySelector(".lbl").textContent=LBL[name]||"Working…";
   const drawing=["make_concepts","change_option","more_options","choose_option","finish_brief","show_views"].includes(name);

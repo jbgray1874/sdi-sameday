@@ -1484,6 +1484,58 @@ def ballpark_turn(s, ch):
     return ch, s
 
 
+ESTIMATE_ASK = re.compile(r"\bestimate[- ]?lite\b|\b(run|do|get|give me|start|can (i|we|you) (get|have|do|run))"
+                          r" (an? |the )?(proper |full |real |quick )?estimate\b|\bprice (it|this|that) (up|properly)\b", re.I)
+EL_WATCHING = set()      # chats whose Estimate Lite run is being followed by this process
+
+
+def _el_follow(sid, run_id):
+    """Follow the run in the background; when it ends its line goes into the chat."""
+    import estimate_lite as el
+    import requests
+    if run_id in EL_WATCHING:
+        return
+    EL_WATCHING.add(run_id)
+
+    def done(rec):
+        EL_WATCHING.discard(run_id)
+        if rec:
+            log_msg(sid, "out", el.say(rec))
+    threading.Thread(target=lambda: el.watch(DB, sid, run_id, requests.get, done=done), daemon=True).start()
+
+
+def estimate_lite_start(s):
+    """Queue Estimate Lite for the option on screen. -> (record, '') or (None, why)."""
+    import estimate_lite as el
+    import requests
+    renders = [v for v in s.get("visuals", []) if v.get("kind") == "render"]
+    if not renders:
+        return None, "there's no design on screen yet to estimate - make the visual first"
+    base = renders[-1]
+    lab = base.get("label") or "A"
+    img = base.get("hd_path") if base.get("hd_path") and os.path.exists(base.get("hd_path")) else base.get("path")
+    if not img or not os.path.exists(img):
+        return None, "the render's picture isn't on the server any more"
+    d = ((s["brief"].get("_dirs") or {}).get(lab) or {}) if isinstance(s["brief"].get("_dirs"), dict) else {}
+    director = " ".join(str(d.get(k) or "") for k in ("idea", "build", "header", "products"))
+    rid, why = el.start(s["brief"], img, lab, s["id"], requests.post, requests.get, director)
+    if not rid:
+        return None, why
+    el._save(DB, s["id"], rid, new=True, label=lab)
+    _el_follow(s["id"], rid)
+    return el.latest(DB, s["id"]), ""
+
+
+def estimate_lite_turn(s, ch):
+    rec, why = estimate_lite_start(s)
+    if not rec:
+        ch.text(f"I couldn't start Estimate Lite: {why}.")
+        return ch, s
+    ch.estimate_lite(rec, f"Estimate Lite started for Option {rec['label']} - the estimating engine prices it part by part "
+                          "from the render and the brief, usually 5-15 minutes. It'll appear here; carry on meanwhile.")
+    return ch, s
+
+
 MODEL3D_ASK = re.compile(r"\b(3d|three[- ]d) (model|view|version)\b|\bspin (it|round|around)\b|\brotat(e|able|ing)\b|"
                          r"\bturn(table| it round in 3d)\b|\b360\b", re.I)
 
@@ -2169,6 +2221,13 @@ class Channel:
             self.choices(body, ch)
             return
         wa_post({"type": "text", "text": {"body": t[:4000]}}, self.number)
+
+    def estimate_lite(self, rec, line):
+        self.flush()
+        self.out.append({"type": "text", "role": "estimate_lite", "text": line, "estimate_lite": rec})
+        log_msg(self.sid, "out", line)
+        if self.number:
+            wa_post({"type": "text", "text": {"body": line}}, self.number)
 
     def ballpark(self, bp, line):
         """The internal guide price, with its workings - a card on the page, the line on WhatsApp."""
@@ -3391,6 +3450,8 @@ def handle(number, name, text, image_path=None, voice=False, ch=None, new=False,
         b["_offer_declined"] = 1                              # "not yet": the brief carries on, the offer isn't repeated
     if t_override is None and MODEL3D_ASK.search(text or "") and b.get("size"):
         return model3d_turn(s, ch)
+    if (t_override is None and ESTIMATE_ASK.search(text or "")) or t.get("intent") == "estimate_lite":
+        return estimate_lite_turn(s, ch)
     if (t_override is None and PRICE_ASK.search(text or "")) or t.get("intent") == "ballpark":
         return ballpark_turn(s, ch)
     asked_views = VIEWS_ASK.search(text or "") and any(v.get("kind") == "render" for v in s["visuals"])
@@ -4455,6 +4516,14 @@ def api_rt_tool():
                 f"Not drawn: the AM hasn't asked for a visual (their last words: \"{last_[:80]}\"). Never start one "
                 "yourself. Carry on with the brief; draw only when they ask ('make the visual', 'crack on', 'show me "
                 "it'), or say yes when you offer once the questions run out.")}))})
+    if js.get("name") == "estimate_lite":
+        rec, why = estimate_lite_start(s)
+        if not rec:
+            return jsonify({"slow": False, "output": _said(json.dumps({"error": f"Not started: {why}. Tell the AM in one line."}))})
+        log_msg(s["id"], "out", f"Estimate Lite started for Option {rec['label']}.")
+        return jsonify({"slow": False, "estimate_lite": rec, "output": _said(json.dumps({"started": True, "note": (
+            "Estimate Lite is running - usually 5-15 minutes. Say so in one line and carry on with the brief; the result "
+            "appears on screen. It's provisional, from the concept, not a quote.")}))})
     if js.get("name") == "ballpark":
         import ballpark as bp_
         bp = ballpark_for(s)
@@ -5274,6 +5343,36 @@ def api_page_problem():
     who = signed_in_user() or "not signed in"
     print(f"[page] {datetime.now():%H:%M:%S} {who} chat={chat or '-'} {what}", flush=True)
     return jsonify({"ok": True})
+
+
+@app.route("/api/estimate-lite/<sid>")
+def api_estimate_lite(sid):
+    """Where the chat's Estimate Lite is: queued, running, done (with its prices) or why not. A run this server was
+    following before a restart is picked up again."""
+    import estimate_lite as el
+    rec = el.latest(DB, sid)
+    if not rec:
+        return jsonify({"record": None})
+    if rec["status"] not in ("done", "error", "failed", "cancelled", "abandoned", "timeout"):
+        _el_follow(sid, rec["run_id"])
+    return jsonify({"record": rec, "say": el.say(rec) if rec["status"] != "queued" else ""})
+
+
+@app.route("/api/estimate-lite/<sid>/workbook")
+def api_estimate_lite_workbook(sid):
+    """The DRAFT workbook, fetched from the estimating service (the AM's browser can't reach it, nor needs its key)."""
+    import estimate_lite as el
+    import requests
+    rec = el.latest(DB, sid)
+    path = ((rec or {}).get("result") or {}).get("workbook") or ""
+    if not rec or rec.get("status") != "done" or not path.startswith("/api/estimate/"):
+        abort(404)
+    r = requests.get(el.url() + path, headers=el._headers(), timeout=60)
+    if r.status_code != 200:
+        abort(502)
+    name = path.rsplit("/", 1)[-1] or f"EstimateLite_{rec['run_id']}.xlsx"
+    return send_file(io.BytesIO(r.content), as_attachment=True, download_name=name,
+                     mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
 
 @app.route("/api/model3d/<sid>")

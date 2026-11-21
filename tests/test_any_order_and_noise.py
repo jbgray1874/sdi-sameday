@@ -3031,3 +3031,70 @@ class AnInternalGuidePriceTests(unittest.TestCase):
         self.assertTrue(card and card[0]["ballpark"]["basis"][0]["job"] == "88328")
         self.assertIn("function bpCard(", PAGE)
         self.assertNotIn("_ballpark", (WORK / "brief_lite" / "pdf_pack.py").read_text(encoding="utf-8"))   # never on the client sheet
+
+
+class EstimateLiteTests(unittest.TestCase):
+    """21 Nov 2026 (James: "let's wire it in"): the design on screen priced by the estimating engine's concept route."""
+
+    class Resp:
+        def __init__(self, code, body):
+            self.status_code, self._b, self.text, self.content = code, body, json.dumps(body), b"xlsx"
+
+        def json(self):
+            return self._b
+
+    def setUp(self):
+        import estimate_lite
+        self.E = estimate_lite
+        self.sent = []
+        self.db = str(Path(tempfile.mkdtemp()) / "el.db")
+        self.img = Path(tempfile.mkdtemp()) / "a.png"
+        self.img.write_bytes(b"png")
+
+    def post(self, url, **kw):
+        self.sent.append((url, kw.get("data"), sorted((kw.get("files") or {}).keys()), dict(kw.get("headers") or {})))
+        return self.Resp(200, {"run_id": "abc123"})
+
+    def get(self, url, **kw):
+        if url.endswith("/runners"):
+            return self.Resp(200, {"runners": [{"id": "r1", "online": True}]})
+        if url.endswith("/summary"):
+            return self.Resp(200, {"run_id": "abc123", "unit_cost_gbp": 412.0, "provisional": True,
+                                   "workbook_xlsx": "/api/estimate/abc123/deliverables/x.xlsx", "caution": "LLM-only"})
+        return self.Resp(200, {"status": "done", "quantity_prices": [{"quantity": 1, "unit_gbp": 412.0},
+                                                                     {"quantity": 10, "unit_gbp": 318.4}]})
+
+    def test_the_brief_and_render_go_to_the_concept_route(self):
+        brief = {"client": "Sainsburys", "unit_type": "FSDU", "size": "1500 x 500 x 500 mm", "materials": "metal",
+                 "lighting": "illuminated shelves", "volume_qty": "250", "other_notes": "acrylic risers on the shelf fronts"}
+        rid, why = self.E.start(brief, str(self.img), "D", "chat1", self.post, self.get)
+        self.assertEqual((rid, why), ("abc123", ""))
+        url, data, files, headers = self.sent[0]
+        self.assertTrue(url.endswith("/api/estimate/llm"))
+        self.assertEqual(files, ["image"])
+        self.assertEqual(data["quantities"], "1,10,250")
+        self.assertEqual(data["reference"], "SDILive-chat1-D")
+        for want in ("Sainsburys", "1500 x 500 x 500 mm", "illuminated shelves", "acrylic risers", "not drawings"):
+            self.assertIn(want, data["prompt"])
+
+    def test_no_runner_or_no_service_is_said_plainly(self):
+        nobody = lambda url, **kw: self.Resp(200, {"runners": []})
+        self.assertIn("no estimating runner", self.E.start({}, str(self.img), "A", "c", self.post, nobody)[1])
+        down = lambda url, **kw: (_ for _ in ()).throw(OSError("refused"))
+        self.assertIn("didn't answer", self.E.start({}, str(self.img), "A", "c", self.post, down)[1])
+        self.assertEqual(self.sent, [])                                     # nothing queued
+
+    def test_followed_to_the_end_and_said(self):
+        self.E._save(self.db, "chat1", "abc123", new=True, label="D")
+        rec = self.E.watch(self.db, "chat1", "abc123", self.get, sleep=lambda s: None)
+        self.assertEqual(rec["status"], "done")
+        self.assertEqual(rec["result"]["prices"], [{"qty": 1, "unit_gbp": 412.0}, {"qty": 10, "unit_gbp": 318.4}])
+        self.assertIn("£318 a unit at 10", self.E.say(rec))
+        self.assertIn("not a quote", self.E.say(rec))
+
+    def test_asked_for_in_chat_and_on_calls(self):
+        for line in ("can we get an Estimate Lite", "run a proper estimate on it", "price it up please"):
+            self.assertTrue(L.ESTIMATE_ASK.search(line), line)
+        self.assertFalse(L.ESTIMATE_ASK.search("the estimate date is next week"))
+        self.assertIn("estimate_lite", {t["name"] for t in rt.TOOLS})
+        self.assertIn("function elCard(", PAGE)
