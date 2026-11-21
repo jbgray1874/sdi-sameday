@@ -3027,8 +3027,8 @@ class AnInternalGuidePriceTests(unittest.TestCase):
         s["refs"] = [{"job_no": 88328, "name": "Gondola End", "estimate": {"unit_cost": 225, "qty": 10, "date": "2024-01-01"}}]
         L.save_session(s)
         out, s = say(who, "can you give me a ballpark price")
-        card = [r for r in out if r.get("role") == "ballpark"]
-        self.assertTrue(card and card[0]["ballpark"]["basis"][0]["job"] == "88328")
+        card = [r for r in out if r.get("role") == "quick_estimate"]           # 21 Nov 2026: the quick estimate now
+        self.assertTrue(card and card[0]["quick"]["base"]["job"] == "88328")
         self.assertIn("function bpCard(", PAGE)
         self.assertNotIn("_ballpark", (WORK / "brief_lite" / "pdf_pack.py").read_text(encoding="utf-8"))   # never on the client sheet
 
@@ -3093,8 +3093,53 @@ class EstimateLiteTests(unittest.TestCase):
         self.assertIn("not a quote", self.E.say(rec))
 
     def test_asked_for_in_chat_and_on_calls(self):
-        for line in ("can we get an Estimate Lite", "run a proper estimate on it", "price it up please"):
+        for line in ("can we get an Estimate Lite", "run a proper estimate on it", "I need a full estimate"):
             self.assertTrue(L.ESTIMATE_ASK.search(line), line)
+        for line in ("price it up please", "can you get an estimate", "quick estimate"):     # the quick one (seconds)
+            self.assertFalse(L.ESTIMATE_ASK.search(line), line)
+            self.assertTrue(L.PRICE_ASK.search(line), line)
         self.assertFalse(L.ESTIMATE_ASK.search("the estimate date is next week"))
         self.assertIn("estimate_lite", {t["name"] for t in rt.TOOLS})
         self.assertIn("function elCard(", PAGE)
+
+
+class QuickEstimateAndAndysChangeTests(unittest.TestCase):
+    """21 Nov 2026 (James: "two options ... the look up to old jobs which are similar ... and modifies to suit");
+    and Andy's 19 Nov change that a past-job question stopped."""
+
+    def test_the_sums_are_done_here_from_the_past_job(self):
+        import ballpark
+        from datetime import date
+        q = [{"job": "88328", "name": "Gondola End", "unit_cost": 225, "qty": 10, "date": "2024-01-01"},
+             {"job": "10987", "name": "A2 Gondola End", "unit_cost": 260, "qty": 10, "date": "2024-06-01"}]
+        ans = json.dumps({"base_job": "88328", "adjustments": [{"what": "LED shelf lighting", "gbp": 96, "why": "strip"},
+                                                               {"what": "smaller header", "gbp": -10, "why": ""}]})
+        r = ballpark.quick({"client": "Boots"}, q, lambda p: ans, 100, date(2026, 11, 21))
+        base_today = r["base"]["today"]
+        self.assertAlmostEqual(r["unit_gbp"], round(base_today + 86, 2))       # past job today + adjustments
+        at100 = next(p for p in r["prices"] if p["qty"] == 100)["unit_gbp"]
+        self.assertAlmostEqual(at100, round(r["unit_gbp"] * (10 / 100) ** ballpark.VOLUME, 2))
+        self.assertTrue(r["confidence"].startswith("medium"))
+        wild = ballpark.quick({}, q, lambda p: json.dumps({"base_job": "88328", "adjustments": [{"what": "x", "gbp": 5000}]}))
+        self.assertTrue(wild["confidence"].startswith("low"))                   # not believed
+        broken = ballpark.quick({}, q, lambda p: "no json here")
+        self.assertEqual(broken["adjustments"], [])
+        self.assertTrue(broken["confidence"].startswith("low"))
+        self.assertIn("not for the client", ballpark.say_quick(r))
+        self.assertIn("function qeCard(", PAGE)
+
+    def test_a_change_to_the_design_on_screen_is_never_held_by_a_past_job_question(self):
+        who = new_chat()
+        say(who, "Fanatics want a counter unit", {"client": "Fanatics", "unit_type": "counter unit"})
+        s = L._session_by_id(L.get_session(who)["id"])
+        s["brief"].update(_render_asked=1, liked_job="No", _ref_more=1, size="100 x 350 x 350 mm")
+        s["visuals"].append({"kind": "render", "label": "A", "path": "a.png"})
+        L.save_session(s)
+        drawn, keep = [], L.make_visual
+        L.make_visual = lambda s_, kind, *a, **k: (drawn.append(kind), (None, "stopped (test)"))[1]
+        try:
+            out, s = say(who, "add a plinth to showcase one card and RGB glow in the base", {}, "change_visual")
+        finally:
+            L.make_visual = keep
+        self.assertNotIn("couldn't find the past job", " ".join(r.get("text") or "" for r in out))
+        self.assertTrue(drawn)

@@ -80,3 +80,92 @@ def say(bp):
             f"{len(bp['basis'])} past SDI quote{'s' if len(bp['basis']) != 1 else ''} (closest: {first['job']} at "
             f"£{float(first['unit_cost']):,.0f} a unit{(' for ' + str(first['qty'])) if first.get('qty') else ''}). "
             f"Confidence: {bp['confidence'].split(' - ')[0]}.")
+
+
+# ── the quick estimate: the closest past job's estimate, adjusted to suit (21 Nov 2026) ─────────────────────────────
+# James: "two options - one ... for a more accurate estimate [Estimate Lite, 5-15 minutes]. The second one is the look
+# up to old jobs which are similar in the K: / W: and modifies to suit." Here a model only SAYS what differs and by
+# how much (each adjustment with its reason); the sums are done in this file, from the past job's own figures:
+#     per unit now  = the base job's quote brought to today (as above) + the adjustments, at the base job's quantity
+#     at each qty   = that x (base qty / qty) ** VOLUME
+# Adjustments that would take it below 40% or above 250% of the base are not believed: confidence drops to low and it
+# says so.
+
+ADJUST = """You are an SDI Displays estimator. A new display has been briefed; the closest past SDI jobs and their
+estimates are below. Pick the ONE past job closest to the new unit as the base, then list what's different about the
+new unit and what each difference adds to or takes off the PER-UNIT cost at the base job's quantity, in GBP - size,
+materials, finish, lighting, shelves, header, graphics, assembly, anything in the brief. Only real differences; no
+padding. Say each one plainly ("LED shelf lighting, 4 shelves: +£85 - LED strip, driver and wiring per shelf").
+
+THE NEW UNIT:
+{brief}
+
+PAST SDI JOBS (each quote per unit at its quantity, already brought to today's money; material / labour split and
+what the estimate lists where known):
+{quotes}
+
+Answer with JSON only:
+{{"base_job": "<job number from the list>", "adjustments": [{{"what": "...", "gbp": <number, + or ->, "why": "..."}}],
+ "assumptions": ["..."]}}"""
+
+
+def _brief_lines(brief):
+    keys = ("client", "unit_type", "size", "materials", "finish", "colours_graphics", "lighting", "products_held",
+            "shelf_load", "placement", "fixing", "assembled", "volume_qty", "other_notes")
+    return "\n".join(f"- {k}: {' '.join(str(brief[k]).split())}" for k in keys if brief.get(k))
+
+
+def quick(brief, quotes, ask, brief_qty=None, today=None):
+    """-> the quick estimate {base, adjustments, unit_gbp, prices, confidence, assumptions, band}, or None (no quotes)."""
+    band = work_out(quotes, None, "", today)
+    if not band:
+        return None
+    by_job = {str(u["job"]): u for u in band["basis"]}
+    lines = []
+    for u in band["basis"]:
+        extra = []
+        if u.get("material_cost") or u.get("labour_cost"):
+            extra.append(f"materials £{float(u.get('material_cost') or 0):,.0f} / labour £{float(u.get('labour_cost') or 0):,.0f}")
+        for k in ("materials", "processes"):
+            if u.get(k):
+                extra.append(f"{k}: {' '.join(str(u[k]).split())[:300]}")
+        lines.append(f"- {u['job']} {u.get('name', '')}: £{u['today']:,.0f} a unit today at qty {u.get('qty') or 1}"
+                     + (f" ({'; '.join(extra)})" if extra else ""))
+    try:
+        import json as _json
+        raw = ask(ADJUST.format(brief=_brief_lines(brief), quotes="\n".join(lines)))
+        m = re.search(r"\{.*\}", raw or "", re.S)
+        got = _json.loads(m.group(0)) if m else {}
+    except Exception:                                                     # noqa: BLE001
+        got = {}
+    base = by_job.get(str(got.get("base_job") or "")) or band["basis"][0]
+    adj = []
+    for a in got.get("adjustments") or []:
+        try:
+            g = round(float(a.get("gbp")), 2)
+        except (TypeError, ValueError):
+            continue
+        if a.get("what"):
+            adj.append({"what": str(a["what"])[:120], "gbp": g, "why": str(a.get("why") or "")[:200]})
+    base_q = base.get("qty") or 1
+    unit = round(base["today"] + sum(a["gbp"] for a in adj), 2)
+    conf = "medium - one past job adjusted" if adj else "low - the past job as it was, nothing adjusted"
+    if unit < 0.4 * base["today"] or unit > 2.5 * base["today"]:
+        conf = "low - the adjustments move it a long way from the past job; check it"
+    if not got:
+        conf = "low - the adjustment couldn't be worked out; this is the closest past job brought to today"
+    qtys = sorted({1, 10} | ({brief_qty} if brief_qty else set()) | {base_q})
+    prices = [{"qty": q, "unit_gbp": round(max(0.0, unit) * (base_q / q) ** VOLUME, 2)} for q in qtys]
+    return {"base": {"job": base["job"], "name": base.get("name", ""), "quoted": float(base["unit_cost"]), "qty": base_q,
+                     "date": base.get("date"), "today": base["today"]},
+            "adjustments": adj, "unit_gbp": unit, "prices": prices, "confidence": conf,
+            "assumptions": [str(x)[:160] for x in (got.get("assumptions") or [])][:5],
+            "band": {"low": band["low"], "high": band["high"], "n": len(band["basis"])}}
+
+
+def say_quick(q):
+    at = next((p for p in q["prices"] if p["qty"] == q["base"]["qty"]), q["prices"][0])
+    return (f"Quick estimate - internal, not for the client: about £{at['unit_gbp']:,.0f} a unit at {at['qty']}, from SDI's "
+            f"{q['base']['job']} (£{q['base']['quoted']:,.0f} a unit) adjusted for {len(q['adjustments'])} difference"
+            f"{'s' if len(q['adjustments']) != 1 else ''}. Confidence: {q['confidence'].split(' - ')[0]}. For the engine's "
+            "priced estimate, ask for Estimate Lite (5-15 minutes).")

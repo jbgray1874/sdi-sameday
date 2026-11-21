@@ -1449,6 +1449,7 @@ VIEWS_ASK = re.compile(r"\b(more|other|different|extra|all( the)?|several|multip
 
 
 PRICE_ASK = re.compile(r"\b(budget(ary)? (price|pricing|cost|figure|number)s?|ballpark|guide price|rough (price|cost)|"
+                       r"quick (estimate|price)|(get|give me|do|run) (an? |the )?estimate|price (it|this|that) up|"
                        r"indicative (price|cost)|(any|some) (budget )?pricing|how much (would|will|does|might) (it|this|that|one|"
                        r"each|they) (cost|be)|what (would|will|does|might) (it|this|that|each) cost|cost per unit|"
                        r"price per unit|unit (price|cost))\b", re.I)
@@ -1464,15 +1465,45 @@ def ballpark_for(s):
         if e.get("unit_cost") and r.get("job_no") not in seen:
             seen.add(r.get("job_no"))
             quotes.append({"job": str(r.get("job_no")), "name": (r.get("name") or "")[:60], "unit_cost": e["unit_cost"],
-                           "qty": e.get("qty"), "date": e.get("date") or r.get("last") or r.get("first")})
+                           "qty": e.get("qty"), "date": e.get("date") or r.get("last") or r.get("first"),
+                           "material_cost": e.get("material_cost"), "labour_cost": e.get("labour_cost"),
+                           "materials": e.get("materials"), "processes": e.get("processes")})
     renders = [v for v in s.get("visuals", []) if v.get("kind") == "render"]
     lab = (renders[-1].get("label") if renders else None) or "A"
     band = ((b.get("_dirs") or {}).get(lab) or {}).get("cost", "") if isinstance(b.get("_dirs"), dict) else ""
+    s["_quotes"] = quotes[:5]
     return ballpark.work_out(quotes[:5], ballpark._qty(b.get("volume_qty")), band)
+
+
+def quick_estimate_for(s):
+    """The closest past job's estimate adjusted to suit this brief (ballpark.quick) - seconds, not minutes."""
+    import ballpark
+    if not ballpark_for(s):
+        return None
+    b = s["brief"]
+
+    def ask(prompt):
+        try:
+            budget_gate("claude")
+        except BudgetStop:
+            return ""
+        r = claude_create(timeout=60, model=CHAT_MODEL, max_tokens=1200, messages=[{"role": "user", "content": prompt}])
+        try:
+            log_cost(s["id"], "quick-estimate", usd(CHAT_MODEL, r.usage))
+        except Exception:                                    # noqa: BLE001
+            pass
+        return "".join(getattr(x, "text", "") for x in r.content)
+    return ballpark.quick(b, s.get("_quotes") or [], ask, ballpark._qty(b.get("volume_qty")))
 
 
 def ballpark_turn(s, ch):
     import ballpark
+    q = quick_estimate_for(s)
+    if q:
+        s["brief"]["_quick_estimate"] = {k: v for k, v in q.items() if k != "assumptions"}
+        save_session(s)
+        ch.quick_estimate(q, ballpark.say_quick(q))
+        return ch, s
     bp = ballpark_for(s)
     if not bp:
         ch.text("I haven't got a past SDI quote close enough to give a guide price for this one. Estimate Lite can price "
@@ -1484,8 +1515,8 @@ def ballpark_turn(s, ch):
     return ch, s
 
 
-ESTIMATE_ASK = re.compile(r"\bestimate[- ]?lite\b|\b(run|do|get|give me|start|can (i|we|you) (get|have|do|run))"
-                          r" (an? |the )?(proper |full |real |quick )?estimate\b|\bprice (it|this|that) (up|properly)\b", re.I)
+ESTIMATE_ASK = re.compile(r"\bestimate[- ]?lite\b|\b(proper|full|real|detailed|engine'?s?|accurate) (priced )?estimate\b|"
+                          r"\bprice (it|this|that) properly\b|\brun it through (the )?estimat", re.I)
 EL_WATCHING = set()      # chats whose Estimate Lite run is being followed by this process
 
 
@@ -2225,6 +2256,13 @@ class Channel:
     def estimate_lite(self, rec, line):
         self.flush()
         self.out.append({"type": "text", "role": "estimate_lite", "text": line, "estimate_lite": rec})
+        log_msg(self.sid, "out", line)
+        if self.number:
+            wa_post({"type": "text", "text": {"body": line}}, self.number)
+
+    def quick_estimate(self, q, line):
+        self.flush()
+        self.out.append({"type": "text", "role": "quick_estimate", "text": line, "quick": q})
         log_msg(self.sid, "out", line)
         if self.number:
             wa_post({"type": "text", "text": {"body": line}}, self.number)
@@ -3657,7 +3695,8 @@ def handle(number, name, text, image_path=None, voice=False, ch=None, new=False,
         ch.ask(f"Just to check - do you mean {b['_ref_confirm']['label']}? I'll follow that one closely for the render and GA.",
                field="_ref_confirm", options=["Yes, that one", "No, a different one"])
         return ch, s
-    if b.get("_ref_ask") and b.get("_ref_ask_shown") != b["_ref_ask"] and not voice:
+    changing_ = intent == "change_visual" and any(v.get("kind") == "render" for v in s["visuals"])   # a change to what's drawn
+    if b.get("_ref_ask") and b.get("_ref_ask_shown") != b["_ref_ask"] and not voice and not changing_:
         b["_ref_ask_shown"] = list(b["_ref_ask"])
         save_session(s)
         if not b.get("_ref_weak"):        # 3 Nov 2026: only show pictures of jobs that really fit
@@ -3666,7 +3705,7 @@ def handle(number, name, text, image_path=None, voice=False, ch=None, new=False,
                 "job number?" if b.get("_ref_weak") else "A few past SDI jobs fit that - which one do you mean?")
                + " Say \"show me\" to see any of them.", field="_ref_ask", options=b["_ref_ask"][:3])
         return ch, s
-    if b.get("_ref_more") and not b.get("_ref_job") and not b.get("_ref_more_shown") and not voice:
+    if b.get("_ref_more") and not b.get("_ref_job") and not b.get("_ref_more_shown") and not voice and not changing_:
         b["_ref_more_shown"] = 1
         save_session(s)
         ch.ask("I couldn't find that one in SDI's past work - what's its job number, or a few more words from its name?",
@@ -3679,10 +3718,17 @@ def handle(number, name, text, image_path=None, voice=False, ch=None, new=False,
         intent, t["n_options"], t["reply"] = "more_options", 1, ""
         b["_redraw_for_ref"] = b["_ref_job"]
     ref_open = ref_pending(b)
-    if ref_open and (DROP_REF.search(text or "") or re.search(r"\bmake it new\b", text or "", re.I)):
-        drop_ref(b)                       # 'show me it... actually forget it, something new' (ref_lookup didn't run)
+    liked_ = str(b.get("liked_job") or "")
+    if ref_open and (DROP_REF.search(text or "") or re.search(r"\bmake it new\b", text or "", re.I)
+                     or (not b.get("_ref_job") and liked_ and (NOPE.match(liked_) or DROP_REF.search(liked_)))):
+        # 'show me it... actually forget it, something new' (ref_lookup didn't run) - and 21 Nov 2026 (Andy, 19 Nov):
+        # "No ... this is something we're designing from scratch" saved as the liked job left a past-job question open
+        drop_ref(b)
         ref_open = None
-    if ref_open and intent_wants_render(t, text) and not voice:
+    # 21 Nov 2026 (Andy, 19 Nov): his change to the design ON SCREEN was stopped by that open question ("I couldn't find
+    # the past job you mentioned") and never drawn. A change to what's drawn is never held up by a past-job question.
+    changing_ = intent == "change_visual" and any(v.get("kind") == "render" for v in s["visuals"])
+    if ref_open and intent_wants_render(t, text) and not voice and not changing_:
         save_session(s)                   # 3 Nov 2026 (Muhammad): unsure which job = ask again, never draw something odd
         if b.get("_ref_confirm"):
             ch.ask(f"Before I draw it - do you mean {b['_ref_confirm']['label']}?", field="_ref_confirm",
@@ -4526,6 +4572,13 @@ def api_rt_tool():
             "appears on screen. It's provisional, from the concept, not a quote.")}))})
     if js.get("name") == "ballpark":
         import ballpark as bp_
+        q = quick_estimate_for(s)
+        if q:
+            log_msg(s["id"], "out", bp_.say_quick(q))
+            return jsonify({"slow": False, "quick_estimate": q, "output": _said(json.dumps({"say": bp_.say_quick(q), "note": (
+                "Say it in your own words: internal only, never for the client; the past job it started from and the main "
+                "adjustments; how sure it is; and that Estimate Lite gives the engine's priced estimate in 5-15 minutes. "
+                "The card with every adjustment is on screen.")}))})
         bp = ballpark_for(s)
         if not bp:
             return jsonify({"slow": False, "output": _said(json.dumps({"none": True, "say": (
@@ -6301,7 +6354,36 @@ import realtime_parts as rt   # live voice (ChatGPT-style) - same tools, same br
 rt.bind(globals())
 
 
+class Stamped:
+    """Every line SDI Live writes to its log starts with the date and time (21 Nov 2026: Andy's 19 Nov call could only be
+    found by its chat id - the lines said what happened but never when)."""
+
+    def __init__(self, out):
+        self.out, self.fresh = out, True
+
+    def write(self, text):
+        if not text:
+            return 0
+        stamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S ")
+        parts = text.split("\n")
+        done = []
+        for i, p in enumerate(parts):
+            if p and self.fresh:
+                p = stamp + p
+            done.append(p)
+            self.fresh = i < len(parts) - 1 or (self.fresh and not p)
+        self.out.write("\n".join(done))
+        return len(text)
+
+    def flush(self):
+        self.out.flush()
+
+    def __getattr__(self, name):
+        return getattr(self.out, name)
+
+
 if __name__ == "__main__":
+    sys.stdout, sys.stderr = Stamped(sys.stdout), Stamped(sys.stderr)
     import socket
     probe = socket.socket()
     try:

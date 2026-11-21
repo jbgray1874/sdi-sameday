@@ -130,13 +130,14 @@ TOOLS = [
     {"type": "function", "name": "estimate_lite",
      "description": "Estimate Lite: SDI's estimating engine prices the design on screen part by part from its render and "
                     "the brief - materials, labour and bought-in - at 1, 10 and the brief's quantity. Takes 5-15 minutes "
-                    "and appears on screen. Call it when the AM asks for Estimate Lite, a proper estimate or to price it "
-                    "up. Provisional, from a concept: never a quote for the client.",
+                    "and appears on screen. Call it only when the AM asks for Estimate Lite or a full / proper / detailed "
+                    "estimate (otherwise call ballpark). Provisional, from a concept: never a quote for the client.",
      "parameters": {"type": "object", "properties": {}}},
     {"type": "function", "name": "ballpark",
-     "description": "An INTERNAL guide price per unit, worked out from SDI's past quotes for the closest jobs - when the AM "
-                    "asks about budget, pricing, a ballpark or how much it'll cost. Say it's an internal guide only, never "
-                    "for the client, and how sure it is. It is not a quote: for a priced breakdown offer Estimate Lite.",
+     "description": "The QUICK estimate, in seconds: SDI's closest past job's own estimate (from K:), brought to today and "
+                    "adjusted for what's different about this design - each adjustment with its £ and reason. Call it when "
+                    "the AM asks about budget, pricing, a ballpark, how much it'll cost or 'an estimate'. Internal only, "
+                    "never for the client. Then offer Estimate Lite - the engine's priced estimate, 5-15 minutes.",
      "parameters": {"type": "object", "properties": {}}},
     {"type": "function", "name": "show_3d",
      "description": "Put a 3D model of the unit on screen that the AM can drag to turn round - made from the brief's "
