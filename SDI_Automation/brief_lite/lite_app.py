@@ -1148,6 +1148,7 @@ def visual_prompt(b, kind, change=None, refs=None, said=""):
     return base
 
 
+PENDING_CHARACTER = {}   # who -> the character the page has picked (Sid, Beth, Ray, Isla), put on the chat at its next turn
 STOP_RENDERS = {}   # chat id -> when the AM pressed Stop: no new picture is started for that chat until their next message
 
 
@@ -2849,6 +2850,8 @@ def handle(number, name, text, image_path=None, voice=False, ch=None, new=False,
         STOP_RENDERS.pop(s["id"], None)      # a new message from the AM: Stop no longer applies
     if PENDING_SPACES.get(number):
         s["brief"]["_spaces"] = PENDING_SPACES.pop(number)
+    if PENDING_CHARACTER.get(number):
+        s["brief"]["_character"] = PENDING_CHARACTER.pop(number)
     ch = ch or Channel(s["id"], number if not number.startswith("web:") else None)
     ch.sid, ch.voice = s["id"], bool(voice)
     paths = [x for x in (image_path if isinstance(image_path, list) else [image_path]) if x]
@@ -3197,7 +3200,8 @@ def handle(number, name, text, image_path=None, voice=False, ch=None, new=False,
                                            "\"make a render\" any time you want to see it."))
     if t_override is None and re.search(r"\bwhat (can|do) you do\b|\bhow (does this|do you) work\b|\bwhat are you( for)?\b|^\s*help\s*\??$",
                                         text or "", re.I):
-        ch.text("I'm Sid, SDI's design assistant. I take a client brief from you - by text, voice note or files - and:\n"
+        import characters
+        ch.text(f"I'm {characters.of(s)['name']}, SDI's design assistant. I take a client brief from you - by text, voice note or files - and:\n"
                 "• ask only the questions that matter for this kind of unit\n"
                 "• show SDI's past work for that client or unit type\n"
                 "• make concept renders (and a GA) you can change by just saying what you want\n"
@@ -4208,6 +4212,10 @@ def api_rt_session():
     who = "web:" + (project or re.sub(r"[^\w-]", "", js.get("who") or "test")[:40])
     sid = js.get("session") if not js.get("new") else None
     s = get_session(who, _project_name(project) or "Web", new=not sid, project=project, sid=sid)
+    if js.get("character"):
+        import characters
+        s["brief"]["_character"] = characters.key(js["character"])
+        save_session(s)
     if not s["brief"].get("briefing_date"):
         s["brief"]["briefing_date"] = f"{date.today():%a %d %b %Y}"
         save_session(s)
@@ -4887,6 +4895,9 @@ def api_chat():
     who = "web:" + (project or re.sub(r"[^\w-]", "", js.get("who") or "test")[:40])
     if js.get("spaces") and (js.get("new") or not sid):
         PENDING_SPACES[who] = [x for x in js["spaces"] if spaces.get(x)][:6]
+    if js.get("character"):
+        import characters
+        PENDING_CHARACTER[who] = characters.key(js["character"])
     return jsonify({"turn": _start_turn(who, _project_name(project) or "Web", (js.get("text") or "").strip(),
                                         new=bool(js.get("new")) or not sid, sid=sid, project=project)})
 
@@ -5066,6 +5077,24 @@ def api_page_problem():
     who = signed_in_user() or "not signed in"
     print(f"[page] {datetime.now():%H:%M:%S} {who} chat={chat or '-'} {what}", flush=True)
     return jsonify({"ok": True})
+
+
+@app.route("/api/avatar/<key>")
+def api_avatar(key):
+    """The character's portrait (brand/avatars/<key>.png, made once by make_avatars.py); none yet = 404 and the page
+    shows their initial on their colour."""
+    import characters
+    k = characters.key(key)
+    p = os.path.join(HERE, "brand", "avatars", f"{k}.png")
+    if k != re.sub(r"[^a-z]", "", str(key).lower()) or not os.path.isfile(p):
+        abort(404)
+    return send_file(p, mimetype="image/png", max_age=86400)
+
+
+@app.route("/api/characters")
+def api_characters():
+    import characters
+    return jsonify({"characters": characters.public(), "default": characters.DEFAULT})
 
 
 @app.route("/api/me")
@@ -5470,7 +5499,8 @@ def api_tts():
         abort(400)
     strict = request.args.get("strict") == "1"      # talk mode: Sid's own voice or an honest error - never a substitute
     try:
-        return send_file(natural_tts(t, request.args.get("session"), strict=strict), mimetype="audio/mpeg", max_age=86400)
+        return send_file(natural_tts(t, request.args.get("session"), strict=strict, character=request.args.get("c")),
+                         mimetype="audio/mpeg", max_age=86400)
     except Exception as e:
         print("tts failed:", str(e)[:200], flush=True)
         return jsonify({"error": str(e)[:200]}), (503 if strict else 500)
@@ -5482,14 +5512,23 @@ TTS_STYLE = ("A warm, natural British designer from London chatting to a colleag
              "friendly, contractions, no announcer voice, no robotic pauses.")
 
 
-def natural_tts(text, sid=None, strict=False):
+def natural_tts(text, sid=None, strict=False, character=None):
     """29 Oct 2026 (Muhammad: 'the voice is really bad'): voice-note replies in OpenAI's natural British voice, about
     1.5c a minute, cached by text. Falls back to the free Microsoft voice if OpenAI fails or the daily cap is reached."""
     import hashlib
     clean = re.sub(r"[*_`#]", "", text)[:1100]
     d = os.path.join(OUT, "tts")
     os.makedirs(d, exist_ok=True)
-    mp3 = os.path.join(d, "oa_" + hashlib.md5((TTS_VOICE + clean).encode()).hexdigest()[:16] + ".mp3")
+    # 21 Nov 2026: whoever the AM picked - Sid, Beth, Ray or Isla - in their own voice and accent (Sid as before)
+    import characters
+    if not character and sid:
+        s_ = _session_by_id(sid)
+        character = ((s_ or {}).get("brief") or {}).get("_character")
+    ck = characters.key(character)
+    voice_, style_ = (TTS_VOICE, TTS_STYLE) if ck == "sid" else (characters.CHARACTERS[ck]["tts_voice"],
+                                                              characters.CHARACTERS[ck]["tts_style"])
+    mp3 = os.path.join(d, "oa_" + hashlib.md5((voice_ + ("" if ck == "sid" else style_) + clean).encode()).hexdigest()[:16]
+                       + ".mp3")
     if os.path.exists(mp3):
         return mp3
     # 17 Nov 2026 (James: "we CANNOT fall back"): talk mode asks with strict=1. Sid's voice is OpenAI's; if it can't be made
@@ -5504,8 +5543,8 @@ def natural_tts(text, sid=None, strict=False):
         last = None
         for attempt in (1, 2):
             try:
-                r = OpenAI(timeout=40, max_retries=0).audio.speech.create(model=TTS_MODEL, voice=TTS_VOICE, input=clean,
-                                                                          instructions=TTS_STYLE, response_format="mp3", speed=1.12)
+                r = OpenAI(timeout=40, max_retries=0).audio.speech.create(model=TTS_MODEL, voice=voice_, input=clean,
+                                                                          instructions=style_, response_format="mp3", speed=1.12)
                 open(mp3, "wb").write(r.content)
                 log_cost(sid, "tts", round(len(clean) / 900 * 0.015, 5))   # ~900 characters a minute, ~1.5c a minute
                 return mp3

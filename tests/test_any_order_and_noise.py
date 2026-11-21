@@ -2563,7 +2563,7 @@ class TheAssistantIsCalledSidTests(unittest.TestCase):
         out, _ = say(who, "what can you do?", {})
         self.assertIn("I'm Sid", " ".join(r.get("text") or "" for r in out))
         self.assertNotIn('class="av">SDI<', PAGE)
-        self.assertIn('class="av">SID<', PAGE)
+        self.assertIn('let CH=', PAGE); self.assertIn('sid:{name:"Sid"', PAGE)      # 21 Nov 2026: Sid is the default character
         self.assertNotIn("<b>SDI</b>", PAGE)
 
 
@@ -2614,11 +2614,11 @@ class SidSpeaksInHisOwnVoiceOrSaysWhyNotTests(unittest.TestCase):
         self.assertNotIn("speechSynthesis", PAGE)
         self.assertNotIn("function sidFallback(", PAGE)
         turn = PAGE[PAGE.index("function talkTurn("):PAGE.index("async function listen(")]
-        self.assertIn("/api/tts?strict=1&t=", turn)
+        self.assertIn('/api/tts?strict=1&c="+CH.key+"&t=', turn)
         self.assertIn("if(attempt<1)", turn)                              # tried twice before anything is said
         self.assertIn("The browser blocked the sound", turn)
         self.assertIn("The voice didn't start within 8 seconds", turn)
-        self.assertIn("Sid's voice isn't available.", turn)
+        self.assertIn("${CH.name}'s voice isn't available.", turn)
         self.assertIn('data-act="sidretry"', turn)
         self.assertNotIn("player.onerror=()=>{player=null;listen()}", PAGE)   # no more silent skip to listening
 
@@ -2649,7 +2649,7 @@ class AnEmptyOpenAIAccountIsSaidPlainlyTests(unittest.TestCase):
         self.assertEqual(got["n"], "")
         start = PAGE[PAGE.index("async function rtStart("):PAGE.index("let wake=null;")]
         self.assertIn("if(noCredit(why)){", start)                         # no credit: one message, no talk-mode fallback
-        self.assertIn("Sid can't talk right now.", start)
+        self.assertIn("${CH.name} can't talk right now.", start)
         self.assertIn("const nc=noCredit(why)", PAGE)
 
 
@@ -2738,13 +2738,14 @@ class NothingIsDrawnUntilTheAMAsksTests(unittest.TestCase):
     def test_an_older_yes_never_counts_as_the_ask(self):
         _, s = self.matts_opening()[1:]
         L.log_msg(s["id"], "in", "yes")
+        time.sleep(0.01)                                     # lines are seconds apart on a call; never the same millisecond
         L.log_msg(s["id"], "in", "four shelves")
         b = L._session_by_id(s["id"])
         b["brief"]["_offer_asked"] = 1
         L.save_session(b)
         out = json.loads(self.client.post("/api/rt/tool", json={"session": s["id"], "name": "make_concepts",
                          "arguments": {"output": "3D render", "design_route": "new"}}).get_json()["output"])
-        self.assertIn("Not drawn", out.get("error", ""))
+        self.assertIn("Not drawn", out.get("error", ""), out)
 
     def test_sid_is_told_to_wait(self):
         self.assertIn("ONLY when the AM asks", rt.VOICE_RULES)
@@ -2873,3 +2874,52 @@ class SdiAndClientBrandingTests(unittest.TestCase):
         self.assertIn("#05054B", L._brand_colour_note({"client": "Boots", "colours_graphics": "Boots graphics all over"}))
         self.assertIn("#00539F", L._brand_colour_note({"client": "Tesco", "colours_graphics": "Tesco brand colors"}))
         self.assertIn("Colgate", L._brand_colour_note({"client": "Sainsburys", "colours_graphics": "Colgate branding on the header"}))
+
+
+class FourCharactersTests(unittest.TestCase):
+    """21 Nov 2026 (James): Sid, Beth (posh, polite, persuasive), a Birmingham and a Scottish voice, with avatars, picked
+    on the left."""
+
+    def setUp(self):
+        import characters
+        self.C = characters
+
+    def test_there_are_four_and_sid_is_the_default(self):
+        self.assertEqual(list(self.C.CHARACTERS), ["sid", "beth", "ray", "isla"])
+        self.assertEqual(self.C.key("nonsense"), "sid")
+        self.assertEqual(self.C.of({"brief": {}})["name"], "Sid")
+
+    def test_sids_instructions_are_unchanged(self):
+        s = {"id": "x", "visuals": [], "brief": {"_flow": 2, "client": "Tesco"}}
+        self.assertEqual(self.C.voice_rules(rt.VOICE_RULES, self.C.CHARACTERS["sid"]), rt.VOICE_RULES)
+        self.assertEqual(rt.session_config(s)["audio"]["output"]["voice"], rt.RT_VOICE)
+
+    def test_each_other_character_has_their_name_voice_and_accent_on_a_call(self):
+        for k, accent, voice in (("beth", "Received Pronunciation", "marin"), ("ray", "Birmingham", "ash"),
+                                 ("isla", "Scottish", "coral")):
+            s = {"id": "x" + k, "visuals": [], "brief": {"_flow": 2, "_character": k}}
+            rules = self.C.voice_rules(rt.VOICE_RULES, self.C.CHARACTERS[k])
+            name = self.C.CHARACTERS[k]["name"]
+            self.assertIn(f"You are {name},", rules)
+            self.assertIn(accent, rules)
+            self.assertNotIn("Sid", rules)
+            self.assertLess(len(rules), 8800)
+            self.assertEqual(rt.session_config(s)["audio"]["output"]["voice"], voice)
+
+    def test_talk_mode_and_the_page_follow_the_choice(self):
+        self.assertIn("&c=", PAGE)
+        self.assertIn('id="chars"', PAGE)
+        self.assertIn("character:CH.key", PAGE)
+        client = L.app.test_client()
+        self.assertEqual([c["name"] for c in client.get("/api/characters").get_json()["characters"]],
+                         ["Sid", "Beth", "Ray", "Isla"])
+        self.assertEqual(client.get("/api/avatar/../../etc").status_code, 404)
+
+    def test_a_chat_keeps_the_character_it_was_sent_with(self):
+        client = L.app.test_client()
+        L._start_turn, keep = (lambda *a, **k: "t"), L._start_turn
+        try:
+            client.post("/api/chat", json={"text": "hello", "new": True, "who": "chartest", "character": "isla"})
+        finally:
+            L._start_turn = keep
+        self.assertEqual(L.PENDING_CHARACTER.get("web:chartest"), "isla")

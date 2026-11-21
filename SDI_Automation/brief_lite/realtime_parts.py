@@ -18,6 +18,7 @@ always build the same brief. Cost: gpt-realtime (set in .env, 20 Oct 2026; was g
 """
 import json, os, re
 from datetime import datetime
+import characters
 
 G = {}
 
@@ -319,8 +320,9 @@ def instructions(s, mid_call=False):
     convo_text = saved_conversation(s["id"])
     name = first_name(s)
     st = stage_now(s)
-    return (
-        VOICE_RULES
+    c = characters.of(s)
+    return characters.say_name(
+        characters.voice_rules(VOICE_RULES, c)
         + "\n# This call\n"
         + f"Today is {G['date'].today():%A %d %B %Y}; it's {now:%H:%M}, the {part}. Greet only with the right part of "
           "the day, or just 'Hi'.\n"
@@ -344,7 +346,7 @@ def instructions(s, mid_call=False):
            "from you. What's the client after?')." if not known.get("client") and not convo_text else
            "This is the same brief you were already working on: don't greet them as new, and don't ask again for "
            "anything in BRIEF SO FAR or the conversation. Open with 'Hi, Sid here', then say in one short line where you got "
-           "to, then ask the next question.")))
+           "to, then ask the next question.")), c)
 
 
 # 4 Nov 2026: gpt-4o-transcribe has a successor for live audio, gpt-live-transcribe (OpenAI, 29 July 2026): fewer errors on
@@ -446,7 +448,8 @@ def session_config(s, far=True, model=None, live=True):
                                 "turn_detection": {"type": "semantic_vad", "eagerness": "low", "interrupt_response": False,
                                                    "create_response": False},
                                 "noise_reduction": {"type": "far_field" if far else "near_field"}},
-                      "output": {"voice": RT_VOICE, "speed": 1.08}},
+                      "output": {"voice": characters.of(s)["rt_voice"] if characters.key((s.get("brief") or {}).get("_character")) != "sid"
+                                 else RT_VOICE, "speed": 1.08}},
             "tools": TOOLS, "tool_choice": "auto"}
 
 

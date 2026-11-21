@@ -847,6 +847,10 @@ def converse(s, text, fast=False):
                if (sc := space_context(s, text)) else "")
             + (f"{cm}\n" if (cm := craft_memory(b)) else "")
             + f"\nCONVERSATION:\n{history(s['id'])}\n\nNEW MESSAGE FROM AM: {text}")
+    import characters                      # 21 Nov 2026: Sid, Beth, Ray or Isla - the one the AM picked
+    c_ = characters.of(s)
+    if c_["name"] != "Sid":
+        system = characters.say_name(system, c_) + f"\nYOUR MANNER: {c_['manner']}\n"
     client = anthropic.Anthropic(timeout=150, max_retries=1)
     msgs = [{"role": "user", "content": user}]
     if not fast:

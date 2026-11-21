@@ -918,7 +918,14 @@ button,input,textarea,select{font-family:inherit}
 .steps{background:color-mix(in srgb,var(--paper) 88%,transparent);border-bottom:1px solid var(--line)}
 .crumb{font-weight:500;border-right-color:var(--line)}.crumb b{font-weight:600}
 .steps .mbar.mbrief{border-radius:999px;border-color:var(--line);font-weight:600}
-.av{border-radius:50%;background:var(--y);color:var(--ink);font-size:9px;font-weight:700;letter-spacing:.08em}
+.av{border-radius:50%;background:var(--y);color:var(--ink);font-size:11px;font-weight:700;letter-spacing:.02em;position:relative;overflow:hidden}
+.av img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.chars{display:flex;flex-direction:column;gap:4px;margin:0 12px 12px}
+.chr{display:flex;gap:10px;align-items:center;padding:7px 9px;border:1px solid transparent;border-radius:12px;background:none;text-align:left;cursor:pointer;color:inherit}
+.chr:hover{background:rgba(0,0,0,.04)}
+.chr.on{border-color:var(--ink);background:rgba(246,217,70,.18)}
+.chr .av{width:34px;height:34px;margin:0;font-size:13px}
+.chn{display:flex;flex-direction:column;line-height:1.2}.chn b{font-size:13.5px}.chn small{font-size:11.5px;opacity:.7}
 .bub{border-radius:4px 20px 20px 20px;border-color:var(--line);box-shadow:none;padding:11px 16px;line-height:1.55}
 .me .bub{background:var(--ink);color:#fff;border-color:var(--ink);border-radius:20px 4px 20px 20px}
 .card{border-color:var(--line);border-radius:20px;box-shadow:var(--shadow)}
@@ -1067,6 +1074,8 @@ body:not(.branded) .vs-you.live p::after{background:var(--ink)}
   <div class="brand"><svg class="sdiwm" role="img" aria-label="we.are.sdi" viewBox="0 0 950 169" fill="none" xmlns="http://www.w3.org/2000/svg"> <path d="M158.91 36.77L135.38 114.85C133.11 122.35 130.44 133.08 129.13 138.46C127.99 133.14 125.68 122.65 123.77 115.37L103.18 36.77H80.96L59.63 115.36C57.71 122.53 55.26 133.19 54.05 138.53C52.76 133.17 50.13 122.39 48.03 114.86L25.72 36.77H2.41L42.88 164.18H64.81L86.14 87.54C88.19 80.21 90.50 70.16 91.68 64.87C92.79 70.16 94.97 80.21 97.02 87.54L118.11 164.18H139.79L181.49 36.77H158.91Z" fill="currentColor"/> <path d="M198.24 89.38C201.71 65.09 215.39 51.20 235.90 51.20C257.02 51.20 269.94 65.10 271.47 89.38H198.24ZM235.90 33.62C200.84 33.62 175.40 61.79 175.40 100.60C175.40 140.03 200.78 167.57 237.12 167.57C266.09 167.57 286.10 151.90 292.02 124.58L292.29 123.33H271.03L270.83 124.10C266.63 140.41 254.98 149.03 237.12 149.03C214.60 149.03 199.56 132.66 197.67 106.23H294.71V105.20C294.71 61.05 272.18 33.62 235.90 33.62Z" fill="currentColor"/> <path d="M423.09 99.34V116.84C423.09 129.47 413.09 149.51 386.25 149.51C374.76 149.51 361.06 146.03 361.06 129.45C361.06 111.98 374.55 109.01 395.10 106.47C405.22 105.35 416.17 102.54 423.09 99.34ZM442.87 145.21V75.14C442.87 48.07 427.17 34.35 396.20 34.35C365.32 34.35 345.88 50.57 344.19 77.74L344.13 78.84H365.11L365.18 77.89C366.61 59.68 376.54 51.20 396.44 51.20C413.72 51.20 422.85 58.47 422.85 72.23C422.85 84.77 413.6 87.91 394.16 89.87C365.81 92.71 338.12 98.13 338.12 129.93C338.12 152.21 355.49 166.60 382.36 166.60C399.06 166.60 412.19 160.66 422.44 148.45C422.81 156.82 424.03 161.37 426.55 163.88L426.85 164.18H447.48V161.87L447.02 161.56C445.35 160.45 442.87 154.48 442.87 145.21Z" fill="currentColor"/> <path d="M544.01 89.38C547.48 65.09 561.16 51.20 581.67 51.20C602.79 51.20 615.71 65.10 617.24 89.38H544.01ZM581.67 33.62C546.61 33.62 521.17 61.79 521.17 100.60C521.17 140.03 546.55 167.57 582.89 167.57C611.86 167.57 631.87 151.90 637.79 124.58L638.05 123.33H616.80L616.60 124.10C612.40 140.41 600.74 149.03 582.89 149.03C560.37 149.03 545.33 132.66 543.44 106.23H640.48V105.20C640.48 61.05 617.95 33.62 581.67 33.62Z" fill="currentColor"/> <path d="M851.70 149.27C829.69 149.27 816.56 131.25 816.56 101.08C816.56 71.21 829.93 52.65 851.46 52.65C875.53 52.65 890.48 71.21 890.48 101.08C890.48 143.01 866.18 149.27 851.70 149.27ZM889.27 52.95C880.17 40.79 866.17 33.86 850.48 33.86C816.91 33.86 794.35 60.78 794.35 100.84C794.35 141.52 816.57 167.82 850.97 167.82C867.23 167.82 879.13 162.36 889.27 150.19V164.18H910.99V0.13H889.27V52.95Z" fill="currentColor"/> <path d="M927.14 164.18H948.86V36.77H927.14V164.18Z" fill="currentColor"/> <path d="M927.14 21.26H948.86V0.13H927.14V21.26Z" fill="currentColor"/> <path d="M743.39 88.19C721.16 83.70 710.47 80.99 710.47 68.59C710.47 57.85 719.30 51.68 734.69 51.68C752.84 51.68 761.39 58.52 763.28 74.53L763.39 75.44H785.61L785.47 74.29C782.35 48.00 764.95 34.11 735.17 34.11C706.25 34.11 688.99 47.36 688.99 69.56C688.99 98.35 713.23 103.33 736.66 108.15C761.03 113.28 768.61 116.91 768.61 129.69C768.61 142.31 758.63 149.27 740.51 149.27C719.61 149.27 708.61 141.22 705.88 123.95L705.74 123.08H683.49L683.60 124.21C686.30 152.33 706.34 167.81 740.03 167.81C771.68 167.81 790.58 153.20 790.58 128.72C790.58 97.71 765.51 92.65 743.39 88.19Z" fill="currentColor"/> <path d="M525.69 57.69V37.10L525.04 36.85C522.56 35.85 520.48 35.32 516.64 35.32C502.33 35.32 488.73 42.98 479.81 55.94V36.77H458.08V164.18H479.81V93.57C479.81 69.25 497.61 56.53 515.19 56.53C519.06 56.53 520.87 56.78 523.60 57.69H525.69Z" fill="currentColor"/> <path d="M304.43 145.84H322.87V164.15H304.43V145.84Z" fill="currentColor"/> <path d="M650.64 145.69H669.08V164.00H650.64V145.69Z" fill="currentColor"/> </svg><div class="prodname"><i class="ydot"></i>Live</div></div>
   <button class="newbtn" id="newb"><span class="nplus" aria-hidden="true">+</span>New chat</button>
   <button id="install">📲 Install the app</button>
+  <div class="rlab">Talk to</div>
+  <div class="chars" id="chars" role="radiogroup" aria-label="Who you talk to"></div>
   <nav class="snav" id="snav">
    <a class="sn" data-v="home" href="#"><svg class="svgi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m3 10 9-7 9 7v10a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1z"/></svg><span>Home</span></a>
    <a class="sn" data-v="all" href="#"><svg class="svgi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="4" height="16" rx="1"/><rect x="9" y="4" width="4" height="16" rx="1"/><path d="m15.5 5 3.6-1 2.4 15.6-3.6 1z"/></svg><span>All</span></a>
@@ -1203,11 +1212,26 @@ function vnEl(src,peaks,dur,auto){const w=document.createElement("div");w.classN
 function vnPlain(t){return String(t||"").replace(/\*\*?|__|`|#+ /g,"").replace(/\[([^\]]+)\]\([^)]+\)/g,"$1").replace(/\s+/g," ").trim()}
 function vnAttach(d){if(!vnQueue.length)return;const text=vnPlain(vnQueue.join(" "));vnQueue=[];if(!text)return;
  const bub=d.querySelector(".bub");if(!bub)return;const hide=document.createElement("div");hide.className="vnhide";while(bub.firstChild)hide.appendChild(bub.firstChild);const v=vnEl(null,null,0,false);v.classList.add("sdivn");bub.appendChild(v);const tg=document.createElement("button");tg.className="vntg";tg.textContent="Show text";tg.onclick=()=>{const o=bub.classList.toggle("vnopen");tg.textContent=o?"Hide text":"Show text"};bub.appendChild(tg);bub.appendChild(hide);bub.classList.add("vnonly");
- const u="/api/tts?t="+encodeURIComponent(text.slice(0,1100))+(sid?"&session="+sid:"");
+ const u="/api/tts?t="+encodeURIComponent(text.slice(0,1100))+(sid?"&session="+sid:"")+"&c="+CH.key;
  // play replies one after another, the first straight away (like a voice-note thread)
  const go=()=>{v.setSrc(u);v.audio.play().catch(()=>{})};
  if(vnPlaying&&!vnPlaying.paused){const prev=vnPlaying;const old=prev.onended;prev.addEventListener("ended",go,{once:true});v.setSrc(u);v.audio.pause()}else go()}
-function row(html,me){const d=document.createElement("div");d.className="row"+(me?" me":"");d.innerHTML=(me?"":`<div class="av">SID</div>`)+`<div class="bub">${html}</div>`;log.appendChild(d);if(!me&&vnReply)vnAttach(d);scrollEnd();return d}
+// 21 Nov 2026 (James): four characters - Sid, Beth, Ray, Isla - picked on the left, kept on this device. Each chat uses
+// the one picked when it was sent; a call started now uses it (a call already going keeps its voice).
+const CHARS={sid:{name:"Sid",he:"he",tagline:"Sharp, quick, London designer",colour:"#F6D946"},
+ beth:{name:"Beth",he:"she",tagline:"Polished, polite and persuasive",colour:"#E1E1D5"},
+ ray:{name:"Ray",he:"he",tagline:"Friendly, down-to-earth Brummie",colour:"#282928"},
+ isla:{name:"Isla",he:"she",tagline:"Calm, clear and Scottish",colour:"#71716B"}};
+let CH=(()=>{let k="sid";try{k=localStorage.getItem("sdi_char")||"sid"}catch(e){}return Object.assign({key:CHARS[k]?k:"sid"},CHARS[CHARS[k]?k:"sid"])})();
+function avHtml(k){const c=k?Object.assign({key:k},CHARS[k]):CH;const dark=c.key==="ray"||c.key==="isla";
+ return `<div class="av av-${c.key}" style="background:${c.colour};color:${dark?"#fff":"#000"}"><img src="/api/avatar/${c.key}" alt="" onerror="this.remove()"><span>${c.name.slice(0,1)}</span></div>`}
+function pickChar(k){if(!CHARS[k])return;CH=Object.assign({key:k},CHARS[k]);try{localStorage.setItem("sdi_char",k)}catch(e){}drawChars();
+ if(typeof rt!=="undefined"&&rt)toast(CH.name+" takes over from your next call");else toast("You're talking to "+CH.name)}
+function drawChars(){const box=document.getElementById("chars");if(!box)return;
+ box.innerHTML=Object.keys(CHARS).map(k=>`<button class="chr${k===CH.key?" on":""}" role="radio" aria-checked="${k===CH.key}" data-char="${k}" type="button">${avHtml(k)}<span class="chn"><b>${CHARS[k].name}</b><small>${CHARS[k].tagline}</small></span></button>`).join("")}
+document.addEventListener("click",e=>{const b=e.target.closest&&e.target.closest("[data-char]");if(b){e.preventDefault();pickChar(b.dataset.char)}});
+drawChars();document.addEventListener("DOMContentLoaded",drawChars);
+function row(html,me){const d=document.createElement("div");d.className="row"+(me?" me":"");d.innerHTML=(me?"":avHtml())+`<div class="bub">${html}</div>`;log.appendChild(d);if(!me&&vnReply)vnAttach(d);scrollEnd();return d}
 function block(html){const d=document.createElement("div");d.className="block";d.innerHTML=html;log.appendChild(d);scrollEnd();return d}
 function zoomable(url,cap){gallery.push({url,cap});return gallery.length-1}
 // ---------- rendering each reply
@@ -1215,7 +1239,7 @@ function zoomable(url,cap){gallery.push({url,cap});return gallery.length-1}
 const LS={showing:false,timer:0,t0:0,label:"A"};
 function lsBlur(on){const m=$(".main");if(m)m.classList.toggle("live-blur",!!on&&!!rt)}
 function lsYou(t,live){const e=$("#vs-you");if(!e)return;e.innerHTML=t?`<b>You</b><p>${esc(String(t).slice(-260))}</p>`:"";e.classList.toggle("live",!!live)}
-function lsSdi(t){const e=$("#vs-sdi");if(!e)return;e.innerHTML=t?`<b>Sid</b><p>${esc(String(t).slice(-320))}</p>`:""}
+function lsSdi(t){const e=$("#vs-sdi");if(!e)return;e.innerHTML=t?`<b>${CH.name}</b><p>${esc(String(t).slice(-320))}</p>`:""}
 function lsWork(on,title,sub,secs){const w=$("#vs-work");if(!w)return;clearInterval(LS.timer);w.classList.toggle("on",!!on);if(!on)return;
  $("#vs-work-t").textContent=title;$("#vs-work-s").textContent=sub;LS.t0=Date.now();const bar=$("#vs-bar");bar.style.width="3%";
  LS.timer=setInterval(()=>{bar.style.width=Math.min(94,(Date.now()-LS.t0)/1000/secs*100)+"%"},1000);
@@ -1371,7 +1395,7 @@ async function poll(turn,wait){let seen=0;
   wait.querySelector(".lbl").textContent=/technical GA|\bGA\b/.test(last.text||"")&&!/new design|render|concept/i.test(last.text||"")?"Drawing the technical GA…":/concept|minute|making|remaking/i.test(last.text||"")?"Making the concepts and checking them…":/history|built before/i.test(last.text||"")?"Looking through SDI's history…":"Thinking…";
   await new Promise(z=>setTimeout(z,1200))}
  busy=false;$("#send").disabled=false;loadHist();loadFiles();if(talkOn&&!rt)talkTurn()}
-function waiter(){const d=document.createElement("div");d.className="row";d.innerHTML=`<div class="av">SID</div><div class="bub typing"><span class="sp"></span><span class="lbl">Thinking…</span><button class="stopr" title="Stop - nothing more is made, so no credit is spent">■ Stop</button></div>`;
+function waiter(){const d=document.createElement("div");d.className="row";d.innerHTML=avHtml()+`<div class="bub typing"><span class="sp"></span><span class="lbl">Thinking…</span><button class="stopr" title="Stop - nothing more is made, so no credit is spent">■ Stop</button></div>`;
  d.querySelector(".stopr").onclick=async e=>{const b=e.currentTarget;b.disabled=true;b.textContent="Stopped";d.dataset.stopped=1;
   if(sid)await fetch("/api/stop",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({session:sid})}).catch(()=>{});
   d.querySelector(".lbl").textContent="Stopped";stopSpeaking();if(vnPlaying)vnPlaying.pause();d.querySelector(".sp")?.remove();toast("Stopped - nothing new will be made")};
@@ -1380,7 +1404,7 @@ async function send(text,shown,vnRow){text=(text??t.value).trim();if(!text||busy
  if(!project){toast("Pick your name first");newBrief();return}
  const hero=$(".hero");if(hero)hero.remove();stopSpeaking();lastAsk="";
  t.value="";t.style.height="";busy=true;$("#send").disabled=true;if(vnRow){const tx=vnRow.querySelector(".vtx");if(tx){tx.textContent="";tx.title=shown||text}}else row(esc(shown||text),true);const w=waiter();
- try{const r=await fetch("/api/chat",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({text,new:!sid,session:sid,project,who,spaces:!sid&&pendingSpaces?pendingSpaces:undefined})}).then(r=>r.json());fresh=false;await poll(r.turn,w)}
+ try{const r=await fetch("/api/chat",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({text,new:!sid,session:sid,project,who,character:CH.key,spaces:!sid&&pendingSpaces?pendingSpaces:undefined})}).then(r=>r.json());fresh=false;await poll(r.turn,w)}
  catch(e){w.querySelector(".lbl").textContent="Sorry - "+e;busy=false;$("#send").disabled=false}}
 window.send=send;
 $("#send").onclick=()=>send();
@@ -1414,7 +1438,7 @@ async function loadFiles(){if(!sid){$("#flist").innerHTML="";return}
 let rt=null;
 async function rtStart(){if(!project){toast("Pick your name first");newBrief();return true}
  talkUI(true,"Connecting…");
- const j=await fetch("/api/rt/session",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({who,new:!sid,session:sid,project,mobile:/Android|iPhone|iPad|Mobile/i.test(navigator.userAgent)})}).then(r=>r.json()).catch(e=>({error:String(e)}));
+ const j=await fetch("/api/rt/session",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({who,new:!sid,session:sid,project,character:CH.key,mobile:/Android|iPhone|iPad|Mobile/i.test(navigator.userAgent)})}).then(r=>r.json()).catch(e=>({error:String(e)}));
  if(j.error){   // 2 Nov 2026: an expired OpenAI key silently dropped to the slow talk mode - say what is wrong instead
   const key=/expired|invalid|401|api key|OPENAI_API_KEY|incorrect/i.test(j.error),cap=/budget/i.test(j.error);
   if(key||cap){vpLog("live voice: "+(cap?"today's budget is used up":"the OpenAI key was refused"));talkOn=false;$("#talk").classList.remove("on");{const h=$(".hero");if(h)h.remove()}
@@ -1441,7 +1465,7 @@ async function rtStart(){if(!project){toast("Pick your name first");newBrief();r
  if(!ans.ok){const why=await ans.text().catch(()=>"");rtStop();
   if(noCredit(why)){   // talk mode uses the same OpenAI account, so it can't help: one plain message, no fallback
    talkOn=false;$("#talk").classList.remove("on");vpLog("live voice: openai "+ans.status+" - no credit on SDI's OpenAI account | "+browserTag());
-   vpShow(`<b>Sid can't talk right now.</b> ${esc(noCredit(why))}`,"start");return true}
+   vpShow(`<b>${CH.name} can't talk right now.</b> ${esc(noCredit(why))}`,"start");return true}
   talkOn=true;$("#talk").classList.add("on");voiceProblem("openai "+ans.status,`OpenAI refused the voice connection (error ${ans.status}).`,why.slice(0,120));return false}
  await pc.setRemoteDescription({type:"answer",sdp:await ans.text()});
  // 17 Nov 2026: a connection that never opens said nothing - say so after 12 seconds
@@ -1779,7 +1803,7 @@ function orbLvl(x,src){const o=$("#vo-orb"),v=$("#vo");if(!o||!v)return;
  voPrev=voPrev*.55+Math.max(0,Math.min(1,x))*.45;o.style.setProperty("--lvl",voPrev.toFixed(3))}
 function voNote(t){const v=$("#vo");if(!v||!v.classList.contains("on")||(rt&&rt.paused))return;v.dataset.s="thinking";$("#vo-state").textContent=t}
 function voCap(t,who){if(who==="you")lsYou(t,false);else if(who==="sdi")lsSdi(t);else if(!t){lsYou("");lsSdi("")}
- const c=$("#vo-cap");if(!c)return;c.innerHTML=t?`<b>${who==="you"?"You":"Sid"}</b>${esc(String(t).slice(-320))}`:""}
+ const c=$("#vo-cap");if(!c)return;c.innerHTML=t?`<b>${who==="you"?"You":CH.name}</b>${esc(String(t).slice(-320))}`:""}
 function fakeTalk(){if(voFake)return;const go=()=>{const v=$("#vo");if(!v||v.dataset.s!=="speaking"||rt){voFake=0;return}
   const t=performance.now()/1000;orbLvl(.35+.25*Math.sin(t*7.3)+.15*Math.sin(t*13.1),"out");voFake=requestAnimationFrame(go)};voFake=requestAnimationFrame(go)}
 let voCtx=null;
@@ -1806,7 +1830,7 @@ function talkTurn(){if(!talkOn)return;const say=(lastAsk||"").replace(/\n+/g," "
 async function sidPlay(say,my,attempt){
  const gone=()=>my!==ttsSeq||!talkOn;
  const fail=why=>{if(gone())return;if(attempt<1){setTimeout(()=>sidPlay(say,my,attempt+1),1200);return}sidVoiceDown(say,why)};
- let r;try{r=await fetch("/api/tts?strict=1&t="+encodeURIComponent(say))}catch(e){return fail("The page couldn't reach the server ("+((e&&e.message)||"network")+")")}
+ let r;try{r=await fetch("/api/tts?strict=1&c="+CH.key+"&t="+encodeURIComponent(say))}catch(e){return fail("The page couldn't reach the server ("+((e&&e.message)||"network")+")")}
  if(!r.ok){let m="";try{m=(await r.json()).error||""}catch(e){}return fail(m||"The server answered "+r.status)}
  let blob;try{blob=await r.blob()}catch(e){return fail("The voice file didn't download")}
  if(gone())return;
@@ -1817,7 +1841,7 @@ async function sidPlay(say,my,attempt){
  try{await a.play()}catch(e){if(player===a){player=null;fail("The browser blocked the sound ("+((e&&e.name)||"?")+")")}return}
  setTimeout(()=>{if(player===a&&!started&&a.paused){player=null;fail("The voice didn't start within 8 seconds")}},8000)}
 function sidVoiceDown(say,why){vpLog("talk mode: Sid's voice failed - "+why+" | "+browserTag());window.__sidSay=say;
- const nc=noCredit(why),msg=`<b>Sid's voice isn't available.</b> ${esc(nc||String(why).replace(/\.$/,"")+". He can't speak, so nothing is read out")}${nc?"":"."} <button class="vo-link" data-act="sidretry" type="button">Try again</button> &middot; <button class="vo-link" data-act="soundcheck" type="button">Test sound and microphone</button>`,
+ const nc=noCredit(why),msg=`<b>${CH.name}'s voice isn't available.</b> ${esc(nc||String(why).replace(/\.$/,"")+". "+(CH.he==="she"?"She":"He")+" can't speak, so nothing is read out")}${nc?"":"."} <button class="vo-link" data-act="sidretry" type="button">Try again</button> &middot; <button class="vo-link" data-act="soundcheck" type="button">Test sound and microphone</button>`,
   cur=document.getElementById("vpbar");
  if(cur&&cur.dataset.tag==="start")cur.querySelector("span").insertAdjacentHTML("beforeend","<br>"+msg);   // keep the first, bigger problem on screen
  else vpShow(msg,"tts")}
