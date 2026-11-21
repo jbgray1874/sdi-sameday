@@ -1252,6 +1252,8 @@ function drawChars(){const box=document.getElementById("chars");if(!box)return;
  // 21 Nov 2026: one row of four faces and one line for the one picked - the list of four pushed Spaces and Projects off
  box.innerHTML=`<div class="chrow">${Object.keys(CHARS).map(k=>`<button class="chr${k===CH.key?" on":""}" role="radio" aria-checked="${k===CH.key}" aria-label="${CHARS[k].name} - ${CHARS[k].tagline}" title="${CHARS[k].name} - ${CHARS[k].tagline}" data-char="${k}" type="button">${avHtml(k)}<span>${CHARS[k].name}</span></button>`).join("")}</div><div class="chsel">${CH.tagline}</div>`}
 document.addEventListener("click",e=>{const b=e.target.closest&&e.target.closest("[data-char]");if(b){e.preventDefault();pickChar(b.dataset.char)}});
+// a button that says something for you ("AI estimate", "Estimate Lite") - as if typed
+document.addEventListener("click",e=>{const b=e.target.closest&&e.target.closest("[data-say]");if(b&&typeof send==="function"){e.preventDefault();send(b.dataset.say)}});
 drawChars();voFace();document.addEventListener("DOMContentLoaded",()=>{drawChars();voFace()});
 // 21 Nov 2026 (James: "3 d visuals that can rotate"): the unit as boxes at the brief's exact sizes (model3d.py), drawn
 // here on a canvas - no library to download - turning slowly until touched; drag to turn it, double-tap to reset.
@@ -1289,7 +1291,7 @@ function aiCard(e){if(!e||!e.prices)return null;const gbp=v=>"£"+(+v).toLocaleS
   ${(e.setup||[]).length?`<tr class="qg"><td colspan="2"><b>One-off setup</b> (paid once, shared over the order)</td></tr>${e.setup.map(x=>`<tr><td>${esc(x.what)}</td><td>${gbp(x.gbp)}</td></tr>`).join("")}<tr class="qtot"><td>Setup</td><td>${gbp(e.setup_total)}</td></tr>`:""}</table>
   <div class="bpn" style="font-size:15px">${e.prices.map(p=>`<span>${gbp(p.unit_gbp)} a unit at ${esc(p.qty)}</span>`).join(" · ")}<i class="bpc bpc-${esc(conf)}">${esc(conf)} confidence</i></div>
   ${(e.assumptions||[]).length?`<div class="bpw">Assumed: ${e.assumptions.map(esc).join("; ")}</div>`:""}${e.risk?`<div class="bpw">Biggest risk: ${esc(e.risk)}</div>`:""}
-  <div class="bpf">Costed by the AI model from the render and brief${e.yardstick?`, against SDI's ${esc(e.yardstick.job)} (${gbp(e.yardstick.today)} a unit today)`:""}. For the estimating engine's figure, ask for <b>Estimate Lite</b>.</div></div>`)}
+  <div class="bpf">Costed by the AI model from the render and brief${e.yardstick?`, against SDI's ${esc(e.yardstick.job)} (${gbp(e.yardstick.today)} a unit today)`:""}. For the estimating engine's figure: <button class="vo-link" type="button" data-say="Estimate Lite">Estimate Lite</button> (5-15 minutes).</div></div>`)}
 function qeCard(q){if(!q||!q.base)return null;const gbp=v=>"£"+Math.round(+v).toLocaleString("en-GB");const sg=v=>(v<0?"−":"+")+gbp(Math.abs(v));
  const conf=String(q.confidence||"").split(" - ")[0],b=q.base;
  return block(`<div class="card bp qe"><div class="ch"><span class="ico">⚡</span><b>Quick estimate - internal, not for the client</b></div>
@@ -1298,7 +1300,7 @@ function qeCard(q){if(!q||!q.base)return null;const gbp=v=>"£"+Math.round(+v).t
   <tr class="qtot"><td>Per unit at ${esc(b.qty)}</td><td>${gbp(q.unit_gbp)}</td></tr></table>
   <div class="bpn" style="font-size:15px">${(q.prices||[]).map(p=>`<span>${gbp(p.unit_gbp)} at ${esc(p.qty)}</span>`).join(" · ")}<i class="bpc bpc-${esc(conf)}">${esc(conf)} confidence</i></div>
   ${(q.assumptions||[]).length?`<div class="bpw">Assumed: ${q.assumptions.map(esc).join("; ")}</div>`:""}
-  <div class="bpf">Past jobs in range: ${gbp(q.band.low)}-${gbp(q.band.high)} (${esc(q.band.n)} quote${q.band.n==1?"":"s"}). More: the <b>AI estimate</b> costs it line by line (about a minute); <b>Estimate Lite</b> is the estimating engine (5-15 minutes).</div></div>`)}
+  <div class="bpf">Past jobs in range: ${gbp(q.band.low)}-${gbp(q.band.high)} (${esc(q.band.n)} quote${q.band.n==1?"":"s"}). More detail: <button class="vo-link" type="button" data-say="AI estimate">AI estimate</button> (about a minute) &middot; <button class="vo-link" type="button" data-say="Estimate Lite">Estimate Lite</button> (the estimating engine, 5-15 minutes).</div></div>`)}
 function bpCard(bp){if(!bp)return null;const gbp=v=>"£"+Math.round(+v).toLocaleString("en-GB");
  const conf=String(bp.confidence||"").split(" - ")[0];
  const rows=(bp.basis||[]).map(u=>`<li><b>${esc(u.job)}</b> ${esc(u.name||"")} - ${gbp(u.unit_cost)} a unit${u.qty?" for "+esc(u.qty):""}${u.date?" ("+esc(String(u.date).slice(0,4))+")":""} &rarr; ${gbp(u.today)} today${bp.qty?" at "+esc(bp.qty):""}</li>`).join("");
@@ -1662,7 +1664,11 @@ function meter(stream){const ctx=new (window.AudioContext||window.webkitAudioCon
   bars.forEach((b,i)=>b.style.height=Math.min(20,4+r*420*(0.6+((i*7)%5)/5))+"px");orbLvl(r*8,"in");
   rt.lvl=Math.max(r,(rt.lvl||0)*0.9);if(!rt.speaking&&r<0.06)rt.floor=(rt.floor??r)*0.985+r*0.015;   // the room's background level
   if(rt.inTurn||rt.held)rt.peak=Math.max(rt.peak||0,r);
-  if(rt.speaking&&r>Math.max(0.1,(rt.floor||0)*6)){if(++loud>=18){loud=0;rt.speaking=false;rtSay({type:"response.cancel"});rtSay({type:"output_audio_buffer.clear"});talkUI(true,"Listening…")}}else loud=0;
+  // 21 Nov 2026 (James: "the voice missed a bunch of words compared to what was printed"): 0.3 s over 0.1 stopped Sid
+  // mid-sentence - his own voice coming back from laptop speakers, a cough or an "mm" was enough, and the words already
+  // on screen were never heard. Now about 0.7 s of clearly louder sound, and each stop is logged with its level.
+  if(rt.speaking&&r>Math.max(0.16,(rt.floor||0)*9)){if(++loud>=42){loud=0;rt.speaking=false;rtSay({type:"response.cancel"});rtSay({type:"output_audio_buffer.clear"});talkUI(true,"Listening…");
+    vpLog("barge-in: "+CH.name+" was stopped mid-sentence by sound at level "+r.toFixed(3)+" (room "+(rt.floor||0).toFixed(3)+") | "+browserTag())}}else loud=Math.max(0,loud-2);
   requestAnimationFrame(tick)};tick()}
 // The voice replies only once real words have been heard (the room, a cough or the speaker's own echo never start a reply),
 // and what the AM asked for - past work, a render - is started by Brief Lite itself, then the voice is told it's on screen.

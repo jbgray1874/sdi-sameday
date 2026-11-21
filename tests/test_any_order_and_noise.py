@@ -3186,3 +3186,17 @@ class AIEstimateTests(unittest.TestCase):
         self.assertFalse(L.AI_ESTIMATE_ASK.search("price it up"))              # that's the quick one
         self.assertIn("ai_estimate", {t["name"] for t in rt.TOOLS})
         self.assertIn("function aiCard(", PAGE)
+
+
+class SidIsNotCutOffByEchoTests(unittest.TestCase):
+    """21 Nov 2026 (James: "the voice of sid ... missed a bunch of words compared to what was printed on the screen")."""
+
+    def test_stopping_him_needs_clear_speech_and_is_logged(self):
+        self.assertNotIn("loud>=18", PAGE)
+        self.assertIn("r>Math.max(0.16,(rt.floor||0)*9)){if(++loud>=42)", PAGE)
+        self.assertIn('vpLog("barge-in: "', PAGE)
+
+    def test_the_cards_offer_the_other_estimates(self):
+        self.assertIn('data-say="AI estimate"', PAGE)
+        self.assertIn('data-say="Estimate Lite"', PAGE)
+        self.assertIn("AI estimate (line by line", next(t["description"] for t in rt.TOOLS if t["name"] == "ballpark"))

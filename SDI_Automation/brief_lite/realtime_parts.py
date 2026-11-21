@@ -143,7 +143,8 @@ TOOLS = [
      "description": "The QUICK estimate, in seconds: SDI's closest past job's own estimate (from K:), brought to today and "
                     "adjusted for what's different about this design - each adjustment with its £ and reason. Call it when "
                     "the AM asks about budget, pricing, a ballpark, how much it'll cost or 'an estimate'. Internal only, "
-                    "never for the client. Then offer Estimate Lite - the engine's priced estimate, 5-15 minutes.",
+                    "never for the client. Then offer the two fuller ones once: the AI estimate (line by line, about a minute) "
+                    "or Estimate Lite (the estimating engine, 5-15 minutes).",
      "parameters": {"type": "object", "properties": {}}},
     {"type": "function", "name": "show_3d",
      "description": "Put a 3D model of the unit on screen that the AM can drag to turn round - made from the brief's "
