@@ -219,5 +219,5 @@ def say(rec):
     ps = (rec.get("result") or {}).get("prices") or []
     if not ps:
         return "Estimate Lite finished but gave no unit price - the workbook says why."
-    bits = "; ".join(f"£{p['unit_gbp']:,.0f} a unit at {p['qty']}" for p in ps)
-    return f"Estimate Lite (provisional, from the concept - not a quote): {bits}."
+    bits = "; ".join(f"£{p['unit_gbp']:,.0f} a unit to make at {p['qty']}" for p in ps)
+    return f"Estimate Lite (provisional, from the concept - cost before margin, not a selling price or a quote): {bits}."

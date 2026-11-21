@@ -165,7 +165,7 @@ def quick(brief, quotes, ask, brief_qty=None, today=None):
 
 def say_quick(q):
     at = next((p for p in q["prices"] if p["qty"] == q["base"]["qty"]), q["prices"][0])
-    return (f"Quick estimate - internal, not for the client: about £{at['unit_gbp']:,.0f} a unit at {at['qty']}, from SDI's "
+    return (f"Past jobs estimate - internal, not for the client: a cost to make of about £{at['unit_gbp']:,.0f} a unit at {at['qty']}, from SDI's "
             f"{q['base']['job']} (£{q['base']['quoted']:,.0f} a unit) adjusted for {len(q['adjustments'])} difference"
-            f"{'s' if len(q['adjustments']) != 1 else ''}. Confidence: {q['confidence'].split(' - ')[0]}. For the engine's "
+            f"{'s' if len(q['adjustments']) != 1 else ''}. Cost before margin, not a selling price. Confidence: {q['confidence'].split(' - ')[0]}. For the engine's "
             "priced estimate, ask for Estimate Lite (5-15 minutes).")

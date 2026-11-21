@@ -3089,8 +3089,8 @@ class EstimateLiteTests(unittest.TestCase):
         rec = self.E.watch(self.db, "chat1", "abc123", self.get, sleep=lambda s: None)
         self.assertEqual(rec["status"], "done")
         self.assertEqual(rec["result"]["prices"], [{"qty": 1, "unit_gbp": 412.0}, {"qty": 10, "unit_gbp": 318.4}])
-        self.assertIn("£318 a unit at 10", self.E.say(rec))
-        self.assertIn("not a quote", self.E.say(rec))
+        self.assertIn("£318 a unit to make at 10", self.E.say(rec))
+        self.assertIn("not a selling price or a quote", self.E.say(rec))
 
     def test_asked_for_in_chat_and_on_calls(self):
         for line in ("can we get an Estimate Lite", "run a proper estimate on it", "I need a full estimate"):

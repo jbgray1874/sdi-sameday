@@ -109,6 +109,6 @@ def estimate(brief, image_path, quotes_today, ask, brief_qty=None):
 
 def say(e):
     at = next((p for p in e["prices"] if p["qty"] == 10), e["prices"][0])
-    return (f"AI estimate - internal, not for the client: about £{at['unit_gbp']:,.0f} a unit at {at['qty']} "
+    return (f"AI estimate - internal, not for the client: a cost to make of about £{at['unit_gbp']:,.0f} a unit at {at['qty']} "
             f"(£{e['unit_variable']:,.0f} a unit to make, plus £{e['setup_total']:,.0f} one-off setup shared over the "
-            f"order). Confidence: {e['confidence'].split(' - ')[0]}.")
+            f"order) - cost before margin, not a selling price. Confidence: {e['confidence'].split(' - ')[0]}.")

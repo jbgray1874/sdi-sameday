@@ -1267,7 +1267,7 @@ function elInner(r){const gbp=v=>"£"+(+v).toLocaleString("en-GB",{minimumFracti
  if(!r)return "";const st=String(r.status||"queued");
  if(st==="done"){const ps=(r.result&&r.result.prices)||[];
   return `<div class="ch"><span class="ico">📊</span><b>Estimate Lite - Option ${esc(r.label||"A")} - provisional, from the concept (not drawings)</b></div>`+
-   (ps.length?`<table class="elt"><tr><th>Quantity</th><th>£ per unit</th></tr>${ps.map(p=>`<tr><td>${esc(p.qty)}</td><td><b>${gbp(p.unit_gbp)}</b></td></tr>`).join("")}</table>`:"<p>It finished without a unit price - the workbook says why.</p>")+
+   (ps.length?`<table class="elt"><tr><th>Quantity</th><th>Cost per unit (before margin)</th></tr>${ps.map(p=>`<tr><td>${esc(p.qty)}</td><td><b>${gbp(p.unit_gbp)}</b></td></tr>`).join("")}</table>`:"<p>It finished without a unit price - the workbook says why.</p>")+
    `<div class="elf">Priced by SDI's estimating engine part by part from the render and the brief - a measurement, not a quote. Run ${esc(r.run_id)}.`+
    (r.result&&r.result.workbook?` <a href="/api/estimate-lite/${esc(sid)}/workbook">Download the DRAFT workbook</a>`:"")+`</div>`}
  if(["error","failed","cancelled","abandoned","timeout"].includes(st))
@@ -1286,7 +1286,7 @@ function aiCard(e){if(!e||!e.prices)return null;const gbp=v=>"£"+(+v).toLocaleS
  const conf=String(e.confidence||"").split(" - ")[0],G={"materials":"Materials","labour":"Labour","bought-in":"Bought-in","finish":"Finish","packing":"Packing"};
  const groups=Object.keys(G).filter(g=>(e.per_unit||[]).some(x=>x.group===g));
  const tot=Object.values(e.split||{}).reduce((a,b)=>a+b,0)||1;
- return block(`<div class="card bp qe"><div class="ch"><span class="ico">🤖</span><b>AI estimate - internal, not for the client</b></div>
+ return block(`<div class="card bp qe"><div class="ch"><span class="ico">🤖</span><b>AI estimate - internal, not for the client</b></div><div class="bpw"><b>Cost to make per unit, before margin - not a selling price.</b></div>
   <div class="aibar">${groups.map(g=>`<span style="flex:${(e.split[g]||0)/tot}" title="${G[g]} ${gbp(e.split[g]||0)}">${G[g]} ${Math.round(100*(e.split[g]||0)/tot)}%</span>`).join("")}</div>
   <table class="qet">${groups.map(g=>`<tr class="qg"><td colspan="2"><b>${G[g]}</b></td></tr>`+(e.per_unit||[]).filter(x=>x.group===g).map(x=>`<tr><td>${esc(x.what)}</td><td>${gbp(x.gbp)}</td></tr>`).join("")).join("")}
   <tr class="qtot"><td>To make, per unit</td><td>${gbp(e.unit_variable)}</td></tr>
@@ -1307,7 +1307,7 @@ function autoCard(label){const chat=sid;const el=block(`<div class="mstat"><span
  setTimeout(tick,2500);return el}
 function qeCard(q){if(!q||!q.base)return null;const gbp=v=>"£"+Math.round(+v).toLocaleString("en-GB");const sg=v=>(v<0?"−":"+")+gbp(Math.abs(v));
  const conf=String(q.confidence||"").split(" - ")[0],b=q.base;
- return block(`<div class="card bp qe"><div class="ch"><span class="ico">⚡</span><b>Quick estimate - internal, not for the client</b></div>
+ return block(`<div class="card bp qe"><div class="ch"><span class="ico">⚡</span><b>Past jobs estimate - internal, not for the client</b></div><div class="bpw"><b>Cost to make per unit, before margin - not a selling price.</b> From the unit cost on SDI's past estimate sheets.</div>
   <table class="qet"><tr><td>Start: SDI's <b>${esc(b.job)}</b> ${esc(b.name||"")} - ${gbp(b.quoted)} a unit at ${esc(b.qty)}${b.date?" ("+esc(String(b.date).slice(0,4))+")":""}, today</td><td>${gbp(b.today)}</td></tr>
   ${(q.adjustments||[]).map(a=>`<tr><td>${esc(a.what)}${a.why?`<small>${esc(a.why)}</small>`:""}</td><td>${sg(a.gbp)}</td></tr>`).join("")}
   <tr class="qtot"><td>Per unit at ${esc(b.qty)}</td><td>${gbp(q.unit_gbp)}</td></tr></table>
@@ -1435,7 +1435,7 @@ function render(x){
    ${x.inspired&&x.inspired.length?`<div class="insp">✨ Inspired by your Space <b>${esc(x.inspired[0].space)}</b> ${x.inspired.map(i=>`<i style="background-image:url('${i.thumb}')"></i>`).join("")}</div>`:""}
    ${x.check_note&&!x.check_ok?`<div class="note">⚠ ${esc(x.check_note)}</div>`:""}
    <div class="acts"><button class="btn pri" data-a="use">✓ Use this</button><button class="btn" data-a="chg">✎ Change…</button><a class="btn ghost" href="${x.url}" download>⬇</a></div>
-   <div class="estrow"><b>Estimate this design</b> (internal, not for the client)
+   <div class="estrow"><b>Estimate this design</b> (internal guide to the cost to make - not a selling price, not for the client)
     <div class="estb"><button class="btn" type="button" data-say="Quick estimate for option ${esc(L)}" title="SDI's closest past job, adjusted for this design">Past jobs<small>seconds</small></button><button class="btn" type="button" data-say="AI estimate for option ${esc(L)}" title="The AI model costs the design part by part">AI estimate<small>about a minute</small></button><button class="btn" type="button" data-say="Estimate Lite for option ${esc(L)}" title="SDI's estimating engine prices it - the longest and most thorough">Estimate Lite<small>5-15 minutes</small></button></div></div></div>`;
   c.querySelector('[data-a="use"]').onclick=()=>{document.querySelectorAll(".opt").forEach(o=>o.classList.toggle("chosen",o===c));send(`Option ${L} is the one - send me the client sheet`);whyChips(c,"option_chosen")};
   c.querySelector('[data-a="chg"]').onclick=()=>{t.value=`Option ${L}: `;t.focus()};
