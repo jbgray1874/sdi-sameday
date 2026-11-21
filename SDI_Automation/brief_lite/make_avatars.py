@@ -21,16 +21,20 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 OUT = os.path.join(HERE, "brand", "avatars")
 OPTS = os.path.join(OUT, "options")
 
-STYLE = ("A stylised digital character portrait for a design studio's AI assistant: head and shoulders, centred, facing "
-         "the viewer with a warm, confident expression. A modern semi-realistic 3D look - smooth stylised skin and hair, "
-         "soft studio lighting with a gentle rim light, crisp and premium, like a high-end brand's digital mascot. The "
-         "studio's brand look: a warm stone (#E1E1D5) background with a large SDI yellow (#F6D946) circle behind the head "
-         "and a soft field of small black halftone dots fading across one side; clothing in black or charcoal with a "
-         "single SDI yellow accent. Square, plenty of space around the head so it crops cleanly into a circle. No text, "
-         "no logo, no frame, no hands. A made-up person, not a real one. The character: {who}")
+# 21 Nov 2026 (James, after the first try): "no avatars for them in wearesdi ... like character / cartoon faces ... we
+# need to give identity / character to them". Cartoon characters with real personality, in SDI's palette.
+STYLE = ("A bold, characterful cartoon avatar - the face of a design studio's AI assistant, full of personality, like a "
+         "lead character from a modern animated film or a top illustrator's character sheet. Head and shoulders, centred, "
+         "looking at the viewer. Clean vector illustration: confident outlines, simplified shapes, slightly exaggerated "
+         "friendly features and an expressive face, flat colour with soft cel shading. Palette: SDI yellow (#F6D946), black, "
+         "charcoal and warm stone (#E1E1D5), with natural skin and hair colours. Background: a flat SDI yellow circle on "
+         "warm stone, with a small cluster of black halftone dots in one corner. Square, plenty of room around the head so "
+         "it crops cleanly into a circle and still reads at thumbnail size. No text, no logo, no frame, no hands. A "
+         "made-up character, not a real person. The character: {who}")
 PEOPLE = {
     "sid": "Sid - a sharp, quick-witted London designer in his thirties: short dark hair with a neat fade, light stubble, "
-           "a black crew-neck jumper, a yellow pencil tucked behind one ear, a knowing half-smile.",
+           "a black crew-neck jumper, a yellow pencil tucked behind one ear, one eyebrow raised in a knowing half-smile - "
+           "the clever one with a plan.",
     "beth": "Beth - a polished, elegant English account director in her forties: sleek shoulder-length fair hair, a "
             "tailored black blazer over a cream top, a small yellow enamel pin, pearl earrings, a gracious, persuasive smile.",
     "ray": "Ray - a cheerful, down-to-earth Birmingham workshop designer in his fifties: short greying hair, a trimmed "
