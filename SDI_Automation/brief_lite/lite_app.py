@@ -1443,6 +1443,8 @@ VIEWS = {
     "detail": ("Header close-up", "a close-up of the header and the top shelf, showing the materials, edges and finish"),
     "back": ("Back view", "a view of the back of the unit, square on"),
     "top": ("Top-down view", "a plan view looking straight down from above"),
+    # 21 Nov 2026 (James, on the quote portal's hero picture: "it needs to blow your socks off"): the unit in its store
+    "instore": ("In store", "in place in the store it's made for"),
 }
 VIEWS_ASK = re.compile(r"\b(more|other|different|extra|all( the)?|several|multiple|few)\s+(views?|angles?)\b|"
                        r"\b(from|at) (the|a|another|different|other) (side|back|front|top|angle)\b|"
@@ -1750,7 +1752,8 @@ def views_wanted(text):
     t = (text or "").lower()
     picked = [k for k, w in (("front", r"\bfront\b"), ("side", r"\bside\b"), ("three-quarter", r"three[- ]quarter|angled"),
                              ("detail", r"close[- ]?up|detail|header"), ("back", r"\bback\b|\brear\b"),
-                             ("top", r"\btop\b|\bplan\b|above")) if re.search(w, t)]
+                             ("top", r"\btop\b|\bplan\b|above"),
+                             ("instore", r"\bin (the |a )?(store|shop)\b|in situ|in place|on the shop floor")) if re.search(w, t)]
     return picked or ["front", "side", "three-quarter", "detail"]
 
 
@@ -1770,6 +1773,15 @@ def make_views(s, base, which):
                   f"EXACT unit again - identical design, proportions ({b.get('size') or 'as shown'}), materials, colours, "
                   f"graphics, logos and products - from a new camera position: {VIEWS[k][1]}. Change nothing about the unit "
                   "itself; only the camera moves. Same lighting and the same quality as the picture given, photo-real.")
+        if k == "instore":
+            store = b.get("retailer") or b.get("client") or "a UK retailer"
+            where = b.get("placement") or "on the shop floor"
+            prompt = (f"This is a retail display unit SDI Displays has designed for {b.get('client') or 'the client'}. Show "
+                      f"THIS EXACT unit - identical design, proportions ({b.get('size') or 'as shown'}), materials, colours, "
+                      f"graphics, logos and products - standing in place in a real {store} store, {where}, fully stocked. "
+                      "A magazine-quality interior photograph: shopper's eye level, three-quarter angle, the unit the clear "
+                      "hero in sharp focus, the store softly out of focus behind it, natural store lighting, no people's "
+                      "faces. Change nothing about the unit itself. Landscape, photo-real.")
         try:
             with open(src, "rb") as fh:
                 r = draw_image(True, model=IMAGE_MODEL, image=[fh], prompt=prompt, size="1536x1024", quality=CHANGE_QUALITY)
@@ -4098,10 +4110,11 @@ def handle(number, name, text, image_path=None, voice=False, ch=None, new=False,
         views_out, tv = {}, None
         if pack_cfg["views"] and chosen.get("kind") == "render" and len(have_views) < 2 and not stopped(s["id"]):
             tv = threading.Thread(target=lambda: views_out.update(
-                r=make_views(s, chosen, ["front", "side", "three-quarter", "detail"])), daemon=True)
+                r=make_views(s, chosen, ["instore", "front", "three-quarter", "detail"])), daemon=True)
             tv.start()
         if need_hd or need_ga or tv:  # 28 Oct 2026: the HD and the GA are drawn at the same time (they were one after the other)
-            ch.text(f"Good - Option {label}. Making the client pack now: the render, " + ("four more views, " if tv else "")
+            ch.text(f"Good - Option {label}. Making the client pack now: the render, " + ("the unit in store and three more "
+                    "views, " if tv else "")
                     + "the sizes and the estimate" + (" (in HD)" if need_hd else "") + " - about a minute.", role="status")
         hd_out = {}
         th = None

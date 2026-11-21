@@ -2961,7 +2961,7 @@ class MoreViewsOfTheChosenDesignTests(unittest.TestCase):
         self.assertIn("show_views", rt.SLOW)
         self.assertEqual(rt.tool_intent("show_views", {"label": "B", "views": ["back"]})[1]["intent"], "views")
         src = (WORK / "brief_lite" / "client_pack.py").read_text(encoding="utf-8")    # 21 Nov 2026: the views page
-        self.assertIn('"From every angle"', src)
+        self.assertIn('"Every angle"', src)
 
 
 class ARotatable3DModelTests(unittest.TestCase):
@@ -3445,11 +3445,11 @@ class TheClientPack(unittest.TestCase):
 
     def test_a_few_pages_with_everything_captured(self):
         path, n, _s = self.make()
-        self.assertEqual(n, 6)                       # cover, concept, specification, angles, sizes, next steps
+        self.assertEqual(n, 7)          # cover, concept, how we designed it, specification, angles, sizes, next steps
         t = self.text(path)
         for want in ("Tesco coal bunker 412", "Andy Baxter", "Sarah Jones", "12431", "1800 x 600 x 400 mm",
-                     "Keeps bagged coal dry", "Yes, by SDI", "The specification", "From every angle", "Next steps",
-                     "Concept approved"):
+                     "Keeps bagged coal dry", "Yes, by SDI", "Everything captured at briefing",
+                     "We listened to your brief", "From this concept to your stores", "Name"):
             self.assertIn(want, t)
 
     def test_nothing_internal(self):
@@ -3462,11 +3462,11 @@ class TheClientPack(unittest.TestCase):
         est = {"kind": "ai", "prices": [{"qty": 10, "unit_gbp": 200.0}, {"qty": 250, "unit_gbp": 160.0}],
                "split": {"materials": 100, "labour": 60}, "setup_total": 1000}
         _p, n, _s = self.make(markup=None, est=est)
-        self.assertEqual(n, 6)                       # no markup set: no budget page, never SDI's cost
+        self.assertEqual(n, 7)                       # no markup set: no budget page, never SDI's cost
         path, n, _s = self.make(markup=25, est=est)
-        self.assertEqual(n, 7)
+        self.assertEqual(n, 8)
         t = self.text(path)
-        self.assertIn("Indicative budget", t)
+        self.assertIn("For this concept, per unit", t)
         self.assertIn("£200", t)                     # 160 x 1.25 at 250 units
         self.assertIn("£250", t)                     # 200 x 1.25 at 10
         self.assertNotIn("£160", t)
