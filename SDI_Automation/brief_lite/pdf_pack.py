@@ -480,10 +480,11 @@ def _client_logo(session):
     return None
 
 
-def client_sheet(session, visuals, out_dir):
-    """Exactly one landscape A4 page: up to two generated render options (A, B) plus the dimensioned concept GA,
-    so the client sees what it looks like AND what size it is. Never past SDI work for other clients."""
-    brief = session.get("brief") or {}
+def client_sheet(session, visuals, out_dir, estimate=None, markup_pct=None, story=None, model=None):
+    """The client pack (client_pack.py, 21 Nov 2026 - it was one page): the chosen render and its concept GA, the views
+    of that design, the design story, the specification, the indicative budget (only with SDI's markup set) and next
+    steps. Never past SDI work for other clients."""
+    import client_pack
     forbidden = _reference_paths(session)
     known = {os.path.normcase(os.path.abspath(v.get("path", ""))) for v in session.get("visuals", [])
              if v.get("kind") in ("render", "technical")}
@@ -496,79 +497,22 @@ def client_sheet(session, visuals, out_dir):
         if kind == "technical":
             selected["GA"] = visual
             continue
-        label = str(visual.get("label") or "A").upper()
-        if label not in {"A", "B"}:
-            label = "A" if "A" not in selected else "B"
-        selected[label] = visual
+        selected.setdefault(str(visual.get("label") or "A").upper(), visual)
     if not selected:
         raise ValueError("A concept render or GA is required before making a client sheet.")
-    options = sorted((k, v) for k, v in selected.items() if k != "GA")[:2] + ([("GA", selected["GA"])] if "GA" in selected else [])
+    renders = [v for k, v in sorted(selected.items()) if k != "GA"]
+    render = renders[0] if renders else selected["GA"]
+    ga = selected.get("GA")
+    lab = str(render.get("label") or "A")
+    views = [(v["path"], re.sub(r"^[A-Z]\s+", "", str(v.get("label") or "View")))
+             for v in session.get("visuals", []) if v.get("kind") == "view" and str(v.get("from_option")) == lab
+             and os.path.isfile(v.get("path", "")) and os.path.normcase(os.path.abspath(v["path"])) not in forbidden][-4:]
+    brief = session.get("brief") or {}
     client = _client_text(brief.get("client") or "Client concept", session)
-    unit = _client_text(brief.get("unit_type") or "Display concept", session)
-    title = f"{client} | {unit}"
-    path = _safe_output(out_dir, f"Concept_{_slug(client)}_{_slug(session.get('id'))}_{len(options)}.pdf")
-    width, height = landscape(A4)
-    c = canvas.Canvas(path, pagesize=(width,height))
-    c.setTitle(title)
-    c.setAuthor("SDI Displays")
-    c.setStrokeColor(SDI_YELLOW)
-    c.setLineWidth(3)
-    c.line(14*mm, height-18*mm, width-14*mm, height-18*mm)
-    if os.path.isfile(BRAND_LOGO):
-        c.drawImage(BRAND_LOGO, width-58*mm, height-14.5*mm, width=44*mm, height=7.8*mm, preserveAspectRatio=True,
-                    mask="auto", anchor="e")
-    clogo = _client_logo(session)
-    tx = 14*mm
-    if clogo:      # the client's own logo, top left - it's their pack
-        try:
-            c.drawImage(clogo, 14*mm, height-41*mm, width=34*mm, height=18*mm, preserveAspectRatio=True, mask="auto")
-            tx = 52*mm
-        except Exception:
-            pass
-    _flow(c, [_p(title, H1, 250)], tx, height-24*mm, width-tx-14*mm, 17*mm)
-    spec = [re.sub(r"\s*\((assumed|as assumed)[^)]*\)", "", _client_text(brief.get(key), session), flags=re.I)   # internal notes stay internal
-            for key in ("size", "materials", "colours_graphics", "placement") if not _missing(brief.get(key))]
-    _flow(c, [_p(" | ".join(spec), SMALL, 900)], 14*mm, height-43*mm, width-28*mm, 15*mm)
-    gap = 6*mm
-    card_width = (width-28*mm-gap*(len(options)-1))/len(options)
-    for index, (label, visual) in enumerate(options):
-        x = 14*mm + index*(card_width+gap)
-        one = sum(1 for k, _ in options if k != "GA") == 1     # one finalised design: "Your concept", not "Option B"
-        _flow(c, [_p("CONCEPT GA - SIZES" if label == "GA" else "YOUR CONCEPT" if one else f"OPTION {label}", H2)],
-              x, height-61*mm, card_width, 9*mm)
-        _photo(c, visual, x, 33*mm, card_width, 103*mm, "Concept unavailable")
-    _flow(c, [_p("Concept visual for discussion - final design confirmed by SDI's design team after approval.", SMALL)],
-          14*mm, 25*mm, width-28*mm, 10*mm)
-    c.setFont("Helvetica", 7.5)
-    c.setFillColor(MUTE)
-    c.drawString(14*mm, 9*mm, f"{SDI_FOOTER}  |  {today():%d %B %Y}")
-    c.showPage()
-    # 21 Nov 2026: the views the AM asked for of this option - front, side, three-quarter, close-up - on a second page
-    shown_ = [lab for lab, _v in options if lab != "GA"]
-    views = [v for v in session.get("visuals", []) if v.get("kind") == "view" and shown_
-             and v.get("from_option") == (options[0][1].get("label") or shown_[0]) and os.path.isfile(v.get("path", ""))][-4:]
-    if views:
-        c.setStrokeColor(SDI_YELLOW)
-        c.setLineWidth(3)
-        c.line(14*mm, height-18*mm, width-14*mm, height-18*mm)
-        if os.path.isfile(BRAND_LOGO):
-            c.drawImage(BRAND_LOGO, width-58*mm, height-14.5*mm, width=44*mm, height=7.8*mm, preserveAspectRatio=True,
-                        mask="auto", anchor="e")
-        _flow(c, [_p(f"{title} - more views", H1, 250)], 14*mm, height-24*mm, width-28*mm, 17*mm)
-        cols = 2
-        gap = 6*mm
-        cw = (width-28*mm-gap)/cols
-        ch_ = (height-24*mm-45*mm-gap)/2
-        for i, v in enumerate(views):
-            x = 14*mm + (i % cols)*(cw+gap)
-            y = height-45*mm - (i//cols + 1)*ch_ - (i//cols)*gap
-            _flow(c, [_p(str(v.get("label") or "View").upper(), H2)], x, y+ch_-1*mm, cw, 8*mm)
-            _photo(c, v, x, y, cw, ch_-9*mm, "View unavailable")
-        c.setFont("Helvetica", 7.5)
-        c.setFillColor(MUTE)
-        c.drawString(14*mm, 9*mm, f"{SDI_FOOTER}  |  {today():%d %B %Y}")
-        c.showPage()
-    c.save()
+    path = _safe_output(out_dir, f"Concept_{_slug(client)}_{_slug(session.get('id'))}_{lab}.pdf")
+    client_pack.build(path, session, render.get("path"), ga=(ga or {}).get("path"), views=views, model=model, story=story,
+                      est=estimate, markup_pct=markup_pct, client_logo=_client_logo(session), sdi_logo=BRAND_LOGO,
+                      today=today())
     return path
 
 

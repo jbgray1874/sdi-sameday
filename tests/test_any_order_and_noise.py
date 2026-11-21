@@ -2960,8 +2960,8 @@ class MoreViewsOfTheChosenDesignTests(unittest.TestCase):
         self.assertIn("show_views", {t["name"] for t in rt.TOOLS})
         self.assertIn("show_views", rt.SLOW)
         self.assertEqual(rt.tool_intent("show_views", {"label": "B", "views": ["back"]})[1]["intent"], "views")
-        src = (WORK / "brief_lite" / "pdf_pack.py").read_text(encoding="utf-8")
-        self.assertIn('- more views", H1', src)
+        src = (WORK / "brief_lite" / "client_pack.py").read_text(encoding="utf-8")    # 21 Nov 2026: the views page
+        self.assertIn('"From every angle"', src)
 
 
 class ARotatable3DModelTests(unittest.TestCase):
@@ -3409,3 +3409,72 @@ console.log(JSON.stringify(logs.map(x=>x.split(" - ")[0])));"""
         f.write_text(js, encoding="utf-8")
         got = json.loads(subprocess.run(["node", str(f)], capture_output=True, text=True, check=True).stdout)
         self.assertEqual(got, ["voice chatter: spoke before a tool call", "voice chatter: thought out loud"])
+
+
+class TheClientPack(unittest.TestCase):
+    """21 Nov 2026 - James: "It is for clients so it has to be brilliant ... all the details captured ... fed into the
+    pack ... a few pages ... the estimate on there also." Built from a chat end to end, then read back."""
+
+    def make(self, markup=None, est=None):
+        import client_pack
+        import ga_draw
+        import model3d
+        from PIL import Image
+        d = Path(tempfile.mkdtemp(prefix="pack-"))
+        render = d / "r.png"
+        Image.new("RGB", (1536, 1024), (40, 40, 40)).save(render)
+        b = {"client": "Tesco", "unit_type": "Coal bunker FSDU", "project_name": "Tesco coal bunker 412",
+             "size": "1800 x 600 x 400 mm", "materials": "Powder-coated steel (assumed)", "volume_qty": "250",
+             "account_manager": "Andy Baxter", "customer_name": "Sarah Jones", "job_number": "12431", "installation": "yes",
+             "narrative": "Keeps bagged coal dry outside the store.", "creative_chargeable": "yes, £1,500",
+             "target_unit_cost": "£180", "other_notes": "Lockable lid, quoted £90 for the lock",
+             "similar_projects": "11041 Morrisons coal bunker"}
+        ga = d / "ga.png"
+        ga_draw.draw(b, (1800, 600, 400), str(ga), "Tesco")
+        s = {"brief": b, "refs": [{"job_no": "11041"}]}
+        path, n = client_pack.build(str(d / "p.pdf"), s, str(render), ga=str(ga), model=model3d.model(b),
+                                    story={"name": "Weatherproof bunker", "idea": "Keeps fuel dry", "cost": "£280-£340"},
+                                    est=est, markup_pct=markup)
+        return path, n, s
+
+    def text(self, path):
+        import shutil as sh
+        if not sh.which("pdftotext"):
+            self.skipTest("pdftotext not installed")
+        return " ".join(subprocess.run(["pdftotext", path, "-"], capture_output=True, text=True, check=True).stdout.split())
+
+    def test_a_few_pages_with_everything_captured(self):
+        path, n, _s = self.make()
+        self.assertEqual(n, 6)                       # cover, concept, specification, angles, sizes, next steps
+        t = self.text(path)
+        for want in ("Tesco coal bunker 412", "Andy Baxter", "Sarah Jones", "12431", "1800 x 600 x 400 mm",
+                     "Keeps bagged coal dry", "Yes, by SDI", "The specification", "From every angle", "Next steps",
+                     "Concept approved"):
+            self.assertIn(want, t)
+
+    def test_nothing_internal(self):
+        path, _n, _s = self.make()
+        t = self.text(path)
+        for never in ("£1,500", "£180", "£90", "£280", "11041", "assumed", "Morrisons"):
+            self.assertNotIn(never, t)
+
+    def test_the_budget_is_cost_plus_markup_and_only_with_a_markup(self):
+        est = {"kind": "ai", "prices": [{"qty": 10, "unit_gbp": 200.0}, {"qty": 250, "unit_gbp": 160.0}],
+               "split": {"materials": 100, "labour": 60}, "setup_total": 1000}
+        _p, n, _s = self.make(markup=None, est=est)
+        self.assertEqual(n, 6)                       # no markup set: no budget page, never SDI's cost
+        path, n, _s = self.make(markup=25, est=est)
+        self.assertEqual(n, 7)
+        t = self.text(path)
+        self.assertIn("Indicative budget", t)
+        self.assertIn("£200", t)                     # 160 x 1.25 at 250 units
+        self.assertIn("£250", t)                     # 200 x 1.25 at 10
+        self.assertNotIn("£160", t)
+        self.assertIn("not a quotation", t)
+
+    def test_the_most_thorough_estimate_for_this_option_goes_in(self):
+        L.AUTO_EST["px"] = {"label": "A", "status": "done", "kind": "quick", "data": {"prices": [{"qty": 1, "unit_gbp": 1}]}}
+        s = {"id": "px", "brief": {"_ai_estimate": {"label": "A", "prices": [{"qty": 1, "unit_gbp": 2}], "split": {}}}}
+        self.assertEqual(L.estimate_for_pack(s, "A")["kind"], "ai")
+        s["brief"]["_ai_estimate"]["label"] = "B"
+        self.assertEqual(L.estimate_for_pack(s, "A")["kind"], "quick")

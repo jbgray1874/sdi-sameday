@@ -1563,6 +1563,46 @@ def auto_estimate_start(s, label):
     return rec
 
 
+def client_pack_settings():
+    """The client pack's settings in studio_data\\ai_switch.json: client_pack_markup_pct (SDI's markup on its cost to make,
+    for the pack's indicative budget - no page until it's set) and client_pack_views (the four views, made automatically)."""
+    try:
+        j = json.load(open(os.path.join(BASE, "studio_data", "ai_switch.json")))
+    except Exception:                                        # noqa: BLE001
+        j = {}
+    mk = j.get("client_pack_markup_pct")
+    try:
+        mk = float(mk) if mk is not None and str(mk).strip() != "" else None
+    except (TypeError, ValueError):
+        mk = None
+    return {"markup": mk, "views": j.get("client_pack_views", True) is not False}
+
+
+def estimate_for_pack(s, label):
+    """The estimate for this option that goes in the pack - the most thorough one done: Estimate Lite, then the AI
+    estimate, then past jobs. {kind, prices, split?, setup_total?} or None."""
+    try:
+        import estimate_lite as el
+        rec = el.latest(DB, s["id"])
+    except Exception:                                        # noqa: BLE001
+        rec = None
+    if rec and rec.get("status") == "done" and (rec.get("label") or "A") == label and (rec.get("result") or {}).get("prices"):
+        return {"kind": "lite", "prices": rec["result"]["prices"]}
+    ai = s["brief"].get("_ai_estimate") or {}
+    if ai.get("label") == label and ai.get("prices"):
+        return {"kind": "ai", "prices": ai["prices"], "split": ai.get("split"), "setup_total": ai.get("setup_total")}
+    auto = AUTO_EST.get(s["id"]) or {}
+    if auto.get("label") == label and auto.get("status") == "done" and (auto.get("data") or {}).get("prices"):
+        d = auto["data"]
+        if auto.get("kind") == "ai":
+            return {"kind": "ai", "prices": d["prices"], "split": d.get("split"), "setup_total": d.get("setup_total")}
+        return {"kind": "quick", "prices": d["prices"]}
+    q = s["brief"].get("_quick_estimate") or {}
+    if q.get("prices"):
+        return {"kind": "quick", "prices": q["prices"]}
+    return None
+
+
 def ai_estimate_for(s):
     """The frontier model's line-by-line costing of the design on screen (ai_estimate.py), or (None, why)."""
     import ai_estimate
@@ -1605,7 +1645,7 @@ def ai_estimate_turn(s, ch):
         ch.text(f"I couldn't do the AI estimate: {why}.")
         return ch, s
     e["label"] = ((_est_render(s) or {}).get("label")) or "A"
-    s["brief"]["_ai_estimate"] = {k: e[k] for k in ("prices", "unit_variable", "setup_total", "confidence", "label")}
+    s["brief"]["_ai_estimate"] = {k: e.get(k) for k in ("prices", "unit_variable", "setup_total", "confidence", "label", "split")}
     save_session(s)
     ch.ai_estimate(e, ai_estimate.say(e))
     return ch, s
@@ -4049,9 +4089,20 @@ def handle(number, name, text, image_path=None, voice=False, ch=None, new=False,
         # 4 Nov 2026 (Muhammad): 'I like this render -> give me the client pack', not a 90 s wait for an HD redraw first
         need_hd = not hd and chosen.get("kind") == "render" and bool(HD_ASK.search(text or ""))
         need_ga = want_ga and not ga
-        if need_hd or need_ga:       # 28 Oct 2026: the HD and the GA are drawn at the same time (they were one after the other)
-            ch.text(f"Good - Option {label}. Making the client pack now with this render and its GA" +
-                    (" (in HD)" if need_hd else "") + (" - about a minute." if need_hd else " - about 40 seconds."), role="status")
+        # 21 Nov 2026 (James: "it is for clients so it has to be brilliant ... the estimate on there also"): the pack's
+        # estimate and its four views are worked out alongside the GA, so the pack carries them
+        pack_cfg = client_pack_settings()
+        est_rec = auto_estimate_start(s, label) if chosen.get("kind") == "render" else None
+        have_views = [v for v in s["visuals"] if v.get("kind") == "view" and v.get("from_option") == label
+                      and os.path.exists(v.get("path", ""))]
+        views_out, tv = {}, None
+        if pack_cfg["views"] and chosen.get("kind") == "render" and len(have_views) < 2 and not stopped(s["id"]):
+            tv = threading.Thread(target=lambda: views_out.update(
+                r=make_views(s, chosen, ["front", "side", "three-quarter", "detail"])), daemon=True)
+            tv.start()
+        if need_hd or need_ga or tv:  # 28 Oct 2026: the HD and the GA are drawn at the same time (they were one after the other)
+            ch.text(f"Good - Option {label}. Making the client pack now: the render, " + ("four more views, " if tv else "")
+                    + "the sizes and the estimate" + (" (in HD)" if need_hd else "") + " - about a minute.", role="status")
         hd_out = {}
         th = None
         if need_hd:
@@ -4076,11 +4127,35 @@ def handle(number, name, text, image_path=None, voice=False, ch=None, new=False,
         if b.get("_sheet_sig") == sig and b.get("_sheet_pdf") and os.path.exists(b["_sheet_pdf"]):   # asked twice: one pack
             ch.text(f"The client pack for Option {label} is already in the chat above ↑ - anything else?")
             return ch, s
-        sheet = pdf_pack.client_sheet(s, [shown] + ([ga] if ga else []), OUT)
+        if tv:
+            tv.join(200)
+            for k_, pth, _why in (views_out.get("r") or []):
+                if pth:
+                    s["visuals"].append({"path": pth, "kind": "view", "view": k_, "label": f"{label} {VIEWS[k_][0]}",
+                                         "from_option": label})
+                    ch.image(pth, f"Option {label} - {VIEWS[k_][0].lower()}.", role="view", label=label, kind="view",
+                             from_option=label)
+        t0_ = time.time()
+        while est_rec and est_rec.get("status") == "running" and time.time() - t0_ < 75:
+            time.sleep(0.5)
+        est_ = estimate_for_pack(s, label)
+        try:
+            m3_ = model3d_for(s)
+        except Exception:                                    # noqa: BLE001
+            m3_ = None
+        sheet = pdf_pack.client_sheet(s, [shown] + ([ga] if ga else []), OUT, estimate=est_,
+                                      markup_pct=pack_cfg["markup"], story=(b.get("_dirs") or {}).get(label)
+                                      if isinstance(b.get("_dirs"), dict) else None, model=m3_)
+        if est_ and pack_cfg["markup"] is None and not b.get("_markup_told"):
+            b["_markup_told"] = 1
+            ch.text("The pack has no budget page yet: SDI's estimates are a cost to make, so the client's indicative "
+                    "budget needs SDI's markup set first (client_pack_markup_pct).")
         save_session(s)
         b["_sheet_sig"], b["_sheet_pdf"] = sig, sheet
         save_session(s)
-        ch.document(sheet, f"Option {label}" + (" + its technical GA" if ga else "") + " - ready to send the client for approval", role="sheet")
+        ch.document(sheet, f"Option {label} client pack - the concept, specification, views, sizes"
+                    + (", indicative budget" if est_ and pack_cfg["markup"] is not None else "")
+                    + " and next steps - ready to send the client for approval", role="sheet")
         try:             # 21 Nov 2026: and its estimate, every time - worked out in the background, shown when ready
             auto_estimate_start(s, label)
             ch.flush()
