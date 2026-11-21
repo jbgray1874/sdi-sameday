@@ -1623,11 +1623,17 @@ async function rtHeard(tx,itemId){
 // 5 Nov 2026 (James: "it needs to be saved as we go and the chat needs to have it readily available"): each line is
 // saved on the server as it is said; after every line and answer the voice is handed that saved record - the brief so
 // far and the chat so far - so nothing said drops out of what it knows in a long call. One update for a burst of lines.
+const CTX_EVERY=240000;   // the voice's instructions refreshed at most every 4 minutes (cost: see below)
 function rtContext(wait){if(!rt||!sid)return;const at=Date.now()+(wait||0);
  if(rt.ctxT){if(rt.ctxAt<=at){rt.ctxMore=Math.max(rt.ctxMore||0,at);return}clearTimeout(rt.ctxT)}   // the soonest one goes; a later one after it
  rt.ctxAt=at;rt.ctxT=setTimeout(async()=>{const r0=rt;if(!r0||!sid)return;r0.ctxT=null;
+  // 21 Nov 2026: new instructions at the head of the call make OpenAI bill the WHOLE call so far again at the full audio
+  // price on the next reply (its cache is the unchanged start). Sent after every line, Andy's 20-minute call cost $19.
+  // Now at most every CTX_EVERY; each tool result already gives Sid the brief as it is now.
+  r0.ctxSentAt=r0.ctxSentAt||Date.now();const since=Date.now()-r0.ctxSentAt;
+  if(since<CTX_EVERY){rtContext(CTX_EVERY-since);return}
   const j=await fetch("/api/rt/context/"+sid+"?v="+encodeURIComponent(r0.ctxV||"")).then(r=>r.json()).catch(()=>null);
-  if(rt!==r0)return;if(j&&!j.same&&j.instructions){r0.ctxV=j.v;rtSay({type:"session.update",session:{type:"realtime",instructions:j.instructions}})}
+  if(rt!==r0)return;if(j&&!j.same&&j.instructions){r0.ctxV=j.v;r0.ctxSentAt=Date.now();rtSay({type:"session.update",session:{type:"realtime",instructions:j.instructions}})}
   if(r0.ctxMore){const m=r0.ctxMore;r0.ctxMore=0;rtContext(Math.max(0,m-Date.now()))}},wait||0)}
 function rtLog(role,text){fetch("/api/rt/log",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({session:sid,role,text})}).catch(()=>{});rtContext(3500);
  if(role==="user")setTimeout(async()=>{const r=await fetch("/api/session/"+sid).then(r=>r.json()).catch(()=>null);if(r&&r.session)showBrief(r.session.brief)},4000)}

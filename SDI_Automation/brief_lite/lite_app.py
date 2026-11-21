@@ -2835,6 +2835,20 @@ def handle(number, name, text, image_path=None, voice=False, ch=None, new=False,
                 + (" - or type *menu* for SDI Debrief Intelligence (studio jobs)." if ch.number else "."))
         return ch, s
     b = s["brief"]
+    # 20 Nov 2026 (Matt, Muhammad on 19 Nov): with the day's budget used up, every message got "I've hit today's AI
+    # budget" AND the next question ("Which client is it for?"), round and round, answering nothing. Said once, plainly,
+    # with what happens next; what they type is still kept in the chat for when it's back.
+    if not record_only and t_override is None and not voice and text and spent_today() >= daily_cap():
+        today_ = date.today().isoformat()
+        if b.get("_cap_said") != today_:
+            b["_cap_said"] = today_
+            save_session(s)
+            ch.text("SDI Live has used today's AI budget, so I can't carry on with the brief until it resets at midnight - "
+                    "or Muhammad can raise the daily limit and I'll pick up straight away. Everything you've told me is "
+                    "kept.")
+        else:
+            ch.text("Still paused - today's AI budget is used up. What you type is kept for when I'm back.")
+        return ch, s
     # 3 Nov 2026 (Muhammad): "both" was heard as "Boots" at the pack question - there, it can only mean both
     if text and b.get("client") and convo.stage(s) == "pack" and re.fullmatch(r"\W*(boots?|booth|bose|bowth|bolts?|bullets?|bowl|bot|boat|both)\W*(please|pack|packs)?\W*", text, re.I):
         text = "both"
@@ -4233,6 +4247,16 @@ def api_rt_tool():
                 "it'), or say yes when you offer once the questions run out.")}))})
     if js.get("name") == "change_option":
         last_ = _last_am_line(s["id"])
+        # 20 Nov 2026: a size that reads wrong for the unit is said back once before it's redrawn (typed chat does the same)
+        b_ = s["brief"]
+        sz_ = str(b_.get("size") or "")
+        clash_ = [c for c in convo.brief_conflicts(b_) if re.search(r"\b(tall|high|wide|deep|size)\b", c)]
+        if clash_ and sz_ and b_.get("_size_said_back") != sz_ and not re.search(r"\b(high|tall|height)\b", last_, re.I):
+            b_["_size_said_back"] = sz_
+            save_session(s)
+            return jsonify({"slow": False, "output": _said(json.dumps({"error": (
+                f"Not redrawn yet: the size reads as {sz_} (height x width x depth), but {'; and '.join(clash_)}. Say it "
+                "back in one line and ask which is the height; record_answers the size they confirm, then change_option.")}))})
         if half_heard_change(last_):
             return jsonify({"slow": False, "output": _said(json.dumps({"error": (
                 f"Not changed: the AM's last words \"{last_[:60]}\" don't say what to change - probably half-heard. Say you "

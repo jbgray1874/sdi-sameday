@@ -545,6 +545,10 @@ def tool_result(s, replies, saved_now=None, not_saved=None):
         # 11 Nov 2026 (Andy): the base questions still open - go through them; the brief is built only once they are
         # answered, or the AM has said that's everything (finish_brief asks "are you sure?" first)
         "still_open": [c["label"] for c in convo.gaps(b) if c["status"] == "open"][:8],
+        # 19 Nov 2026 (Andy's call, 10:06): "The brief's complete" with questions still to go
+        "brief_status": (f"NOT complete - {sum(1 for c in convo.gaps(b) if c['status'] == 'open')} base questions still "
+                         "open; never say the brief is complete or done" if any(c["status"] == "open" for c in convo.gaps(b))
+                         else "every base question answered"),
         "pack": convo.pack_label(b), "focus": b.get("_focus") or "", "stage": st, "now_do": NOW_DO[st],
         "render_in_progress": st == "rendering",
         "check_with_am": convo.brief_conflicts(b),

@@ -2791,3 +2791,52 @@ class MattsAndAndysCallsTests(unittest.TestCase):
             self.assertNotIn("Which is the height?", asked(out))
         finally:
             L.make_visual = keep
+
+
+class QuickFixesFromTheChatsTests(unittest.TestCase):
+    def test_a_used_up_budget_is_said_once_and_no_question_follows(self):
+        keep = L.spent_today
+        L.spent_today = lambda: 10 ** 6
+        try:
+            who = new_chat()
+            out, s = say(who, "Sainsburys")
+            first = " ".join(r.get("text") or "" for r in out)
+            self.assertIn("used today's AI budget", first)
+            self.assertEqual(asked(out), "")                          # no "Which client is it for?" after it
+            out, s = say(who, "sob")
+            self.assertIn("Still paused", " ".join(r.get("text") or "" for r in out))
+            self.assertEqual(asked(out), "")
+        finally:
+            L.spent_today = keep
+
+    def test_sid_is_told_when_the_brief_is_not_complete(self):
+        s = {"id": "c", "visuals": [], "brief": {"_flow": 2, "_pack": "both", "client": "Fanatics", "unit_type": "counter unit"}}
+        res = json.loads(rt.tool_result(s, []))
+        self.assertIn("never say the brief is complete", res["brief_status"])
+
+    def test_on_a_call_a_size_that_reads_wrong_is_said_back_before_redrawing(self):
+        client = L.app.test_client()
+        who = new_chat()
+        _, s = say(who, "Sainsburys want an FSDU", {"client": "Sainsburys", "unit_type": "FSDU"})
+        s = L._session_by_id(s["id"])
+        s["brief"].update(size="500 x 500 x 1500 mm", _render_asked=1)
+        s["visuals"].append({"kind": "render", "label": "A", "path": "a.png"})
+        L.save_session(s)
+        L.log_msg(s["id"], "in", "make it 500mm x 500mm x 1500mm")
+        out = json.loads(client.post("/api/rt/tool", json={"session": s["id"], "name": "change_option",
+                         "arguments": {"label": "A", "change": "size"}}).get_json()["output"])
+        self.assertIn("Not redrawn yet", out.get("error", ""))
+        self.assertIn("which is the height", out["error"])
+
+
+class AVoiceCallDoesNotRebillItselfEveryLineTests(unittest.TestCase):
+    """21 Nov 2026: Andy's 20-minute call cost $19 - new instructions after every line made OpenAI bill the whole call
+    again at the full audio price on each reply. Now at most every four minutes."""
+
+    def test_the_instructions_are_refreshed_at_most_every_four_minutes(self):
+        page = (WORK / "brief_lite" / "lite_page.html").read_text(encoding="utf-8")
+        self.assertIn("const CTX_EVERY=240000;", page)
+        body = page[page.index("function rtContext("):page.index("function rtLog(")]
+        self.assertIn("if(since<CTX_EVERY){rtContext(CTX_EVERY-since);return}", body)
+        self.assertLess(body.index("since<CTX_EVERY"), body.index("session.update"))
+        self.assertIn("r0.ctxSentAt=Date.now();rtSay({type:\"session.update\"", body)
