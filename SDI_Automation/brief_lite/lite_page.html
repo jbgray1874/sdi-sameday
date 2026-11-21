@@ -1821,6 +1821,15 @@ if(!rt||!sid)return;const at=Date.now()+(wait||0);
   if(r0.ctxMore){const m=r0.ctxMore;r0.ctxMore=0;rtContext(Math.max(0,m-Date.now()))}},wait||0)}
 function rtLog(role,text){fetch("/api/rt/log",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({session:sid,role,text})}).catch(()=>{});rtContext(3500);
  if(role==="user")setTimeout(async()=>{const r=await fetch("/api/session/"+sid).then(r=>r.json()).catch(()=>null);if(r&&r.session)showBrief(r.session.brief)},4000)}
+// 21 Nov 2026 (James's call): a line spoken before a tool call ("I'll capture that, then we'll cover...") and thinking
+// out loud ("let me think about how to phrase this") - the voice is told not to; each time it still does, it's logged
+// (Check-SameDay-Call and the server log show how often), so the rule can be tightened from evidence.
+const THINK_ALOUD=/\b(let me (think|work out|figure out|consider)|how (best )?to phrase (this|that)|i need to (think|figure))\b/i;
+const PREAMBLE=/\b(i'?ll (log|note|capture|record|save|jot|add) (that|this|those|it)|then we'?ll (cover|grab|look at|move on|get)|let me (note|log|capture|record))\b/i;
+function chatter(resp){const out=(resp&&resp.output)||[];const said=out.filter(o=>o.type==="message").map(o=>((o.content||[]).map(c=>c.transcript||c.text||"").join(" "))).join(" ").trim();
+ if(!said)return;const tool=out.some(o=>o.type==="function_call");
+ if(THINK_ALOUD.test(said))vpLog("voice chatter: thought out loud - \""+said.slice(0,120)+"\"");
+ else if(tool&&PREAMBLE.test(said))vpLog("voice chatter: spoke before a tool call - \""+said.slice(0,120)+"\"")}
 function rtSay(o){if(rt&&rt.paused&&o.type==="response.create")return;   // paused: it notes things, but says nothing until Continue
  // 4 Nov 2026 (James: "doesn't talk over"): six things start the voice speaking on their own - a render finishing, a
  // tool's answer, a queued follow-up, an upload, the noisy-room tip, "didn't catch that". None may start while the AM
@@ -1897,7 +1906,7 @@ async function rtEvent(ev){const ty=ev.type||"";
  else if(ty==="output_audio_buffer.stopped"||ty==="output_audio_buffer.cleared"){rt.speaking=false}
  else if(ty==="response.output_audio_transcript.done"||ty==="response.audio_transcript.done"){if(rt.bubble)rt.bubble.dataset.done=1;if(ev.transcript&&sid)rtLog("assistant",ev.transcript)}
  else if(ty==="response.function_call_arguments.done"){rtTool(ev.call_id,ev.name,ev.arguments)}
- else if(ty==="response.done"){rt.inResp=false;if(rt.pendingCreate){rt.pendingCreate=false;if(!rt.spoke)rtSay({type:"response.create"})}
+ else if(ty==="response.done"){try{chatter(ev.response)}catch(e){}rt.inResp=false;if(rt.pendingCreate){rt.pendingCreate=false;if(!rt.spoke)rtSay({type:"response.create"})}
   const u=ev.response&&ev.response.usage;if(u)fetch("/api/rt/usage",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({session:sid,usage:u})}).then(r=>r.json()).then(j=>{if(j&&j.stop){toast("Today's AI budget is used up - live voice has stopped");rtStop()}}).catch(()=>{});
   talkUI(true,"Live - your turn");if(rt&&(rt.closing||(rt.maybeDone&&saidBye(rt.said))))setTimeout(()=>{if(rt){rtStop();toast("Call ended - everything is in the chat")}},1400)}
  else if(ty==="error"){console.warn("realtime",ev.error);if(ev.error&&/expired|session/i.test(ev.error.message||""))toast(ev.error.message)}}

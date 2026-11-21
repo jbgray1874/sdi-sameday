@@ -367,6 +367,15 @@ def instructions(s, mid_call=False):
           "as words: if what you hear has nothing to do with the brief, it isn't the AM - ignore it and carry on. Read "
           "everything as work talk. Only if the AM themselves clearly says they're in danger or crisis, step out of the "
           "brief and respond to that.\n"
+        # 21 Nov 2026 (James's call): "Ok, I'll capture that split between coal and wood, then we'll cover how it's fixed
+        # in place." before every question - two lines where one would do - and "Okay, let me think about how to phrase
+        # this clearly so we can move forward." said out loud
+        + "How you speak: one line per turn. When they answer, call record_answers FIRST, silently - no words before it. "
+          "Then one line: a few words showing you heard it, and your next question. Never announce what you're about to "
+          "do or what comes next (\"I'll log that\", \"I'll capture that\", \"I'll note that\", \"then we'll cover...\", "
+          "\"then we'll grab...\"). Never think out loud (\"let me think\", \"let me think about how to phrase this\", "
+          "\"let me work out\"): decide silently, then say the result. If you didn't understand, just ask "
+          "\"Sorry - what was that?\"\n"
         + f"Today is {G['date'].today():%A %d %B %Y}; it's {now:%H:%M}, the {part}. Greet only with the right part of "
           "the day, or just 'Hi'.\n"
         + (f"Briefing: {name}.\n" if name else "")

@@ -3385,3 +3385,27 @@ console.log(JSON.stringify(out));"""
     def test_switch_to_ray_during_a_call(self):
         page = (WORK / "brief_lite" / "lite_page.html").read_text(encoding="utf-8")
         self.assertIn('toast("Putting you through to "+CH.name', page)
+
+
+class OneLinePerTurnNoThinkingAloud(unittest.TestCase):
+    """21 Nov 2026 - James's call: "Ok, I'll capture that split between coal and wood, then we'll cover how it's fixed in
+    place." before each question, and "let me think about how to phrase this clearly" said out loud."""
+
+    def test_the_voice_is_told(self):
+        src = open(rt.__file__, encoding="utf-8").read()
+        for words in ("call record_answers FIRST, silently", "Never think out loud", "I'll capture that"):
+            self.assertIn(words, src)
+
+    def test_each_lapse_is_logged(self):
+        page = (WORK / "brief_lite" / "lite_page.html").read_text(encoding="utf-8")
+        code = page[page.index("const THINK_ALOUD"):page.index("function rtSay(o){")]
+        js = "const logs=[];function vpLog(x){logs.push(x)}\n" + code + r"""
+const m=(t,tool)=>({output:[{type:"message",content:[{transcript:t}]}].concat(tool?[{type:"function_call"}]:[])});
+chatter(m("Ok, I'll capture that split between coal and wood, then we'll cover how it's fixed in place.",true));
+chatter(m("Okay, let me think about how to phrase this clearly so we can move forward.",false));
+chatter(m("Outside for coal and inside for wood. Are these free-standing?",false));
+console.log(JSON.stringify(logs.map(x=>x.split(" - ")[0])));"""
+        f = WORK / "chatter_check.js"
+        f.write_text(js, encoding="utf-8")
+        got = json.loads(subprocess.run(["node", str(f)], capture_output=True, text=True, check=True).stdout)
+        self.assertEqual(got, ["voice chatter: spoke before a tool call", "voice chatter: thought out loud"])
