@@ -1919,11 +1919,10 @@ class NothingSaidIsLostTests(unittest.TestCase):
         out, b = self.record("budget's five grand, and the client is collecting it",
                              {"target_unit_cost": "£5,000", "warehousing": "Client collecting from SDI",
                               "customer_name": "David Denzil"})
-        self.assertEqual(sorted(out["saved_now"]), ["target_unit_cost", "warehousing"])
-        self.assertEqual(list(out["not_saved"]), ["customer_name"])
-        self.assertIn("customer_name", out["ask_again"])
+        # 21 Nov 2026: a name is saved as heard and read back once for the AM to confirm - never refused
+        self.assertEqual(sorted(out["saved_now"]), ["customer_name", "target_unit_cost", "warehousing"])
+        self.assertIn("David Denzil", out["read_back"])
         self.assertEqual((b.get("target_unit_cost"), b.get("warehousing")), ("£5,000", "Client collecting from SDI"))
-        self.assertFalse(b.get("customer_name"))
 
     def test_still_never_a_number_or_a_date_that_was_not_said(self):
         out, b = self.record("about five grand", {"target_unit_cost": "£7,000"})
@@ -1961,8 +1960,7 @@ class NothingSaidIsLostTests(unittest.TestCase):
         with contextlib.redirect_stdout(buf):
             self.record("budget's five grand", {"target_unit_cost": "£5,000", "customer_name": "David Denzil"})
         line = [x for x in buf.getvalue().splitlines() if x.startswith("rt tool")][-1]
-        self.assertIn("saved target_unit_cost", line)
-        self.assertIn("NOT saved customer_name", line)
+        self.assertIn("saved customer_name, target_unit_cost", line)      # 21 Nov 2026: names saved, read back
 
 
 class TheVoiceHasTheSavedChatTests(unittest.TestCase):
@@ -2054,9 +2052,11 @@ class JamesCallOn5NovTests(unittest.TestCase):
                 self.assertNotIn("error", out)
                 self.assertEqual(b.get(k), v)
 
-    def test_a_name_it_misheard_is_still_refused(self):
+    def test_a_name_it_misheard_is_read_back_not_refused(self):
+        # 21 Nov 2026 (James: "we shouldn't have to train it on every new name"): saved as heard, read back to confirm
         out, b = self.record("John Dorsetts", {"customer_name": "John Griffiths"})
-        self.assertIn("never said 'griffiths'", out.get("error", ""))
+        self.assertNotIn("error", out)
+        self.assertIn("John Griffiths", out["read_back"])
 
     def test_the_previous_job_we_discussed_is_the_one_named_earlier(self):
         b = {"client": "Boots", "unit_type": "counter unit",
@@ -3340,10 +3340,9 @@ class NamesAndJobNumbersAreSaved(unittest.TestCase):
             with self.subTest(said=said):
                 self.assertEqual(self.run_([said], ups), {})
 
-    def test_still_refused(self):
-        for said, ups in [("Dave Smith.", {"account_manager": "James Gray"}),
-                          ("It's me.", {"account_manager": "Matt Evans"}),
-                          ("Twelve four three one.", {"job_number": "12432"})]:
+    def test_numbers_that_were_not_said_are_still_refused(self):
+        for said, ups in [("Twelve.", {"volume_qty": "15"}),
+                          ("About five grand.", {"target_unit_cost": "£7,000"})]:
             with self.subTest(said=said):
                 self.assertTrue(self.run_([said], ups))
 

@@ -4967,8 +4967,9 @@ def api_rt_tool():
                        "and depth).") for k in sent if k not in saved_now}
         if dropped:
             not_saved = {**(not_saved or {}), **dropped}
+    read_back = {k: s["brief"].get(k) for k in (saved_now or []) if k in READ_BACK and convo.real(s["brief"].get(k))}
     out_ = {"turn": jid, "slow": False, "output": rt.tool_result(s, JOBS[jid]["ch"].out, saved_now=saved_now,
-                                                                 not_saved=not_saved)}
+                                                                 not_saved=not_saved, read_back=read_back)}
     _told_direction(s)
     tr = rt.transcription(s, RT_LIVE.get(s["id"], True))
     if rt.hint_text(tr) not in RT_HINT.get(s["id"], []):     # 4 Nov 2026: the transcriber hears this brief's new names too
@@ -5152,6 +5153,7 @@ def _last_am_line(sid):
 
 
 NAME_FIELDS = {"client", "customer_name", "account_manager", "project_name"}
+READ_BACK = {"customer_name", "account_manager", "project_name", "job_number"}    # saved as heard, read back once
 SHORT_OK = re.compile(r"^\s*(yes|yeah|yep|yup|no|nope|nah|nein|sure|correct|right|exactly|ok(ay)?|both|either|neither|"
                       r"none|all|single|double|freestanding|[a-z]+ ?sided|\d[\d\s.,x×mm]*)\b", re.I)   # 29 Oct: "No, it doesn't" counts
 NUM_WORDS = {w: i for i, w in enumerate("zero one two three four five six seven eight nine ten eleven twelve thirteen fourteen "
@@ -5290,6 +5292,13 @@ def _answers_not_heard(s, updates):
         if k == "client" and re.match(r"\s*sdi\b", v, re.I):
             bad[k] = ("SDI Displays is us, never the client. If that was the answer to another question (like which pack), "
                       "it wasn't a clear answer - ask that question again.")
+            continue
+        if k in READ_BACK:
+            # 21 Nov 2026 (James: "it needs to be able to pick up all sorts of names .. we shouldn't have to train it on
+            # every new name"): names and the job number are never refused for not matching the transcript word for word -
+            # the voice and the transcriber spell names differently (Baxter / Backster, 412 / "four one two"). They're
+            # saved as heard and read back once for the AM to confirm or correct (tool_result's read_back). Sizes,
+            # quantities, money and dates below keep the strict check.
             continue
         if k in NAME_FIELDS:
             # 21 Nov 2026 (James: "it can't save the account manager, it also couldn't save the job no"): a job number in a

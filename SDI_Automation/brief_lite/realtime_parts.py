@@ -568,7 +568,7 @@ def fit(d, limit=RESULT_MAX):
     return json.dumps(d)
 
 
-def tool_result(s, replies, saved_now=None, not_saved=None):
+def tool_result(s, replies, saved_now=None, not_saved=None, read_back=None):
     """What the voice model hears back: where the brief is and what to ask next - short, so it answers fast.
     saved_now / not_saved (record_answers): exactly which answers went in, and which weren't heard and must be asked
     again - the rest WERE saved (5 Nov 2026: one unheard answer used to throw away the others)."""
@@ -589,6 +589,14 @@ def tool_result(s, replies, saved_now=None, not_saved=None):
         head["not_saved"] = {k: v for k, v in not_saved.items() if k != "*"}
         head["ask_again"] = ("Only these weren't heard clearly - say what you did get, then ask for just these again: "
                              + ", ".join(head["not_saved"]))
+    if read_back:
+        # 21 Nov 2026: names are saved as heard, never refused - so each is read back once, as a person would check it
+        names = {"account_manager": "account manager", "customer_name": "customer contact", "project_name": "project",
+                 "job_number": "job number"}
+        head["read_back"] = ("In your next line, read these back ONCE as a quick check, then ask your next question: "
+                             + "; ".join(f"{names.get(k, k)} {v}" for k, v in read_back.items())
+                             + " - right? If the AM corrects one, record_answers the correction. Never say you couldn't "
+                             "save a name.")
     return fit({
         **head,
         "saved": True, "answered": f"{done} of {total}",
