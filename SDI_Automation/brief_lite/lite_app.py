@@ -1500,14 +1500,27 @@ AI_ESTIMATE_ASK = re.compile(r"\b(ai|a\.i\.|llm|claude|frontier( model)?|model'?
                              r"\bcost (it|this) (line by line|part by part)\b", re.I)
 
 
+OPTION_NAMED = re.compile(r"\boption ([A-H])\b", re.I)
+
+
+def _est_render(s):
+    """The render to estimate: the option the AM named ("AI estimate for option B" - the buttons under each design say
+    which), else the newest."""
+    renders = [v for v in s.get("visuals", []) if v.get("kind") == "render"]
+    want = str(s["brief"].get("_est_for") or "").upper()
+    for v in reversed(renders):
+        if want and str(v.get("label") or "").upper() == want:
+            return v
+    return renders[-1] if renders else None
+
+
 def ai_estimate_for(s):
     """The frontier model's line-by-line costing of the design on screen (ai_estimate.py), or (None, why)."""
     import ai_estimate
     import ballpark
-    renders = [v for v in s.get("visuals", []) if v.get("kind") == "render"]
-    if not renders:
+    base = _est_render(s)
+    if not base:
         return None, "there's no design on screen yet to cost - make the visual first"
-    base = renders[-1]
     img = base.get("hd_path") if base.get("hd_path") and os.path.exists(base.get("hd_path")) else base.get("path")
     bp = ballpark_for(s)
     quotes = (bp or {}).get("basis") or []
@@ -1542,8 +1555,7 @@ def ai_estimate_turn(s, ch):
     if not e:
         ch.text(f"I couldn't do the AI estimate: {why}.")
         return ch, s
-    renders = [v for v in s.get("visuals", []) if v.get("kind") == "render"]
-    e["label"] = (renders[-1].get("label") if renders else None) or "A"
+    e["label"] = ((_est_render(s) or {}).get("label")) or "A"
     s["brief"]["_ai_estimate"] = {k: e[k] for k in ("prices", "unit_variable", "setup_total", "confidence", "label")}
     save_session(s)
     ch.ai_estimate(e, ai_estimate.say(e))
@@ -1593,10 +1605,9 @@ def estimate_lite_start(s):
     """Queue Estimate Lite for the option on screen. -> (record, '') or (None, why)."""
     import estimate_lite as el
     import requests
-    renders = [v for v in s.get("visuals", []) if v.get("kind") == "render"]
-    if not renders:
+    base = _est_render(s)
+    if not base:
         return None, "there's no design on screen yet to estimate - make the visual first"
-    base = renders[-1]
     lab = base.get("label") or "A"
     img = base.get("hd_path") if base.get("hd_path") and os.path.exists(base.get("hd_path")) else base.get("path")
     if not img or not os.path.exists(img):
@@ -3549,6 +3560,10 @@ def handle(number, name, text, image_path=None, voice=False, ch=None, new=False,
         b["_offer_declined"] = 1                              # "not yet": the brief carries on, the offer isn't repeated
     if t_override is None and MODEL3D_ASK.search(text or "") and b.get("size"):
         return model3d_turn(s, ch)
+    if t_override is None and (AI_ESTIMATE_ASK.search(text or "") or ESTIMATE_ASK.search(text or "")
+                               or PRICE_ASK.search(text or "")):
+        on = OPTION_NAMED.search(text or "")
+        b["_est_for"] = on.group(1).upper() if on else ""      # the button under a design names its option
     if (t_override is None and AI_ESTIMATE_ASK.search(text or "")) or t.get("intent") == "ai_estimate":
         return ai_estimate_turn(s, ch)
     if (t_override is None and ESTIMATE_ASK.search(text or "")) or t.get("intent") == "estimate_lite":

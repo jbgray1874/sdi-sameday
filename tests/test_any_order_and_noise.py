@@ -3200,3 +3200,28 @@ class SidIsNotCutOffByEchoTests(unittest.TestCase):
         self.assertIn('data-say="AI estimate"', PAGE)
         self.assertIn('data-say="Estimate Lite"', PAGE)
         self.assertIn("AI estimate (line by line", next(t["description"] for t in rt.TOOLS if t["name"] == "ballpark"))
+
+
+class EstimateButtonsUnderEachDesign(unittest.TestCase):
+    """21 Nov 2026 - James: "I didn't see an estimate button anywhere." Three buttons under every design; each prices
+    the design it sits under."""
+
+    def test_each_button_reaches_its_own_estimate(self):
+        self.assertTrue(L.PRICE_ASK.search("Quick estimate for option B"))
+        self.assertFalse(L.AI_ESTIMATE_ASK.search("Quick estimate for option B"))
+        self.assertTrue(L.AI_ESTIMATE_ASK.search("AI estimate for option B"))
+        self.assertTrue(L.ESTIMATE_ASK.search("Estimate Lite for option B"))
+        self.assertFalse(L.AI_ESTIMATE_ASK.search("Estimate Lite for option B"))
+
+    def test_the_named_option_is_the_one_priced(self):
+        s = {"brief": {"_est_for": "A"}, "visuals": [{"kind": "render", "label": "A"}, {"kind": "render", "label": "B"}]}
+        self.assertEqual(L._est_render(s)["label"], "A")
+        s["brief"]["_est_for"] = ""
+        self.assertEqual(L._est_render(s)["label"], "B")
+        self.assertIsNone(L._est_render({"brief": {}, "visuals": []}))
+
+    def test_the_buttons_are_on_every_option_card(self):
+        page = (WORK / "brief_lite" / "lite_page.html").read_text(encoding="utf-8")
+        for say in ("Quick estimate for option ${esc(L)}", "AI estimate for option ${esc(L)}",
+                    "Estimate Lite for option ${esc(L)}"):
+            self.assertIn(f'data-say="{say}"', page)

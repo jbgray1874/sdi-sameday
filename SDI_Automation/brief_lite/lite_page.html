@@ -93,6 +93,8 @@ button{font:inherit;cursor:pointer}a{color:inherit}
 .opt .note{font-size:12px;color:var(--amber);background:var(--ambersoft);border-radius:9px;padding:7px 9px;margin:-4px 0 10px}
 .opt .dir{font-weight:700;font-size:13.5px}.opt .src{color:var(--muted);font-size:12px;margin:2px 0 10px}
 .acts{display:flex;gap:8px;flex-wrap:wrap}
+.estrow{margin-top:10px;padding-top:8px;border-top:1px solid var(--line,#e3e3dc);font-size:12px;color:var(--muted)}.estrow b{color:inherit}
+.estb{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:6px}.estb .btn{display:flex;flex-direction:column;align-items:center;padding:6px 4px;font-size:13px;line-height:1.2}.estb small{font-size:11px;font-weight:400;opacity:.75}
 .btn{height:36px;padding:0 14px;border-radius:10px;border:1px solid var(--line);background:var(--card);color:var(--ink);font-weight:600;font-size:13px;display:inline-flex;align-items:center;gap:6px;text-decoration:none}
 .btn:hover{background:var(--soft)}
 .btn.pri{background:var(--red);border-color:var(--red);color:#fff}.btn.pri:hover{background:var(--red2)}
@@ -1420,7 +1422,9 @@ function render(x){
    <div class="body"><div class="dir">${esc(x.direction||"Concept")}</div><div class="src">${x.based_on&&x.based_on.length?"Based on SDI jobs "+x.based_on.map(esc).join(", "):esc(x.caption)}</div>
    ${x.inspired&&x.inspired.length?`<div class="insp">✨ Inspired by your Space <b>${esc(x.inspired[0].space)}</b> ${x.inspired.map(i=>`<i style="background-image:url('${i.thumb}')"></i>`).join("")}</div>`:""}
    ${x.check_note&&!x.check_ok?`<div class="note">⚠ ${esc(x.check_note)}</div>`:""}
-   <div class="acts"><button class="btn pri" data-a="use">✓ Use this</button><button class="btn" data-a="chg">✎ Change…</button><a class="btn ghost" href="${x.url}" download>⬇</a></div></div>`;
+   <div class="acts"><button class="btn pri" data-a="use">✓ Use this</button><button class="btn" data-a="chg">✎ Change…</button><a class="btn ghost" href="${x.url}" download>⬇</a></div>
+   <div class="estrow"><b>Estimate this design</b> (internal, not for the client)
+    <div class="estb"><button class="btn" type="button" data-say="Quick estimate for option ${esc(L)}" title="SDI's closest past job, adjusted for this design">Past jobs<small>seconds</small></button><button class="btn" type="button" data-say="AI estimate for option ${esc(L)}" title="The AI model costs the design part by part">AI estimate<small>about a minute</small></button><button class="btn" type="button" data-say="Estimate Lite for option ${esc(L)}" title="SDI's estimating engine prices it - the longest and most thorough">Estimate Lite<small>5-15 minutes</small></button></div></div></div>`;
   c.querySelector('[data-a="use"]').onclick=()=>{document.querySelectorAll(".opt").forEach(o=>o.classList.toggle("chosen",o===c));send(`Option ${L} is the one - send me the client sheet`);whyChips(c,"option_chosen")};
   c.querySelector('[data-a="chg"]').onclick=()=>{t.value=`Option ${L}: `;t.focus()};
   picFeedback(c,L,x.kind||"render");
