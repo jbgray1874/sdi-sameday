@@ -3239,3 +3239,64 @@ class SidWaitsForTheSoundBeforeHisFirstLine(unittest.TestCase):
         self.assertIn("setTimeout(()=>rtGreet(true),4000)", page)
         self.assertIn('data-act="unmute"', page)
         self.assertIn('a==="unmute"', page)
+
+
+class WhichEstimateTheWordsPick(unittest.TestCase):
+    """21 Nov 2026 - James: "what happens if the AM says an SDI estimate or an LLM estimate ... or a quick estimate?"
+    The turn checks AI first, then Estimate Lite, then the quick one - so this is what each phrase gets."""
+
+    def pick(self, t):
+        if L.AI_ESTIMATE_ASK.search(t):
+            return "ai"
+        if L.ESTIMATE_ASK.search(t):
+            return "lite"
+        if L.PRICE_ASK.search(t):
+            return "quick"
+        return None
+
+    def test_the_words(self):
+        cases = {
+            "give me an SDI estimate": "lite", "run SDI's estimate on it": "lite", "put it through the estimating system": "lite",
+            "Estimate Lite please": "lite", "a proper estimate": "lite", "price it properly": "lite",
+            "can I get an LLM estimate": "ai", "do the AI estimate": "ai", "ChatGPT estimate": "ai", "cost it line by line": "ai",
+            "quick estimate": "quick", "an estimate from past jobs": "quick", "past jobs estimate": "quick",
+            "give me an estimate": "quick", "how much would it cost": "quick", "ballpark?": "quick",
+        }
+        for t, want in cases.items():
+            with self.subTest(t=t):
+                self.assertEqual(self.pick(t), want)
+
+
+class EstimateEveryTimeADesignIsChosen(unittest.TestCase):
+    def test_quick_first_then_ai_and_once_per_design(self):
+        calls = []
+        old_q, old_a, old_log = L.quick_estimate_for, L.ai_estimate_for, L.log_msg
+        try:
+            L.quick_estimate_for = lambda s: (calls.append(("q", s["brief"]["_est_for"])), None)[1]
+            L.ai_estimate_for = lambda s: (calls.append(("ai", s["brief"]["_est_for"])), (
+                {"prices": [{"qty": 10, "unit_gbp": 120.0}], "unit_variable": 100.0, "setup_total": 200.0,
+                 "confidence": "low - x"}, ""))[1]
+            L.log_msg = lambda *a, **k: None
+            L.AUTO_EST.clear()
+            s = {"id": "t-auto", "brief": {}, "visuals": [{"kind": "render", "label": "B"}]}
+            L.auto_estimate_start(s, "B")
+            for _ in range(50):
+                if L.AUTO_EST["t-auto"]["status"] != "running":
+                    break
+                time.sleep(0.02)
+            rec = L.AUTO_EST["t-auto"]
+            self.assertEqual(rec["status"], "done")
+            self.assertEqual(rec["kind"], "ai")                  # no past job close enough -> the AI estimate
+            self.assertEqual(calls, [("q", "B"), ("ai", "B")])
+            L.auto_estimate_start(s, "B")                         # the same design again: not worked out twice
+            self.assertEqual(len(calls), 2)
+            self.assertNotIn("_est_for", s["brief"])             # the chat's own brief is untouched
+        finally:
+            L.quick_estimate_for, L.ai_estimate_for, L.log_msg = old_q, old_a, old_log
+
+    def test_the_page_shows_it_and_sid_says_it(self):
+        page = (WORK / "brief_lite" / "lite_page.html").read_text(encoding="utf-8")
+        self.assertIn('x.role==="auto_estimate"', page)
+        self.assertIn('fetch("/api/auto-estimate/"', page)
+        src = (WORK / "brief_lite" / "lite_app.py").read_text(encoding="utf-8")
+        self.assertIn('"role": "auto_estimate"', src)

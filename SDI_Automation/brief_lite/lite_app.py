@@ -1449,7 +1449,7 @@ VIEWS_ASK = re.compile(r"\b(more|other|different|extra|all( the)?|several|multip
 
 
 PRICE_ASK = re.compile(r"\b(budget(ary)? (price|pricing|cost|figure|number)s?|ballpark|guide price|rough (price|cost)|"
-                       r"quick (estimate|price)|(get|give me|do|run) (an? |the )?estimate|price (it|this|that) up|"
+                       r"quick (estimate|price)|(past|old|previous|similar)[- ]jobs? (estimate|price|pricing)|estimate (from|on|off) (past|old|previous|similar) jobs|(get|give me|do|run) (an? |the )?estimate|price (it|this|that) up|"
                        r"indicative (price|cost)|(any|some) (budget )?pricing|how much (would|will|does|might) (it|this|that|one|"
                        r"each|they) (cost|be)|what (would|will|does|might) (it|this|that|each) cost|cost per unit|"
                        r"price per unit|unit (price|cost))\b", re.I)
@@ -1496,8 +1496,14 @@ def quick_estimate_for(s):
     return ballpark.quick(b, s.get("_quotes") or [], ask, ballpark._qty(b.get("volume_qty")))
 
 
-AI_ESTIMATE_ASK = re.compile(r"\b(ai|a\.i\.|llm|claude|frontier( model)?|model'?s?) (estimate|costing|price|pricing)\b|"
-                             r"\bcost (it|this) (line by line|part by part)\b", re.I)
+# 21 Nov 2026 (James: "what happens if the AM says an SDI estimate or an LLM estimate ... or a quick estimate? We should
+# give some guidance"). The words that pick each one - and anything else ("an estimate", "how much") is the quick one:
+#   Past jobs (quick)  quick / rough / ballpark / past-job / old-job / similar-job estimate, how much, budget price
+#   AI estimate        AI / LLM / Claude / ChatGPT / GPT / model / frontier estimate, cost it line by line
+#   Estimate Lite      Estimate Lite, SDI / SDI's estimate, the estimating engine / system / team, a full / proper /
+#                      detailed / accurate estimate, price it properly
+AI_ESTIMATE_ASK = re.compile(r"\b(ai|a\.i\.|llm|l\.l\.m\.|claude|chat ?gpt|gpt|frontier( model)?|model'?s?) (estimate|costing|price|"
+                             r"pricing|cost)\b|\bcost (it|this|that) (line by line|part by part)\b", re.I)
 
 
 OPTION_NAMED = re.compile(r"\boption ([A-H])\b", re.I)
@@ -1512,6 +1518,47 @@ def _est_render(s):
         if want and str(v.get("label") or "").upper() == want:
             return v
     return renders[-1] if renders else None
+
+
+# ── the automatic estimate (21 Nov 2026) ─────────────────────────────────────────────────────────────────────────────
+# James: "it does need to be automatic ... an estimate needs to be produced. every time." When the AM chooses a design
+# (the client pack is made), the past-jobs estimate is worked out for it straight away - seconds - and when SDI has no
+# close past job, the AI estimate instead (about a minute). In the background, so the client pack isn't held up; the page
+# shows it when it's ready and, in a call, Sid says it. The other two can still be asked for any time.
+AUTO_EST = {}            # chat -> {"label", "status": running|done|error, "kind": quick|ai, "data", "line"}
+
+
+def auto_estimate_start(s, label):
+    import ai_estimate
+    import ballpark
+    sid = s["id"]
+    had = AUTO_EST.get(sid) or {}
+    if had.get("label") == label and had.get("status") in ("running", "done"):
+        return had
+    rec = {"label": label, "status": "running"}
+    AUTO_EST[sid] = rec
+    snap = dict(s)
+    snap["brief"] = dict(s["brief"], _est_for=label)
+    snap["visuals"] = list(s.get("visuals") or [])
+
+    def go():
+        try:
+            q = quick_estimate_for(snap)
+            if q:
+                rec.update(kind="quick", data=q, line=ballpark.say_quick(q), status="done")
+            else:
+                e, why = ai_estimate_for(snap)
+                if e:
+                    e["label"] = label
+                    rec.update(kind="ai", data=e, line=ai_estimate.say(e), status="done")
+                else:
+                    rec.update(line=f"No automatic estimate for Option {label}: {why}.", status="error")
+        except Exception as ex:                              # noqa: BLE001
+            rec.update(line=f"No automatic estimate for Option {label} ({type(ex).__name__}).", status="error")
+        if rec.get("line"):
+            log_msg(sid, "out", rec["line"])
+    threading.Thread(target=go, daemon=True).start()
+    return rec
 
 
 def ai_estimate_for(s):
@@ -1582,7 +1629,8 @@ def ballpark_turn(s, ch):
 
 
 ESTIMATE_ASK = re.compile(r"\bestimate[- ]?lite\b|\b(proper|full|real|detailed|engine'?s?|accurate) (priced )?estimate\b|"
-                          r"\bprice (it|this|that) properly\b|\brun it through (the )?estimat", re.I)
+                          r"\bprice (it|this|that) properly\b|\brun it through (the )?estimat|"
+                          r"\bsdi'?s? (own )?(estimate|estimating|costing|pricing)\b|\bestimating (engine|system|tool|team)\b", re.I)
 EL_WATCHING = set()      # chats whose Estimate Lite run is being followed by this process
 
 
@@ -4031,6 +4079,12 @@ def handle(number, name, text, image_path=None, voice=False, ch=None, new=False,
         b["_sheet_sig"], b["_sheet_pdf"] = sig, sheet
         save_session(s)
         ch.document(sheet, f"Option {label}" + (" + its technical GA" if ga else "") + " - ready to send the client for approval", role="sheet")
+        try:             # 21 Nov 2026: and its estimate, every time - worked out in the background, shown when ready
+            auto_estimate_start(s, label)
+            ch.flush()
+            ch.out.append({"type": "text", "role": "auto_estimate", "label": label, "text": ""})
+        except Exception:                                    # noqa: BLE001
+            pass
         if ga_card:      # the GA on its own, after the pack - to look at closely or change its sizes
             ch.image(ga_card, f"Concept GA of Option {label} - {b.get('size')} as briefed. Parts are named from the concept; "
                               "not for manufacture.", role="option", label="GA", kind="technical", from_option=label)
@@ -5483,6 +5537,12 @@ def api_page_problem():
     who = signed_in_user() or "not signed in"
     print(f"[page] {datetime.now():%H:%M:%S} {who} chat={chat or '-'} {what}", flush=True)
     return jsonify({"ok": True})
+
+
+@app.route("/api/auto-estimate/<sid>")
+def api_auto_estimate(sid):
+    """The automatic estimate for the chosen design: running, done (with its card) or why not."""
+    return jsonify(AUTO_EST.get(sid) or {})
 
 
 @app.route("/api/estimate-lite/<sid>")

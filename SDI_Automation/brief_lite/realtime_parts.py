@@ -131,18 +131,20 @@ TOOLS = [
      "description": "Estimate Lite: SDI's estimating engine prices the design on screen part by part from its render and "
                     "the brief - materials, labour and bought-in - at 1, 10 and the brief's quantity. Takes 5-15 minutes "
                     "and appears on screen. Call it only when the AM asks for Estimate Lite or a full / proper / detailed "
-                    "estimate (otherwise call ballpark). Provisional, from a concept: never a quote for the client.",
+                    "estimate, an SDI estimate, SDI's own estimate, or the estimating engine / system / team (otherwise call "
+                    "ballpark). Provisional, from a concept: never a quote for the client.",
      "parameters": {"type": "object", "properties": {}}},
     {"type": "function", "name": "ai_estimate",
      "description": "The AI estimate, about 30-60 seconds: the AI model costs the design on screen line by line from its "
                     "render and the brief - each part's material, each process's time, bought-in items and one-off setup - "
-                    "checked against SDI's past quotes. Call it when the AM asks for the AI estimate or to cost it line by "
-                    "line. Internal only, never for the client.",
+                    "checked against SDI's past quotes. Call it when the AM asks for the AI, LLM, ChatGPT, Claude or model "
+                    "estimate, or to cost it line by line. Internal only, never for the client.",
      "parameters": {"type": "object", "properties": {}}},
     {"type": "function", "name": "ballpark",
      "description": "The QUICK estimate, in seconds: SDI's closest past job's own estimate (from K:), brought to today and "
                     "adjusted for what's different about this design - each adjustment with its £ and reason. Call it when "
-                    "the AM asks about budget, pricing, a ballpark, how much it'll cost or 'an estimate'. Internal only, "
+                    "the AM asks about budget, pricing, a ballpark, how much it'll cost, a quick / past-jobs estimate, or just "
+                    "'an estimate' without saying which. Internal only, "
                     "never for the client. Then offer the two fuller ones once: the AI estimate (line by line, about a minute) "
                     "or Estimate Lite (the estimating engine, 5-15 minutes).",
      "parameters": {"type": "object", "properties": {}}},
@@ -186,7 +188,9 @@ TOOLS = [
                           "description": "What the AM said: build on SDI's past work, a brand-new concept, or a mix."}},
          "required": ["output", "design_route"]}},
     {"type": "function", "name": "choose_option",
-     "description": "The AM picks a concept (A, B, C...). Draws its GA if wanted and makes the one-page client sheet.",
+     "description": "The AM picks a concept (A, B, C...). Draws its GA if wanted and makes the one-page client sheet. Its "
+                    "estimate is then worked out automatically (past jobs, or the AI estimate) and you'll be told when it's "
+                    "on screen - don't call ballpark for it yourself.",
      "parameters": {"type": "object", "properties": {"label": {"type": "string"}}, "required": ["label"]}},
     {"type": "function", "name": "change_option",
      "description": "Change a concept: e.g. label B, change 'white header, 4 shelves'.",
