@@ -1548,6 +1548,12 @@ async function loadFiles(){if(!sid){$("#flist").innerHTML="";return}
 // ---------- LIVE voice (ChatGPT-style): the browser talks straight to OpenAI's Realtime model over WebRTC.
 // It answers in under a second, stops the moment you talk over it, and fills the brief through Brief Lite's tools.
 let rt=null;
+const PHONE=/Android|iPhone|iPad|Mobile/i.test(navigator.userAgent)||(navigator.maxTouchPoints>1&&/Macintosh/.test(navigator.userAgent));
+// The first line, once: when the line is open AND the sound is playing, after a settle (longer on a phone). `late`: 4 s
+// after the line opened with no sound event (some browsers never send one) - go anyway rather than sit in silence.
+function rtGreet(late){if(!rt||rt.greeted||!rt.opened||!(rt.audioOn||late))return;rt.greeted=1;
+ if(late&&!rt.audioOn)vpLog("live voice: no 'playing' from the sound after 4 s - started anyway | "+browserTag());
+ setTimeout(()=>{if(rt&&rt.dc&&rt.dc.readyState==="open")rt.dc.send(JSON.stringify({type:"response.create"}))},late?0:(PHONE?900:250))}
 async function rtStart(){if(!project){toast("Pick your name first");newBrief();return true}
  talkUI(true,"Connecting…");
  const j=await fetch("/api/rt/session",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({who,new:!sid,session:sid,project,character:CH.key,mobile:/Android|iPhone|iPad|Mobile/i.test(navigator.userAgent)})}).then(r=>r.json()).catch(e=>({error:String(e)}));
@@ -1558,7 +1564,16 @@ async function rtStart(){if(!project){toast("Pick your name first");newBrief();r
   voiceProblem("session",`The server wouldn't start a live voice session (${String(j.error).slice(0,90)}).`,j.error);return false}
  fresh=false;sid=j.session;rememberChat();if(j.brief)showBrief(j.brief);const h=$(".hero");if(h)h.remove();
  const tr0=j.transcription||null;
- const pc=new RTCPeerConnection(),audio=new Audio();audio.autoplay=true;pc.ontrack=e=>{audio.srcObject=e.streams[0];watchOut(e.streams[0])};
+ const pc=new RTCPeerConnection(),audio=new Audio();audio.autoplay=true;audio.setAttribute("playsinline","");audio.style.display="none";document.body.appendChild(audio);
+ // 21 Nov 2026 (James, on his phone: "words were missed compared to those printed on the screen at the start ... he isn't
+ // really speaking to start with"): Sid's first line was asked for the moment the line opened - before the phone had
+ // started playing the incoming sound, and while it was still switching its speaker over for a call (that takes a second
+ // or so once the microphone comes on). The words were on screen; the sound of them went nowhere. Now he starts only once
+ // the sound is actually playing, plus a moment for the phone to settle; if the phone blocks the sound, a button says so.
+ audio.addEventListener("playing",()=>{if(rt){rt.audioOn=1;rtGreet()}});
+ pc.ontrack=e=>{audio.srcObject=e.streams[0];watchOut(e.streams[0]);const p=audio.play&&audio.play();if(p&&p.catch)p.catch(()=>{if(!rt)return;
+  vpLog("live voice: the phone blocked the sound from playing | "+browserTag());
+  vpShow(`<b>Tap to hear ${esc(CH.name)}.</b> Your phone is holding the sound back. <button class="vo-link" data-act="unmute" type="button">Turn the sound on</button>`,"silent")})};
  // 4 Nov 2026 (James: "the render didn't appear on the phone app"): a render takes a minute or two with the mic paused, the
  // phone locked itself, and a locked phone pauses the page and drops the call. The screen now stays on for the call; a
  // call that dropped anyway is closed cleanly and the chat reloaded, so whatever was drawn meanwhile is on screen.
@@ -1568,7 +1583,7 @@ async function rtStart(){if(!project){toast("Pick your name first");newBrief();r
  const dc=pc.createDataChannel("oai-events");
  const told=t=>t?((t.prompt||"")+" "+(t.keywords||[]).join(", ")).trim():"";   // what the transcriber was told: prompt + keyword hints
  rt={pc,dc,mic,audio,bubble:null,userRow:null,talking:false,tr:tr0,hints:told(tr0)?[told(tr0)]:[]};
- dc.onopen=()=>{if(rt)rt.opened=1;talkUI(true,"Live - just talk. Interrupt me any time.");keepAwake(true);dc.send(JSON.stringify({type:"response.create"}));silentWatch()};
+ dc.onopen=()=>{if(rt)rt.opened=1;talkUI(true,"Live - just talk. Interrupt me any time.");keepAwake(true);rtGreet();setTimeout(()=>rtGreet(true),4000);silentWatch()};
  dc.onmessage=e=>rtEvent(JSON.parse(e.data));
  meter(mic);
  const offer=await pc.createOffer();await pc.setLocalDescription(offer);
@@ -1589,7 +1604,7 @@ async function keepAwake(on){try{if(on&&!wake&&"wakeLock" in navigator){wake=awa
 document.addEventListener("visibilitychange",()=>{if(document.visibilityState!=="visible"||!rt)return;
  if(["failed","closed","disconnected"].includes(rt.pc&&rt.pc.connectionState)){rtStop();toast("The call stopped while the phone was locked - everything so far is in the chat. Press Talk to carry on.");return}
  keepAwake(true)});   // the browser lets go of the wake lock when the page is hidden: take it again
-function rtStop(){if(!rt)return;keepAwake(false);try{rt.dc.close()}catch(e){}try{rt.pc.close()}catch(e){}rt.mic.getTracks().forEach(t=>t.stop());rt=null;talkOn=false;talkUI(false);loadHist()}
+function rtStop(){if(!rt)return;keepAwake(false);try{rt.dc.close()}catch(e){}try{rt.pc.close()}catch(e){}rt.mic.getTracks().forEach(t=>t.stop());try{rt.audio.srcObject=null;rt.audio.remove()}catch(e){}rt=null;talkOn=false;talkUI(false);loadHist()}
 // 17 Nov 2026 (James: "it didn't speak to me today"): live voice that couldn't start fell back to talk mode with a toast
 // that was gone in seconds (the bar said "Talk mode" and nobody noticed), and one that connected but never spoke said
 // nothing. Each now says what happened, on the page, and tells the log - Check-SameDay-Call.ps1 prints "[page]" lines.
@@ -1625,6 +1640,7 @@ document.addEventListener("click",e=>{const b=e.target.closest&&e.target.closest
  if(a==="soundcheck"){e.preventDefault();soundCheck()}
  else if(a==="vpclose"){vpHide()}
  else if(a==="sidretry"){if(window.__sidSay){vpHide("tts");sidPlay(window.__sidSay,++ttsSeq,0)}}
+ else if(a==="unmute"&&rt){e.preventDefault();vpHide("silent");const p=rt.audio.play();if(p&&p.catch)p.catch(()=>{})}
  else if(a==="hearagain"&&rt){e.preventDefault();vpHide("silent");rt.heard=false;rt.audioChecked=0;rtSay({type:"response.create"});silentWatch()}});
 function soundCheck(){if(document.getElementById("sndchk"))return;
  const m=document.createElement("div");m.className="modal";m.id="sndchk";

@@ -362,7 +362,7 @@ class ThePageTests(unittest.TestCase):
     def test_the_phone_stays_awake_and_a_dropped_call_reloads_the_chat(self):
         """4 Nov 2026: "the render didn't appear on the phone app" - a minute or two of drawing with the mic paused, the
         phone locked itself, and a locked phone pauses the page and drops the call."""
-        self.assertIn("keepAwake(true);dc.send", PAGE)                       # on as the call opens
+        self.assertIn("keepAwake(true);rtGreet()", PAGE)                       # on as the call opens
         self.assertIn("function rtStop(){if(!rt)return;keepAwake(false);", PAGE)
         self.assertIn('navigator.wakeLock.request("screen")', PAGE)
         self.assertIn('document.addEventListener("visibilitychange"', PAGE)  # taken again when the page is back
@@ -3225,3 +3225,17 @@ class EstimateButtonsUnderEachDesign(unittest.TestCase):
         for say in ("Quick estimate for option ${esc(L)}", "AI estimate for option ${esc(L)}",
                     "Estimate Lite for option ${esc(L)}"):
             self.assertIn(f'data-say="{say}"', page)
+
+
+class SidWaitsForTheSoundBeforeHisFirstLine(unittest.TestCase):
+    """21 Nov 2026 - James, on his phone: words on screen at the start were never heard. The first line is asked for
+    only once the sound is playing (plus a settle), with a 4 s fallback and a 'turn the sound on' button if blocked."""
+
+    def test_first_line_waits_for_the_sound(self):
+        page = (WORK / "brief_lite" / "lite_page.html").read_text(encoding="utf-8")
+        self.assertNotIn('dc.send(JSON.stringify({type:"response.create"}));silentWatch()', page)
+        self.assertIn('audio.addEventListener("playing"', page)
+        self.assertIn("function rtGreet(late)", page)
+        self.assertIn("setTimeout(()=>rtGreet(true),4000)", page)
+        self.assertIn('data-act="unmute"', page)
+        self.assertIn('a==="unmute"', page)
