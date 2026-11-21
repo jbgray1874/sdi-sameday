@@ -361,6 +361,12 @@ def instructions(s, mid_call=False):
     return characters.say_name(
         characters.voice_rules(VOICE_RULES, c)
         + "\n# This call\n"
+        # 21 Nov 2026 (James's call): a radio commentary near the mic reached the voice as the AM, and "Hi Beth" was
+        # answered with a crisis helpline
+        + "This is a work call about a display unit. Sounds from a radio, TV or other people near the AM can come through "
+          "as words: if what you hear has nothing to do with the brief, it isn't the AM - ignore it and carry on. Read "
+          "everything as work talk. Only if the AM themselves clearly says they're in danger or crisis, step out of the "
+          "brief and respond to that.\n"
         + f"Today is {G['date'].today():%A %d %B %Y}; it's {now:%H:%M}, the {part}. Greet only with the right part of "
           "the day, or just 'Hi'.\n"
         + (f"Briefing: {name}.\n" if name else "")

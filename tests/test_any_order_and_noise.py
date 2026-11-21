@@ -316,7 +316,10 @@ def page_fn(name):
 @unittest.skipUnless(NODE, "node is not installed")
 class ThePageTests(unittest.TestCase):
     def run_js(self, body):
-        src = "\n".join(page_fn(n) for n in ("hintEcho", "junkHeard", "vadBar", "autoTD")) + "\n" + body
+        page = (WORK / "brief_lite" / "lite_page.html").read_text(encoding="utf-8")
+        bg = page[page.index("const BG_WORDS"):page.index("function junkHeard")]      # 21 Nov 2026: radio / TV filter
+        src = "function voNote(){}\n" + bg + "\n".join(page_fn(n) for n in ("hintEcho", "junkHeard", "vadBar", "autoTD")) \
+            + "\n" + body
         r = subprocess.run([NODE, "-e", src], capture_output=True, text=True, timeout=30)
         self.assertEqual(r.returncode, 0, r.stderr)
         return json.loads(r.stdout)
@@ -3348,3 +3351,37 @@ class NamesAndJobNumbersAreSaved(unittest.TestCase):
 
     def test_the_job_number_has_a_home(self):
         self.assertIn("job_number", L.FIELDS)
+
+
+class ARadioNearTheMicIsNotTheAM(unittest.TestCase):
+    """21 Nov 2026 - James's call (18:40): a football commentary on a radio was taken as the AM - its numbers opened past
+    jobs' drawings, and Beth answered "Hi Beth" with a helpline. Checked with the call's own lines, in node."""
+
+    def test_the_calls_own_lines(self):
+        import shutil as sh
+        if not sh.which("node"):
+            self.skipTest("node not installed")
+        page = (WORK / "brief_lite" / "lite_page.html").read_text(encoding="utf-8")
+        code = page[page.index("const BG_WORDS"):page.index("function junkHeard")]
+        js = "let rt={};function voNote(){}\n" + code + r"""
+const real=["Color yellow.","The one outside add your bags of coal, the one inside bags of wood.",
+ "No, they're freestanding. They can move around.","Tesco coal bunker four one two.","Hi Beth.","Yeah, can we switch to Ray?",
+ "In your own words the customer needs something that sits by the tills, holds about twenty gift boxes, looks premium, and the client wants their brand colours on the header and lighting in the shelves so it stands out at Christmas"];
+const radio=["For the keep off rooftop and over hearts total control Steven got a tough after 18 but he's got him 18 he's he's got to get send his team out and say look first things first, let's get the first goal, second half, see where it takes us.",
+ "optical over come on school tables and also exceeding So if you look so I'm sure on Chat is However very very very vulnerable",
+ "This could be come out with as they know the pressure see the could because take on Rangers in second place Rangers now seven points behind leaders Celtic after Celtic's 4-1 win at Celtic Park against Motherwell this afternoon."];
+const out={real:real.map(t=>{rt={};return bgSpeech(t.toLowerCase())}),radio:[]};rt={};
+for(const t of radio)out.radio.push(bgSpeech(t.toLowerCase()));
+console.log(JSON.stringify(out));"""
+        f = WORK / "bg_check.js"
+        f.write_text(js, encoding="utf-8")
+        got = json.loads(subprocess.run(["node", str(f)], capture_output=True, text=True, check=True).stdout)
+        self.assertEqual(got["real"], [False] * 7)
+        self.assertEqual(got["radio"], [True] * 3)
+
+    def test_the_voice_is_told_it_is_a_work_call(self):
+        self.assertIn("radio, TV or other people near the AM", open(rt.__file__, encoding="utf-8").read())
+
+    def test_switch_to_ray_during_a_call(self):
+        page = (WORK / "brief_lite" / "lite_page.html").read_text(encoding="utf-8")
+        self.assertIn('toast("Putting you through to "+CH.name', page)

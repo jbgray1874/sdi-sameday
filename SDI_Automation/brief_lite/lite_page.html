@@ -1711,8 +1711,20 @@ function meter(stream){const ctx=new (window.AudioContext||window.webkitAudioCon
 function hintEcho(tx){if(!rt||!rt.hints||!rt.hints.length)return false;const w=(tx.match(/[a-z0-9&']+/g)||[]);if(w.length<6)return false;
  return rt.hints.some(h=>{const hw=(h.toLowerCase().match(/[a-z0-9&']+/g)||[]),k=new Set();for(let i=1;i<hw.length;i++)k.add(hw[i-1]+" "+hw[i]);
   let n=0;for(let i=1;i<w.length;i++)if(k.has(w[i-1]+" "+w[i]))n++;return n>=0.75*(w.length-1)})}
+// 21 Nov 2026 (James's call, 18:40): a football commentary on a radio near the mic was taken as the AM - its numbers
+// opened past jobs' drawings, and its words ("very very vulnerable") reached the voice, which answered "Hi Beth" with a
+// helpline. A long line with nothing about the job, or with broadcast words in it, is someone else talking; once one is
+// heard, for a minute any long line with nothing about the job is too.
+const BG_WORDS=/\b(goals?|half[- ]?time|second half|first half|match|league|season|points|players?|commentary|kick[- ]?off|penalty|referee|striker|midfield(er)?|manager|fans|stadium|celtic|rangers|hearts|motherwell|aberdeen|hibs|arsenal|chelsea|liverpool|weather|forecast|headlines|news|minister|government|traffic|listeners|presenter|after the break|stay tuned|live commentary)\b/g;
+const JOB_WORDS=/\b(unit|units|display|displays|shelf|shelves|shelving|client|brief|design|designs|render|visual|drawing|drawings|size|mm|metres?|millimetres?|high|wide|deep|height|width|depth|colou?rs?|products?|stores?|shop|gondola|fsdu|bunker|header|plinth|acrylic|steel|metal|wood|timber|mdf|logo|brand|graphics|pack|quote|estimate|budget|price|cost|job|option|sid|beth|ray|isla|freestanding|counter|floor|lighting|led|delivery|quantity)\b/g;
+function bgSpeech(tx){const nw=tx.split(/\s+/).filter(Boolean).length;if(nw<10)return false;
+ const bg=(tx.match(BG_WORDS)||[]).length,job=(tx.match(JOB_WORDS)||[]).length;
+ const is=!!((bg>=2&&job===0)||(nw>=45&&job===0)||(nw>=25&&bg>=4&&bg>job*2)||(typeof rt!=="undefined"&&rt&&rt.bgAt&&Date.now()-rt.bgAt<60000&&job===0));
+ if(is&&typeof rt!=="undefined"&&rt){rt.bgAt=Date.now();if(!rt.bgTold){rt.bgTold=1;voNote("There's a radio, TV or another conversation near your mic - I'm ignoring it")}}
+ return is}
 function junkHeard(tx){tx=(tx||"").trim().toLowerCase();
  if(hintEcho(tx))return true;
+ if(bgSpeech(tx))return true;
  if(/answers are often short|short answers like|yes, no, both, client pack|internal pack\. clients|retail display brief for|general assembly, render|clients include|sainsbury'?s, dior|forecourt, coal bunker, adblue|coal bunker, fsdu, gondola end|dump bin, ga\b/.test(tx))return true;
  {const nm=["boots","tesco","lindt","fanatics","ryobi","harrods","superdrug","dyson","halfords","morrisons","sainsbury","dior","watson","unilever","mondelez","callaway","kurt geiger","liz earle","galvin"].filter(w=>tx.includes(w)).length;if(nm>=3)return true}
  // 3 Nov 2026: whispers / the room picked up as a few words, and lines in another script (the transcriber guessing
@@ -1737,6 +1749,10 @@ function hangsUp(tx){return BYE.test(tx)&&tx.split(/\s+/).length<=8&&!/\b(info|i
 function saidBye(said){said=said||"";return /\b(good ?bye|bye|take care|speak soon|talk soon)\b/i.test(said)&&!/\?/.test(said)}
 function dropLog(tx,why){try{fetch("/api/rt/drop",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({session:sid,why,text:String(tx||"").slice(0,300),noisy:!!(rt&&rt.noisy),peak:rt&&rt.peak})})}catch(e){}}
 async function rtHeard(tx,itemId){
+ // 21 Nov 2026 (James: "can we switch to Ray?" - "I can't switch to Ray"): the call ends and starts again with them
+ {const m=/\b(switch|swap|change|go|hand( me)? over|put me through)( me)?( back| over)? to (sid|beth|ray|isla)\b|\b(can i|let me|i'?d like to|i want to) (talk|speak) to (sid|beth|ray|isla)\b/i.exec(String(tx||""));
+  const who=m&&(m[6]||m[9]);if(rt&&who&&CHARS[who.toLowerCase()]&&who.toLowerCase()!==CH.key){if(itemId)rtSay({type:"conversation.item.delete",item_id:itemId});
+   rtStop();pickChar(who.toLowerCase());toast("Putting you through to "+CH.name+"…");setTimeout(()=>{if(!rt){const t=$("#talk");if(t)t.click()}},900);return}}
  // 4 Nov 2026: "both please" came through as "bullet please" - after the pack question it can only mean both
  if(rt&&/client pack|internal (brief )?pack|or both/i.test(rt.lastSdi||"")&&/^\W*(bullet|bullets|boots?|booth|bose|bolts?|bowl|bot|boat|both)\b[\s\W]*(please|pack|packs)?[\s\W]*$/i.test(String(tx||"").trim())&&!/^\W*both/i.test(String(tx||"").trim())){tx="Both please";if(itemId)rtSay({type:"conversation.item.delete",item_id:itemId});itemId=null;rtSay({type:"conversation.item.create",item:{type:"message",role:"user",content:[{type:"input_text",text:"Both please - both packs."}]}})}
  if(rt&&(rt.rendering||rt.paused)){dropLog(tx,rt.paused?"paused":"rendering");if(itemId)rtSay({type:"conversation.item.delete",item_id:itemId});return}
