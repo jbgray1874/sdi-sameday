@@ -127,6 +127,11 @@ TOOLS = [
                      "size is ALWAYS 'HEIGHT x WIDTH x DEPTH mm', height first: '1800 wide, 1200 high, 700 deep' -> '1200 x 1800 x 700 mm'."},
          "not_known": {"type": "array", "items": {"type": "string"}, "description": "Field ids the AM doesn't know (after you offered options)."}},
          "required": ["updates"]}},
+    {"type": "function", "name": "show_3d",
+     "description": "Put a 3D model of the unit on screen that the AM can drag to turn round - made from the brief's "
+                    "size and make-up, instantly and free - when they ask ('show me it in 3D', 'can I spin it', "
+                    "'rotate it'). Needs the size.",
+     "parameters": {"type": "object", "properties": {}}},
     {"type": "function", "name": "show_views",
      "description": "The option on screen drawn from other angles - front, side, three-quarter, a close-up of the header, "
                     "back or top - when the AM asks ('other angles', 'show me it from the side', 'more views'). The same "

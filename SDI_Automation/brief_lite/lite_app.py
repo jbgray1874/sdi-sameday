@@ -1448,6 +1448,29 @@ VIEWS_ASK = re.compile(r"\b(more|other|different|extra|all( the)?|several|multip
                        r"\bclose[- ]?up\b", re.I)
 
 
+MODEL3D_ASK = re.compile(r"\b(3d|three[- ]d) (model|view|version)\b|\bspin (it|round|around)\b|\brotat(e|able|ing)\b|"
+                         r"\bturn(table| it round in 3d)\b|\b360\b", re.I)
+
+
+def model3d_for(s):
+    """The brief as a 3D model to spin (model3d.py), coloured as the brand the AM named or the client - or None."""
+    import model3d
+    b = s["brief"]
+    look = BRAND_LOOK.get(_brand_slug(_named_brand(b) or b.get("client")))
+    return model3d.model(b, look[0] if look else "#F6D946")
+
+
+def model3d_turn(s, ch):
+    m = model3d_for(s)
+    if not m:
+        ch.text("I need the unit's height, width and depth before I can build it in 3D - what size is it?")
+        return ch, s
+    h, w, d = (int(x) for x in m["size"])
+    ch.model3d(m, f"3D model - {h} high x {w} wide x {d} deep mm. Drag it to turn it; it shows the shape and sizes, "
+                  "the renders show the look.")
+    return ch, s
+
+
 def views_wanted(text):
     """Which views the AM asked for ('the side and the back') - the usual four when they just say 'more views'."""
     t = (text or "").lower()
@@ -2110,6 +2133,14 @@ class Channel:
             self.choices(body, ch)
             return
         wa_post({"type": "text", "text": {"body": t[:4000]}}, self.number)
+
+    def model3d(self, model, caption=""):
+        """A 3D model the page draws and the AM can turn (model3d.py). WhatsApp gets the caption only."""
+        self.flush()
+        self.out.append({"type": "text", "role": "model3d", "text": caption, "model": model})
+        log_msg(self.sid, "out", caption or None)
+        if self.number:
+            wa_post({"type": "text", "text": {"body": caption + " (open SDI Live to turn it)"}}, self.number)
 
     def image(self, path, caption="", **meta):
         # meta tells the web page what this picture is: role="ref" (past SDI job) or role="option" (a new concept)
@@ -3314,6 +3345,8 @@ def handle(number, name, text, image_path=None, voice=False, ch=None, new=False,
     if b.get("_offer_asked") and not b.get("_render_asked") and NOT_YET.search(text or "") \
             and not asks_for_visual(text, b):
         b["_offer_declined"] = 1                              # "not yet": the brief carries on, the offer isn't repeated
+    if t_override is None and MODEL3D_ASK.search(text or "") and b.get("size"):
+        return model3d_turn(s, ch)
     asked_views = VIEWS_ASK.search(text or "") and any(v.get("kind") == "render" for v in s["visuals"])
     render_now = intent not in ("change_visual", "approve_visual") and t_override is None and not asked_views and (
         asks_for_visual(text, b) or re.search(r"\b(render|visual|concept)s?\b.{0,20}\b(first|now|please|asap)\b|"
@@ -3770,6 +3803,12 @@ def handle(number, name, text, image_path=None, voice=False, ch=None, new=False,
         if ga_card:      # the GA on its own, after the pack - to look at closely or change its sizes
             ch.image(ga_card, f"Concept GA of Option {label} - {b.get('size')} as briefed. Parts are named from the concept; "
                               "not for manufacture.", role="option", label="GA", kind="technical", from_option=label)
+            try:         # 21 Nov 2026: and the same sizes in 3D, to turn round - free, made from the brief
+                m3 = model3d_for(s)
+                if m3:
+                    ch.model3d(m3, f"Option {label} in 3D at {b.get('size')} - drag it to turn it.")
+            except Exception as e:
+                print("! 3D model failed:", str(e)[:160], flush=True)
         if b.get("_flow"):           # the client pack is done; "both" goes straight on to the internal pack
             b["_client_done"] = 1
             save_session(s)
@@ -4370,6 +4409,14 @@ def api_rt_tool():
                 f"Not drawn: the AM hasn't asked for a visual (their last words: \"{last_[:80]}\"). Never start one "
                 "yourself. Carry on with the brief; draw only when they ask ('make the visual', 'crack on', 'show me "
                 "it'), or say yes when you offer once the questions run out.")}))})
+    if js.get("name") == "show_3d":
+        m = model3d_for(s)
+        if not m:
+            return jsonify({"slow": False, "output": _said(json.dumps({"error": (
+                "No 3D model yet: the brief has no height x width x depth. Ask for the size, record it, then show_3d.")}))})
+        log_msg(s["id"], "out", "3D model shown - drag it to turn it.")
+        return jsonify({"slow": False, "model3d": m, "output": _said(json.dumps({"shown": True, "note": (
+            "The 3D model is on screen now - say in one line they can drag it to turn it, then carry on.")}))})
     if js.get("name") == "change_option":
         last_ = _last_am_line(s["id"])
         # 20 Nov 2026: a size that reads wrong for the unit is said back once before it's redrawn (typed chat does the same)
@@ -5168,6 +5215,15 @@ def api_page_problem():
     who = signed_in_user() or "not signed in"
     print(f"[page] {datetime.now():%H:%M:%S} {who} chat={chat or '-'} {what}", flush=True)
     return jsonify({"ok": True})
+
+
+@app.route("/api/model3d/<sid>")
+def api_model3d(sid):
+    s = _session_by_id(sid)
+    if not s:
+        abort(404)
+    m = model3d_for(s)
+    return jsonify({"model": m}) if m else (jsonify({"error": "no size in the brief yet"}), 404)
 
 
 @app.route("/api/avatar/<key>")

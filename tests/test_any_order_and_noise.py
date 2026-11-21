@@ -2959,3 +2959,38 @@ class MoreViewsOfTheChosenDesignTests(unittest.TestCase):
         self.assertEqual(rt.tool_intent("show_views", {"label": "B", "views": ["back"]})[1]["intent"], "views")
         src = (WORK / "brief_lite" / "pdf_pack.py").read_text(encoding="utf-8")
         self.assertIn('- more views", H1', src)
+
+
+class ARotatable3DModelTests(unittest.TestCase):
+    """21 Nov 2026 (James: "3 d visuals that can rotate"): the brief's exact sizes as a model to turn, free and instant."""
+
+    def test_the_model_is_the_brief_at_its_exact_size(self):
+        import model3d
+        m = model3d.model({"unit_type": "FSDU", "size": "1600 x 600 x 400 mm", "materials": "white powder coat"}, "#F06C00")
+        self.assertEqual(m["size"], [1600.0, 600.0, 400.0])
+        names = [p["name"] for p in m["parts"]]
+        for want in ("plinth", "left side", "right side", "back", "shelf 1", "header"):
+            self.assertIn(want, names)
+        for p in m["parts"]:                                  # nothing sticks out of the brief's size
+            self.assertLessEqual(p["x"] + p["w"], 600.01, p)
+            self.assertLessEqual(p["y"] + p["h"], 1600.01, p)
+            self.assertLessEqual(p["z"] + p["d"], 400.01, p)
+        self.assertEqual(next(p for p in m["parts"] if p["name"] == "header")["colour"], "#F06C00")
+        self.assertIsNone(model3d.model({"unit_type": "FSDU"}))
+
+    def test_typed_chat_and_calls_show_it_and_the_page_draws_it(self):
+        self.assertTrue(L.MODEL3D_ASK.search("can I see it in a 3D model"))
+        self.assertTrue(L.MODEL3D_ASK.search("can I spin it round"))
+        self.assertFalse(L.MODEL3D_ASK.search("make me a 3D render"))      # a render is still a render
+        self.assertIn("show_3d", {t["name"] for t in rt.TOOLS})
+        who = new_chat()
+        say(who, "Sainsburys want an FSDU", {"client": "Sainsburys", "unit_type": "FSDU", "size": "1600 x 600 x 400 mm"})
+        out, s = say(who, "can I see it as a 3D model")
+        m = [r for r in out if r.get("role") == "model3d"]
+        self.assertTrue(m and m[0]["model"]["parts"])
+        client = L.app.test_client()
+        L.log_msg(s["id"], "in", "show me it in 3D")
+        j = client.post("/api/rt/tool", json={"session": s["id"], "name": "show_3d", "arguments": {}}).get_json()
+        self.assertTrue(j.get("model3d"))
+        self.assertIn("function m3dRun(", PAGE)
+        self.assertIn('x.role==="model3d"', PAGE)
