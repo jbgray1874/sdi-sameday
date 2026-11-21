@@ -462,17 +462,48 @@ def _client_text(value, session):
     return re.sub(r"\s+", " ", text).strip(" -;,|")[:500]
 
 
+# 21 Nov 2026 (James: "where do we get logos from?"): SDI Live's own folder was empty - the quote portal's library
+# (C:\\ClaudeVision\\assets\\customer_logos on the server: Tesco, Boots, M&S, Dyson, Harrods, Milwaukee...) is the one
+# library now, matched the way the portal matches it ("M&S" finds MAndS.png; TTI's documents carry Milwaukee's mark).
+# SDI Live's folder is checked first, for a logo saved just for SDI Live (a PNG of one the portal only has as SVG).
+PORTAL_LOGOS = os.environ.get("SDI_CUSTOMER_LOGOS") or r"C:\ClaudeVision\assets\customer_logos"
+LOGO_ALIASES = {"tti": "milwaukee", "techtronic": "milwaukee", "techtronicindustries": "milwaukee",
+                "marksandspencer": "mands", "marksspencer": "mands", "ms": "mands"}
+
+
+def _logo_key(name):
+    k = re.sub(r"[^a-z0-9]", "", str(name or "").lower().replace("&", "and"))
+    return LOGO_ALIASES.get(k, k)
+
+
+def _svg_ok():
+    try:
+        import svglib.svglib  # noqa: F401
+        return True
+    except Exception:                                        # noqa: BLE001
+        return False
+
+
 def _client_logo(session):
-    """The client's own logo for the sheet (27 Oct 2026, Muhammad): SDI's brand-logo library first
-    (studio_data/brand_logos/<client>.png), then a file the AM uploaded that is a logo."""
+    """The client's own logo for the pack: SDI Live's folder, then the quote portal's library, then a file the AM
+    uploaded that is a logo. PNG / JPG / WebP first; SVG only where svglib is installed."""
     brief = session.get("brief") or {}
-    name = re.sub(r"[^a-z0-9]+", "-", str(brief.get("client") or "").lower()).strip("-")
-    lib = os.path.join(os.path.dirname(HERE), "studio_data", "brand_logos")
-    for cand in (name, name.split("-")[0] if name else ""):
-        for ext in (".png", ".jpg", ".jpeg"):
-            p = os.path.join(lib, cand + ext)
-            if cand and os.path.isfile(p):
-                return p
+    want = [k for k in dict.fromkeys(_logo_key(n) for n in (brief.get("client"), str(brief.get("client") or "").split(" ")[0]))
+            if k]
+    exts = [".png", ".jpg", ".jpeg", ".webp"] + ([".svg"] if _svg_ok() else [])
+    for folder in (os.path.join(os.path.dirname(HERE), "studio_data", "brand_logos"), PORTAL_LOGOS):
+        try:
+            files = {}
+            for f in os.listdir(folder):
+                stem, ext = os.path.splitext(f)
+                if ext.lower() in exts:
+                    files.setdefault(_logo_key(stem), []).append(os.path.join(folder, f))
+        except OSError:
+            continue
+        for k in want:
+            got = sorted(files.get(k) or [], key=lambda p: exts.index(os.path.splitext(p)[1].lower()))
+            if got:
+                return got[0]
     for f in brief.get("_files") or []:
         if f.get("kind") == "image" and re.search(r"\blogo", f"{f.get('name', '')} {f.get('what', '')}", re.I) \
                 and os.path.isfile(f.get("path", "")):

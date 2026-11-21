@@ -3478,3 +3478,30 @@ class TheClientPack(unittest.TestCase):
         self.assertEqual(L.estimate_for_pack(s, "A")["kind"], "ai")
         s["brief"]["_ai_estimate"]["label"] = "B"
         self.assertEqual(L.estimate_for_pack(s, "A")["kind"], "quick")
+
+
+class ClientLogosFromThePortalLibrary(unittest.TestCase):
+    """21 Nov 2026 - SDI Live's own logo folder was empty; the quote portal's library has the logos."""
+
+    def test_matched_the_way_the_portal_matches(self):
+        import pdf_pack
+        from PIL import Image
+        d = Path(tempfile.mkdtemp(prefix="logos-"))
+        for n in ("MAndS.png", "Tesco.png", "Dyson.png"):
+            Image.new("RGB", (200, 80), (0, 80, 160)).save(d / n)
+        (d / "dyson.svg").write_text('<svg xmlns="http://www.w3.org/2000/svg" width="200" height="80"/>')
+        (d / "milwaukee.svg").write_text('<svg xmlns="http://www.w3.org/2000/svg" width="210" height="100">'
+                                         '<rect width="210" height="100" fill="#d00"/></svg>')
+        old = pdf_pack.PORTAL_LOGOS
+        try:
+            pdf_pack.PORTAL_LOGOS = str(d)
+            logo = lambda c: os.path.basename(pdf_pack._client_logo({"brief": {"client": c}}) or "")
+            self.assertEqual(logo("M&S"), "MAndS.png")
+            self.assertEqual(logo("Marks & Spencer"), "MAndS.png")
+            self.assertEqual(logo("Tesco Stores"), "Tesco.png")
+            self.assertEqual(logo("Dyson"), "Dyson.png")             # a PNG before the SVG of the same name
+            self.assertEqual(logo("Lindt"), "")
+            if pdf_pack._svg_ok():
+                self.assertEqual(logo("TTI"), "milwaukee.svg")        # TTI's documents carry Milwaukee's mark
+        finally:
+            pdf_pack.PORTAL_LOGOS = old

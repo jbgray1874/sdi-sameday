@@ -170,10 +170,46 @@ def _img_size(path):
         return None
 
 
+def _svg(c, path, x, y, w, h, align):
+    """An SVG logo (the quote portal keeps some only as SVG), drawn as vectors - needs svglib."""
+    try:
+        from reportlab.graphics import renderPDF
+        import tempfile
+        from svglib.svglib import svg2rlg
+        # a logo saved from a web page carries CSS sizes on its <svg> ("width:auto") that svglib can't read: the
+        # root's own sizes are taken from its viewBox instead
+        txt = open(path, encoding="utf-8", errors="ignore").read()
+        m = re.search(r"<svg\b[^>]*>", txt)
+        if m:
+            root = re.sub(r'\s(width|height|style)="[^"]*"', "", m.group(0))
+            vb = re.search(r'viewBox="\s*[-\d.]+[\s,]+[-\d.]+[\s,]+([\d.]+)[\s,]+([\d.]+)', root)
+            if vb:
+                root = root[:-1].rstrip("/ ") + f' width="{vb.group(1)}" height="{vb.group(2)}">'
+            txt = txt[:m.start()] + root + txt[m.end():]
+        with tempfile.NamedTemporaryFile("w", suffix=".svg", delete=False, encoding="utf-8") as fh:
+            fh.write(txt)
+        try:
+            d = svg2rlg(fh.name)
+        finally:
+            os.unlink(fh.name)
+        if not d or not d.width or not d.height:
+            return False
+        s_ = min(w / d.width, h / d.height)
+        d.width, d.height = d.width * s_, d.height * s_
+        d.scale(s_, s_)
+        ix = x + (w - d.width) if align == "right" else x if align == "left" else x + (w - d.width) / 2
+        renderPDF.draw(d, c, ix, y + (h - d.height) / 2)
+        return True
+    except Exception:                                        # noqa: BLE001
+        return False
+
+
 def image(c, path, x, y, w, h, cover=False, pad=0, align="centre"):
     """The picture in the box: whole (contain) or filling it, cropped (cover); a logo can sit to the right."""
     if not path or not os.path.isfile(path):
         return False
+    if path.lower().endswith(".svg"):
+        return _svg(c, path, x + pad, y + pad, w - 2 * pad, h - 2 * pad, align)
     sz = _img_size(path)
     if not sz:
         return False
