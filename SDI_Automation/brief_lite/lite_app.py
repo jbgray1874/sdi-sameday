@@ -63,6 +63,8 @@ FIELDS = {
     # Section 1 - Headline information
     "project_name":         ("Project name", "1. Headline information", False),
     "account_manager":      ("Project account manager", "1. Headline information", False),
+    # 21 Nov 2026 (James: "it also couldn't save the job no"): there was nowhere to put it - now there is
+    "job_number":           ("SDI job number", "1. Headline information", False),
     "client":               ("Client SDI works for - the brand or company paying (e.g. TTI, Boots, SC Johnson), not the store it goes into", "1. Headline information", True),
     "retailer":             ("Retailer / store it goes into (e.g. Toolstation, Tesco, Halfords)", "1. Headline information", False),
     "customer_name":        ("Customer's name (contact)", "1. Headline information", False),
@@ -5203,6 +5205,50 @@ def _heard_numbers(heard):
     return out
 
 
+def _skeleton(w):
+    """A word's consonant sounds, doubled letters once: grey / gray -> gr, mohammed / muhammad -> mmd,
+    baxter / backster -> bkstr."""
+    w = w.lower().replace("ph", "f").replace("ck", "k").replace("x", "ks").replace("c", "k").replace("z", "s")
+    w = re.sub(r"[aeiouyh]", "", w)
+    return re.sub(r"(.)\1+", r"\1", w)
+
+
+def _sounds_said(w, words):
+    """A name the AM said but the transcriber spelt differently - same consonants, or very nearly the same word."""
+    import difflib
+    if len(w) < 3:
+        return False
+    sk = _skeleton(w)
+    return any((len(h) >= 3 and sk and _skeleton(h) == sk and w[0] == h[0])
+               or (len(w) > 4 and difflib.SequenceMatcher(None, w, h).ratio() >= 0.72) for h in words)
+
+
+ME_SAID = re.compile(r"\b(me|myself|mine|i am|i'm|it's me|that's me|me again)\b", re.I)
+
+
+def _am_is_known(s, v, heard, words):
+    """The account manager saved is the person signed in and they said it's them (or said their first or last name), or
+    one of SDI's people whose first or last name they said."""
+    vw = [w for w in re.findall(r"[a-z]+", str(v).lower()) if len(w) > 1]
+    if not vw:
+        return False
+    said = lambda w: w in words or _sounds_said(w, words)
+    me = [w for w in re.findall(r"[a-z]+", (who_of(s) or "").lower()) if len(w) > 1]
+    if me and set(vw) <= set(me) and (ME_SAID.search(heard) or any(said(w) for w in vw)):
+        return True
+    try:
+        con = db()
+        people = [r["name"] for r in con.execute("SELECT name FROM projects").fetchall()]
+        con.close()
+    except Exception:                                        # noqa: BLE001
+        people = []
+    for p in people:
+        pw = [w for w in re.findall(r"[a-z]+", (p or "").lower()) if len(w) > 1]
+        if pw and set(vw) <= set(pw) and any(said(w) for w in vw):
+            return True
+    return False
+
+
 def _answers_not_heard(s, updates):
     """Each answer whose words the AM never said, with why: {field: reason}. {"*": reason} when nothing clear was heard.
 
@@ -5246,7 +5292,13 @@ def _answers_not_heard(s, updates):
                       "it wasn't a clear answer - ask that question again.")
             continue
         if k in NAME_FIELDS:
-            odd = [w for w in vw if not like(w)]
+            # 21 Nov 2026 (James: "it can't save the account manager, it also couldn't save the job no"): a job number in a
+            # name said digit by digit ("one two four three one") is judged as a number, like any other; a name the
+            # transcriber spelt its own way (Grey / Gray, Mohammed / Muhammad) counts as said; and the account manager
+            # may be the person signed in ("it's me", "me, James") or one of SDI's people, heard close enough.
+            odd = [w for w in vw if not (w.isdigit() and w in said_n) and not like(w) and not _sounds_said(w, words)]
+            if odd and k == "account_manager" and _am_is_known(s, v, heard, words):
+                odd = []
             if odd:
                 bad[k] = (f"'{v}' - the AM never said '{' '.join(odd)}' (heard: \"{last[:80]}\"). Use the name EXACTLY as "
                           "heard, nothing added. If unsure, ask them to say or spell it again.")

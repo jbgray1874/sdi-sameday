@@ -732,7 +732,7 @@ def build(session, fields, sections, out_dir):
            "client":brief.get("client"),"account_manager":brief.get("account_manager") or session.get("name"),
            "briefing_date":brief.get("briefing_date"),"target_instore_date":brief.get("instore_date"),
            "status":session.get("status") or "open","converted_to_job":session.get("converted_to_job"),
-           "job_number":session.get("job_no"),"value_estimate":session.get("value_estimate"),"currency":"GBP"},
+           "job_number":brief.get("job_number") or session.get("job_no"),"value_estimate":session.get("value_estimate"),"currency":"GBP"},
        "sage_mapping_status":"Field mapping requires confirmation against the target Sage CRM schema; this file has not been imported.",
        "similar_jobs":[ref.get("job_no") for ref in refs],"historical_estimates":comparisons,
        "visuals":[v.get("path") for v in visuals],"unanswered_questions":missing,

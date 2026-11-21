@@ -3300,3 +3300,52 @@ class EstimateEveryTimeADesignIsChosen(unittest.TestCase):
         self.assertIn('fetch("/api/auto-estimate/"', page)
         src = (WORK / "brief_lite" / "lite_app.py").read_text(encoding="utf-8")
         self.assertIn('"role": "auto_estimate"', src)
+
+
+class NamesAndJobNumbersAreSaved(unittest.TestCase):
+    """21 Nov 2026 - James (Isla: "I couldn't save it. Who's the project account manager?"): the account manager and the
+    job number were refused as 'never said'."""
+
+    def run_(self, said, ups, who="James Gray"):
+        import sqlite3
+        con = sqlite3.connect(":memory:", check_same_thread=False)
+        con.row_factory = sqlite3.Row
+        con.execute("CREATE TABLE messages (session, dir, text, at)")
+        for i, t in enumerate(said):
+            con.execute("INSERT INTO messages VALUES ('x','in',?,?)", (t, f"2026-11-21T10:00:0{i}"))
+
+        class C:
+            def execute(self, *a):
+                return con.execute(*a)
+
+            def close(self):
+                pass
+        old_db, old_who = L.db, L.who_of
+        try:
+            L.db, L.who_of = (lambda: C()), (lambda s: who)
+            return L._answers_not_heard({"id": "x", "brief": {}, "project": 1}, ups)
+        finally:
+            L.db, L.who_of = old_db, old_who
+
+    def test_saved(self):
+        for said, ups in [("James Grey.", {"account_manager": "James Gray"}),
+                          ("It's me.", {"account_manager": "James Gray"}),
+                          ("Me, James.", {"account_manager": "James Gray"}),
+                          ("Mohammed.", {"account_manager": "Muhammad"}),
+                          ("Job number one two four three one.", {"job_number": "12431"}),
+                          ("It's job twelve four three one.", {"project_name": "Job 12431"}),
+                          ("Andy Backster.", {"account_manager": "Andy Baxter"}),
+                          ("Tesco four one two.", {"project_name": "Tesco 412"}),
+                          ("Tesco four twelve.", {"project_name": "Tesco 412"})]:
+            with self.subTest(said=said):
+                self.assertEqual(self.run_([said], ups), {})
+
+    def test_still_refused(self):
+        for said, ups in [("Dave Smith.", {"account_manager": "James Gray"}),
+                          ("It's me.", {"account_manager": "Matt Evans"}),
+                          ("Twelve four three one.", {"job_number": "12432"})]:
+            with self.subTest(said=said):
+                self.assertTrue(self.run_([said], ups))
+
+    def test_the_job_number_has_a_home(self):
+        self.assertIn("job_number", L.FIELDS)
