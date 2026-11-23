@@ -3290,7 +3290,7 @@ class EstimateEveryTimeADesignIsChosen(unittest.TestCase):
             rec = L.AUTO_EST["t-auto"]
             self.assertEqual(rec["status"], "done")
             self.assertEqual(rec["kind"], "ai")                  # no past job close enough -> the AI estimate
-            self.assertEqual(calls, [("q", "B"), ("ai", "B")])
+            self.assertEqual(sorted(calls), [("ai", "B"), ("q", "B")])       # both at once (23 Nov 2026)
             L.auto_estimate_start(s, "B")                         # the same design again: not worked out twice
             self.assertEqual(len(calls), 2)
             self.assertNotIn("_est_for", s["brief"])             # the chat's own brief is untouched
@@ -3558,3 +3558,46 @@ class MuhammadsRenderThatNeverCame(unittest.TestCase):
         ups = {"size": "1500 x 600 x 600 mm"}
         self.assertEqual(L._answers_not_heard(L._session_by_id(self.s["id"]), ups), {})
         self.assertIn("(assumed)", ups["size"])
+
+
+class TheEstimateInTheInternalBrief(unittest.TestCase):
+    """23 Nov 2026 - James: the estimate "is an integral part of the solution" - in full, in the internal brief; by
+    default the best fit, fast and accurate: the AI estimate leads, SDI's past jobs are its cross-check."""
+
+    def test_both_at_once_the_ai_estimate_leads(self):
+        old = (L.quick_estimate_for, L.ai_estimate_for, L.log_msg)
+        q = {"prices": [{"qty": 10, "unit_gbp": 300.0}], "adjustments": [], "confidence": "medium - x",
+             "base": {"job": "11041", "name": "Bunker", "quoted": 290.0, "qty": 10, "date": "2024", "today": 300.0}}
+        e = {"prices": [{"qty": 10, "unit_gbp": 320.0}], "unit_variable": 280.0, "setup_total": 400.0, "confidence": "medium - x",
+             "per_unit": [{"group": "materials", "what": "1.5 mm steel", "gbp": 180.0}], "setup": [{"what": "jig", "gbp": 400.0}]}
+        try:
+            L.quick_estimate_for, L.ai_estimate_for, L.log_msg = (lambda s: q), (lambda s: (dict(e), "")), (lambda *a, **k: None)
+            L.AUTO_EST.clear()
+            s = {"id": "t-brief", "brief": {"chosen_option": "A"}, "visuals": [{"kind": "render", "label": "A"}]}
+            rec = L.auto_estimate_start(s, "A")
+            for _ in range(100):
+                if rec["status"] != "running":
+                    break
+                time.sleep(0.02)
+            self.assertEqual((rec["kind"], rec["quick"]), ("ai", q))
+            d = L.estimate_detail_for(s, wait_s=1)
+            self.assertEqual((d["kind"], d["check"]), ("ai", q))
+        finally:
+            L.quick_estimate_for, L.ai_estimate_for, L.log_msg = old
+
+    def test_the_page_in_full(self):
+        import pdf_pack
+        story = pdf_pack.estimate_story({"kind": "ai", "label": "A", "data": {
+            "prices": [{"qty": 1, "unit_gbp": 700.0}, {"qty": 250, "unit_gbp": 300.0}], "unit_variable": 280.0,
+            "setup_total": 400.0, "per_unit": [{"group": "materials", "what": "1.5 mm steel", "gbp": 180.0}],
+            "setup": [{"what": "welding jig", "gbp": 400.0}], "risk": "the lid hinge", "assumptions": ["flat-packed"],
+            "confidence": "medium - checked"}, "check": {"prices": [{"qty": 250, "unit_gbp": 290.0}],
+                                                       "base": {"job": "11041", "name": "Bunker"}}})
+        def words(f):
+            if hasattr(f, "_cellvalues"):                    # a table: its cells
+                return " ".join(words(c) for row in f._cellvalues for c in row)
+            return getattr(f, "text", "") if not isinstance(f, str) else f
+        text = " ".join(words(f) for f in story)
+        for want in ("COST TO MAKE", "before margin", "1.5 mm steel", "welding jig", "the lid hinge", "flat-packed",
+                     "Cross-check from SDI", "GBP290.00", "11041"):
+            self.assertIn(want, text)

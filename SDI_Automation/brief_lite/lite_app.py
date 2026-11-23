@@ -1546,17 +1546,31 @@ def auto_estimate_start(s, label):
     snap["visuals"] = list(s.get("visuals") or [])
 
     def go():
+        # 23 Nov 2026 (James: "by default, it does the best fit ... fast and accurate"): both at once - the AI estimate
+        # (about a minute, line by line, checked against past jobs) leads; the past-jobs one (seconds) is its cross-check,
+        # and stands in if the AI estimate can't be done
+        from concurrent.futures import ThreadPoolExecutor
         try:
-            q = quick_estimate_for(snap)
+            with ThreadPoolExecutor(max_workers=2) as ex:
+                fq = ex.submit(quick_estimate_for, snap)
+                fa = ex.submit(ai_estimate_for, snap)
+                try:
+                    q = fq.result()
+                except Exception:                            # noqa: BLE001
+                    q = None
+                try:
+                    e, why = fa.result()
+                except Exception as ex_:                     # noqa: BLE001
+                    e, why = None, type(ex_).__name__
             if q:
+                rec.update(quick=q, quick_line=ballpark.say_quick(q))
+            if e:
+                e["label"] = label
+                rec.update(kind="ai", data=e, line=ai_estimate.say(e), status="done")
+            elif q:
                 rec.update(kind="quick", data=q, line=ballpark.say_quick(q), status="done")
             else:
-                e, why = ai_estimate_for(snap)
-                if e:
-                    e["label"] = label
-                    rec.update(kind="ai", data=e, line=ai_estimate.say(e), status="done")
-                else:
-                    rec.update(line=f"No automatic estimate for Option {label}: {why}.", status="error")
+                rec.update(line=f"No automatic estimate for Option {label}: {why}.", status="error")
         except Exception as ex:                              # noqa: BLE001
             rec.update(line=f"No automatic estimate for Option {label} ({type(ex).__name__}).", status="error")
         if rec.get("line"):
@@ -1647,7 +1661,8 @@ def ai_estimate_turn(s, ch):
         ch.text(f"I couldn't do the AI estimate: {why}.")
         return ch, s
     e["label"] = ((_est_render(s) or {}).get("label")) or "A"
-    s["brief"]["_ai_estimate"] = {k: e.get(k) for k in ("prices", "unit_variable", "setup_total", "confidence", "label", "split")}
+    s["brief"]["_ai_estimate"] = {k: e.get(k) for k in ("prices", "unit_variable", "setup_total", "confidence", "label", "split",
+                                                         "per_unit", "setup", "assumptions", "risk", "yardstick")}
     save_session(s)
     ch.ai_estimate(e, ai_estimate.say(e))
     return ch, s
@@ -4616,10 +4631,60 @@ DIRECTIONS = {"C": "a premium, minimal direction - fewer parts, more open space,
 
 # ---------------------------------------------------------------- the PDF
 
+def estimate_detail_for(s, wait_s=75):
+    """The estimate that goes in the internal brief, in full: for the chosen design (or the newest), the most thorough
+    one done - Estimate Lite, then the AI estimate, then past jobs. None done yet: the past-jobs one is worked out now
+    (23 Nov 2026 - James: "it's an integral part of the solution"). {kind, label, data} or None."""
+    b = s["brief"]
+    renders = [v for v in s.get("visuals") or [] if v.get("kind") == "render"]
+    label = b.get("chosen_option") or (renders[-1].get("label") if renders else None) or "A"
+
+    def done():
+        try:
+            import estimate_lite as el
+            rec = el.latest(DB, s["id"])
+        except Exception:                                    # noqa: BLE001
+            rec = None
+        if rec and rec.get("status") == "done" and (rec.get("label") or "A") == label and (rec.get("result") or {}).get("prices"):
+            return {"kind": "lite", "label": label, "data": rec}
+        ai = b.get("_ai_estimate") or {}
+        auto = AUTO_EST.get(s["id"]) or {}
+        auto_ok = auto.get("label") == label and auto.get("status") == "done" and (auto.get("data") or {}).get("prices")
+        if ai.get("label") == label and ai.get("prices"):
+            return {"kind": "ai", "label": label, "data": ai,
+                    "check": auto.get("quick") if auto.get("label") == label else b.get("_quick_estimate")}
+        if auto_ok:
+            return {"kind": auto.get("kind") or "quick", "label": label, "data": auto["data"],
+                    "check": auto.get("quick") if auto.get("kind") == "ai" else None}
+        q = b.get("_quick_estimate") or {}
+        if q.get("prices"):
+            return {"kind": "quick", "label": label, "data": q}
+        return None
+    got = done()
+    if got:
+        return got
+    try:
+        if renders:
+            rec = auto_estimate_start(s, label)
+            t0 = time.time()
+            while rec.get("status") == "running" and time.time() - t0 < wait_s:
+                time.sleep(0.5)
+            return done()
+        q = quick_estimate_for(s)                            # no design yet: from the brief and SDI's past jobs
+        return {"kind": "quick", "label": label, "data": q} if q else None
+    except Exception:                                        # noqa: BLE001
+        return None
+
+
 def build_pdf(s):
-    """Andy's 8-page brief (pdf_pack.py) plus a .json of the same answers for Sage."""
+    """Andy's 8-page brief (pdf_pack.py) plus a .json of the same answers for Sage - and this design's estimate, in full,
+    on a page of its own when there is one."""
     import pdf_pack
-    return pdf_pack.build(s, FIELDS, SECTIONS, OUT)
+    try:
+        est = estimate_detail_for(s)
+    except Exception:                                        # noqa: BLE001
+        est = None
+    return pdf_pack.build(s, FIELDS, SECTIONS, OUT, estimate=est)
 
 
 # ---------------------------------------------------------------- web

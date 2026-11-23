@@ -1297,10 +1297,10 @@ function aiCard(e){if(!e||!e.prices)return null;const gbp=v=>"£"+(+v).toLocaleS
 // 21 Nov 2026 (James: "an estimate needs to be produced. every time"): when a design is chosen the server works out its
 // estimate straight away - past jobs first, the AI estimate when there's no close past job. This holds its place, then
 // becomes that estimate's own card; in a call Sid says it in a sentence.
-function autoCard(label){const chat=sid;const el=block(`<div class="mstat"><span class="spin"></span>Working out the estimate for Option ${esc(label||"A")} - from SDI's past jobs, a few seconds (about a minute if it has to cost it with the AI)…</div>`);
+function autoCard(label){const chat=sid;const el=block(`<div class="mstat"><span class="spin"></span>Working out the estimate for Option ${esc(label||"A")} - the AI estimate, line by line, with SDI's past jobs as a cross-check. About a minute…</div>`);
  let n=0;const tick=async()=>{if(!el.isConnected||sid!==chat)return;
   const j=await fetch("/api/auto-estimate/"+chat).then(r=>r.json()).catch(()=>null);
-  if(j&&j.label===label&&j.status==="done"){el.remove();(j.kind==="ai"?aiCard:qeCard)(j.data);
+  if(j&&j.label===label&&j.status==="done"){el.remove();(j.kind==="ai"?aiCard:qeCard)(j.data);if(j.kind==="ai"&&j.quick)qeCard(j.quick);
    if(rt)lsTell("[Showroom: the estimate for Option "+label+" is on screen now: "+j.line+" Tell the AM in one or two sentences - internal only, not for the client - and that the AI estimate or Estimate Lite are there if they want more.]");return}
   if(j&&j.label===label&&j.status==="error"){el.innerHTML=`<div class="mstat">${esc(j.line||"No automatic estimate this time.")} Use the buttons under the design to ask for one.</div>`;return}
   if(++n<60)setTimeout(tick,3000)};

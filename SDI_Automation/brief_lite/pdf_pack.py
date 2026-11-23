@@ -393,7 +393,7 @@ def _slug(value):
     return re.sub(r"[^A-Za-z0-9_-]+", "_", str(value or "brief"))[:70]
 
 
-def header_footer(c, doc, title):
+def header_footer(c, doc, title, total=8):
     c.saveState()
     if os.path.isfile(BRAND_LOGO):
         try:
@@ -408,7 +408,7 @@ def header_footer(c, doc, title):
     c.setLineWidth(2)
     c.line(18*mm, A4[1]-19*mm, A4[0]-18*mm, A4[1]-19*mm)
     c.drawString(18*mm, 10*mm, "we.are.sdi | INTERNAL | Concept and planning information - not a quotation")
-    c.drawRightString(A4[0]-18*mm, 10*mm, f"{doc.page} / 8")
+    c.drawRightString(A4[0]-18*mm, 10*mm, f"{doc.page} / {total}")
     c.restoreState()
 
 
@@ -563,7 +563,79 @@ def _table(headers, rows, widths):
                      ("BOTTOMPADDING",(0,0),(-1,-1),5)]))
 
 
-def build(session, fields, sections, out_dir):
+def estimate_story(est):
+    """This design's estimate, in full, for SDI's own team (23 Nov 2026 - James: "it's an integral part of the solution").
+    est: {"kind": quick|ai|lite, "label", "data"} - the most thorough estimate done for the chosen design."""
+    kind, d, lab = est.get("kind"), est.get("data") or {}, est.get("label") or "A"
+    gbp = lambda v: f"GBP{float(v):,.2f}"
+    names = {"quick": "Past jobs estimate", "ai": "AI estimate", "lite": "Estimate Lite"}
+    story = [_p(f"{names.get(kind, 'Estimate')} - Option {lab}", H2),
+             _p("SDI's COST TO MAKE per unit, before margin. Internal only - not for the client, and not a quotation.", SMALL)]
+    prices = (d.get("result") or {}).get("prices") if kind == "lite" else d.get("prices")
+    if prices:
+        story.append(_table(["Quantity", "Cost per unit", "Cost for the quantity"],
+                            [[f"{int(p['qty']):,}", gbp(p["unit_gbp"]), gbp(float(p["unit_gbp"]) * int(p["qty"]))]
+                             for p in prices], [40, 60, 74]))
+    conf = str(d.get("confidence") or "")
+    if kind == "quick":
+        base = d.get("base") or {}
+        story += [_p("How it was worked out", H2),
+                  _p(f"Started from SDI's {base.get('job')} {base.get('name', '')}: {gbp(base.get('quoted') or 0)} a unit at "
+                     f"{base.get('qty')} ({str(base.get('date') or '')[:4]}), brought to today at 4% a year = "
+                     f"{gbp(base.get('today') or 0)} a unit. Then adjusted for what's different about this design:", P)]
+        adj = d.get("adjustments") or []
+        story.append(_table(["Difference", "Per unit", "Why"], [[a.get("what", ""), ("+" if float(a.get("gbp") or 0) >= 0 else "")
+                                                                 + gbp(a.get("gbp") or 0), a.get("why", "")] for a in adj],
+                            [58, 26, 90]) if adj else _p("No adjustments - the past job as it was.", P))
+        band = d.get("band") or {}
+        if band:
+            story.append(_p(f"Past jobs in range: GBP{band.get('low'):,} - GBP{band.get('high'):,} a unit "
+                            f"({band.get('n')} past quote{'s' if band.get('n') != 1 else ''}).", SMALL))
+    elif kind == "ai":
+        lines = d.get("per_unit") or []
+        if lines:
+            story += [_p("Per unit, line by line", H2),
+                      _table(["Group", "What", "Per unit"], [[x.get("group", ""), x.get("what", ""), gbp(x.get("gbp") or 0)]
+                                                             for x in lines] + [["", "To make, per unit", gbp(d.get("unit_variable") or 0)]],
+                             [26, 118, 30])]
+        setup = d.get("setup") or []
+        if setup:
+            story += [_p("One-off setup (paid once, shared over the order)", H2),
+                      _table(["What", "Cost"], [[x.get("what", ""), gbp(x.get("gbp") or 0)] for x in setup]
+                             + [["Setup total", gbp(d.get("setup_total") or 0)]], [144, 30])]
+        elif d.get("setup_total"):
+            story.append(_p(f"One-off setup: {gbp(d['setup_total'])}, shared over the order.", P))
+        yard = d.get("yardstick") or {}
+        if yard:
+            story.append(_p(f"Checked against SDI's {yard.get('job')} {yard.get('name', '')}: {gbp(yard.get('today') or 0)} "
+                            "a unit today.", SMALL))
+        if d.get("risk"):
+            story.append(_p(f"Biggest risk: {d['risk']}", P))
+    elif kind == "lite":
+        r = d.get("result") or {}
+        story += [_p("How it was worked out", H2),
+                  _p(f"Priced by SDI's estimating system part by part from the concept render and this brief - run "
+                     f"{d.get('run_id') or r.get('run_id') or '?'}"
+                     + (", provisional" if r.get("provisional", True) else "") + ". The draft workbook downloads from the "
+                     "Estimate Lite card in the chat, or from the run on Grid Control.", P)]
+        if r.get("caution"):
+            story.append(_p(str(r["caution"])[:400], SMALL))
+    chk = est.get("check") or {}
+    if chk.get("prices") and kind != "quick":
+        cp = chk["prices"]
+        at = next((p for p in cp if p["qty"] == (prices or [{}])[-1].get("qty")), cp[-1])
+        base = chk.get("base") or {}
+        story += [_p("Cross-check from SDI's past jobs", H2),
+                  _p(f"{gbp(at['unit_gbp'])} a unit at {int(at['qty']):,}, from SDI's {base.get('job')} "
+                     f"{base.get('name', '')} adjusted for this design. A big gap between the two is worth a look.", P)]
+    if d.get("assumptions"):
+        story += [_p("Assumed", H2)] + [_p(f"- {x}", SMALL) for x in d["assumptions"][:6]]
+    if conf:
+        story.append(_p(f"Confidence: {conf}", SMALL))
+    return story
+
+
+def build(session, fields, sections, out_dir, estimate=None):
     brief, refs, visuals = session.get("brief") or {}, session.get("refs") or [], session.get("visuals") or []
     title = f"{brief.get('project_name') or brief.get('unit_type') or 'Project brief'} | {brief.get('client') or 'Client to confirm'}"
     path = _safe_output(out_dir, f"Brief_{_slug(brief.get('client'))}_{_slug(session.get('id'))}.pdf")
@@ -576,7 +648,7 @@ def build(session, fields, sections, out_dir):
                    "Planning durations are configurable assumptions, not booked studio, factory or transport capacity."]
     actions = ["Confirm outstanding answers with the account manager and client; arrange studio and estimating review."]
     def page(number, heading, story):
-        header_footer(c, type("Page", (), {"page":number})(), title)
+        header_footer(c, type("Page", (), {"page":number})(), title, 9 if estimate else 8)
         _flow(c, [_p(heading, H1)]+story, 18*mm, top, 174*mm, body_height)
         c.showPage()
     # Sections are deliberately placed on fixed pages rather than allowing the
@@ -612,7 +684,7 @@ def build(session, fields, sections, out_dir):
     page(3,"Main brief & estimating",_section(brief,fields,sections,{"3","4","5"}))
     hwd = parse_size(brief.get("size"))
     box, packing_rule = packed_size(hwd,brief.get("assembled")) if hwd else (None,"Complete height, width and depth not supplied; loading cannot be calculated.")
-    header_footer(c,type("Page",(),{"page":4})(),title)
+    header_footer(c,type("Page",(),{"page":4})(),title, 9 if estimate else 8)
     _flow(c,[_p("Initial design & technical response",H1)],18*mm,top,174*mm,15*mm)
     for kind,y,label in (("render",151,"3D concept visual"),("technical",59,"Technical concept GA - NOT FOR MANUFACTURE")):
         # the option the AM finalised (and its GA) - not just whatever was drawn last (27 Oct 2026: Option D was the
@@ -665,6 +737,11 @@ def build(session, fields, sections, out_dir):
         _p("UK historical benchmark: GBP1,170 per 33-pallet artic (GBP35.45 per pallet). Units per pallet, route, restrictions and current rate need confirmation; no per-unit delivery quote is inferred.",SMALL),
         _p("Europe / China: current freight quotations required. No invented container freight price is used.",SMALL)]
     page(5,"Historical cost comparison",cost_story)
+    # 23 Nov 2026: this design's own estimate, in full, on a page of its own after the history
+    extra = 0
+    if estimate:
+        extra = 1
+        page(6, "This design's estimate", estimate_story(estimate))
     loading = [_p(packing_rule),_p("Geometric ceiling only: all rotations and stacking are allowed in this calculation. Real capacity must allow pallets, doors, weight limits, access, load restraint and fragility.",SMALL)]
     if box:
         loading.append(_table(["Equipment","Inside L x W x H (mm)","Max. boxes","Freight / unit"],
@@ -678,7 +755,7 @@ def build(session, fields, sections, out_dir):
         actions.append("Confirm packed carton, upright-only constraints, stackability, unit weight and carrier dimensions before booking transport.")
     else:
         actions.append("Obtain complete H x W x D and packed dimensions for loading calculations.")
-    page(6,"Container & wagon loading",loading)
+    page(6 + extra,"Container & wagon loading",loading)
     stages,issues,weeks,due = timeline(brief)
     timing = [_p((f"Planned backwards from {due:%d %B %Y}" if due else "Indicative forward planning scenario") + f" | approximately {weeks:.1f} calendar weeks",H2),
               _p("Durations are planning assumptions. Working stages use Monday-Friday, excluding public-holiday allowances; full technical is 3 working days after GA. China sea freight uses 42 calendar days.",SMALL),
@@ -686,7 +763,7 @@ def build(session, fields, sections, out_dir):
               _p("Delivery challenges",H2)] + [_p(issue,SMALL) for issue in issues]
     if not issues:
         timing.append(_p("No conflict detected against this assumed route; confirm live capacity before committing.",SMALL))
-    page(7,"Project delivery challenges",timing)
+    page(7 + extra,"Project delivery challenges",timing)
     assumptions.append("Default stage durations (working weeks, except sea): "+", ".join(f"{key} {value:g}" for key,value in STAGES.items())+".")
     missing = [info[0] for key,info in fields.items() if _missing(brief.get(key))]
     ending = [_p("Assumptions to validate",H2)] + [_p("- "+item,SMALL) for item in assumptions]
@@ -698,7 +775,7 @@ def build(session, fields, sections, out_dir):
         ending += [_p(f"{n}. {CLIENT_ASKS[key]}",SMALL) for n,key in enumerate([k for k in CLIENT_ASKS if _missing(brief.get(k))],1)]
     ending += [_p("Every unanswered question",H2),_p(" | ".join(missing) if missing else "All template questions have recorded answers.",SMALL,0),
                _p("All full-length answers and export metadata are preserved in the companion JSON.",SMALL)]
-    page(8,"Assumptions & actions",ending)
+    page(8 + extra,"Assumptions & actions",ending)
     c.save()
     payload = {"schema_version":"sdi.brief-opportunity.v1","title":title,
        "briefed":brief.get("briefing_date"),"exported_at":datetime.now(ZoneInfo("Europe/London")).isoformat(),
