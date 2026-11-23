@@ -1480,8 +1480,15 @@ function questionsCard(x){refBox=optBox=null;
  d.querySelectorAll(".qb").forEach(b=>b.onclick=()=>{t.value=(t.value?t.value+" ":"")+`${+b.dataset.i+1}) `;t.focus()});return d}
 // ---------- brief panel
 // ---------- the client's brand (29 Oct 2026, Andy): logo + colours as soon as the client is said
-let brandNow="";
-async function showBrand(name){name=(name||"").trim();if(name===brandNow)return;brandNow=name;
+let brandNow="";const brandShown=new Set();
+// 23 Nov 2026 (Muhammad: the "Briefing for Sainsbury's" card "is coming on screen on every question and answer"): the
+// name came back spelt two ways ("Sainsbury's" / "Sainsburys"), so every turn was a "new" client. Compared without
+// spelling, and the big card shows once per chat and client.
+const brandKey=n=>(n||"").toLowerCase().replace(/&/g,"and").replace(/[^a-z0-9]/g,"");
+async function showBrand(name){name=(name||"").trim();if(brandKey(name)===brandKey(brandNow)&&(name||!brandNow))return;
+ // a brief that came back without its client (a part-saved turn) is not a new chat: the client stays
+ if(!name&&brandNow&&typeof brief!=="undefined"&&Object.keys(brief||{}).some(k=>!k.startsWith("_")&&brief[k]))return;
+ brandNow=name;
  const card=$("#bcard");if(!name){card.className="bcard";document.body.classList.remove("branded");return}
  let b;try{b=await fetch("/api/brand?name="+encodeURIComponent(name)).then(r=>r.json())}catch(e){return}
  if(!b||!b.name||name!==brandNow)return;
@@ -1491,7 +1498,8 @@ async function showBrand(name){name=(name||"").trim();if(name===brandNow)return;
  card.className="bcard";void card.offsetWidth;card.className="bcard on";
  {const vb=$("#vsbrand");if(vb)vb.innerHTML=`<i>${mark}</i>${esc(b.name)}`;
   const rv=$("#breveal");rv.innerHTML=`<div class="brin"><small>Briefing for</small><div class="brlogo">${mark}</div><strong>${esc(b.name)}</strong></div>`;
-  rv.className="breveal";void rv.offsetWidth;rv.className="breveal on";clearTimeout(rv._t);rv._t=setTimeout(()=>rv.className="breveal",3000)}
+  const k_=(typeof sid!=="undefined"&&sid||"")+"|"+brandKey(b.name);
+  if(!brandShown.has(k_)){brandShown.add(k_);rv.className="breveal";void rv.offsetWidth;rv.className="breveal on";clearTimeout(rv._t);rv._t=setTimeout(()=>rv.className="breveal",3000)}}
  if(typeof log!=="undefined"&&log){const m=document.createElement("div");m.className="bmsg";m.style.cssText=`--b1:${b.c1};--b2:${b.c2}`;m.innerHTML=`<div class="blogo">${mark}</div><span><b>${esc(b.name)}</b> - brand loaded · the concepts will use their logo and colours</span>`;
   try{log.appendChild(m);scrollEnd()}catch(e){}}}
 function showBrief(b){brief=b||{};sideSpaces(brief._spaces||[]);let have=0;
@@ -1826,7 +1834,7 @@ function rtLog(role,text){fetch("/api/rt/log",{method:"POST",headers:{"Content-T
 // (Check-SameDay-Call and the server log show how often), so the rule can be tightened from evidence.
 const THINK_ALOUD=/\b(let me (think|work out|figure out|consider)|how (best )?to phrase (this|that)|i need to (think|figure))\b/i;
 const PREAMBLE=/\b(i'?ll (log|note|capture|record|save|jot|add) (that|this|those|it)|then we'?ll (cover|grab|look at|move on|get)|let me (note|log|capture|record))\b/i;
-function chatter(resp){const out=(resp&&resp.output)||[];const said=out.filter(o=>o.type==="message").map(o=>((o.content||[]).map(c=>c.transcript||c.text||"").join(" "))).join(" ").trim();
+function chatter(resp){const out=(resp&&resp.output)||[];const said=out.filter(o=>o.type==="message"&&o.phase!=="commentary").map(o=>((o.content||[]).map(c=>c.transcript||c.text||"").join(" "))).join(" ").trim();
  if(!said)return;const tool=out.some(o=>o.type==="function_call");
  if(THINK_ALOUD.test(said))vpLog("voice chatter: thought out loud - \""+said.slice(0,120)+"\"");
  else if(tool&&PREAMBLE.test(said))vpLog("voice chatter: spoke before a tool call - \""+said.slice(0,120)+"\"")}
@@ -1888,7 +1896,19 @@ function quietCheck(){if(!rt||!rt.noisy)return;const now=Date.now();if((rt.junk|
  const up=()=>{if(!holding||!rt)return;holding=false;b.classList.remove("rec");
   setTimeout(()=>{rtSay({type:"input_audio_buffer.commit"});talkUI(true,"Thinking…");setTimeout(()=>{if(rt){rt.held=false;setTD(autoTD());if(rt.owed)owedLater()}},1500)},250)};
  ["pointerup","pointerleave","pointercancel"].forEach(ev=>b.addEventListener(ev,up))})();
+// 23 Nov 2026 (Andy's call: "let me think about how best to capture that lead time" seven times in 14 minutes): the voice
+// model speaks "preambles" by default and marks them phase "commentary", apart from its answer. An instruction didn't
+// stop them, so they are silenced: the sound is muted while one plays, its words never reach the screen, and each is
+// logged so we can see how often.
+function preamble(ev){if(!rt)return false;rt.comm=rt.comm||new Set();const it=ev.item||{},ty=ev.type||"";
+ const ph=it.phase||ev.phase||(ev.part&&ev.part.phase)||"";
+ if(ty==="response.output_item.added"&&ph==="commentary"&&it.id){rt.comm.add(it.id);if(rt.audio)rt.audio.muted=true;return true}
+ if(ty==="response.output_item.done"&&it.id&&rt.comm.has(it.id)){if(rt.audio)rt.audio.muted=false;
+  const said=((it.content||[]).map(c=>c.transcript||c.text||"").join(" ")).trim();vpLog("voice chatter: preamble silenced - \""+said.slice(0,120)+"\"");return true}
+ if(ty==="response.done"){if(rt.audio)rt.audio.muted=false;rt.comm.clear();return false}
+ return !!(ev.item_id&&rt.comm.has(ev.item_id))}       // its transcript, bit by bit: never shown
 async function rtEvent(ev){const ty=ev.type||"";
+ if(preamble(ev))return;
  if(rt&&!rt.heard&&/^(response\.created|response\.(output_)?audio_transcript\.delta|output_audio_buffer\.started)$/.test(ty))spokeNow();
  if(ty==="input_audio_buffer.speech_started"){clearTimeout(rt.replyT);rt.replyPending=false;clearTimeout(rt.owedT);clearTimeout(rt.againT);if(rt.speaking&&!rt.noisy&&(rt.lvl||0)>Math.max(0.05,(rt.floor||0)*4)){rtSay({type:"response.cancel"});rtSay({type:"output_audio_buffer.clear"});rt.pendingCreate=false}rt.inTurn=true;rt.peak=0;rt.speaking=false;talkUI(true,"Listening…");rt.youLive="";
   if(!rt.rendering){if(LS.past){LS.past=false;LS.showing=false}lsYou("…",true);if(!LS.showing)lsBlur(true)}if(rt.bubble&&!rt.bubble.dataset.done){rt.bubble.dataset.done=1}

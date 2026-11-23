@@ -3630,3 +3630,32 @@ class AndysJumpToAConclusion(unittest.TestCase):
         out = json.loads(c.post("/api/rt/tool", json={"session": s["id"], "name": "make_concepts",
                                                       "arguments": {"output": "3D render"}}).get_json()["output"])
         self.assertIn("Not drawn", out.get("error", ""))
+
+
+class PreamblesAreSilenced(unittest.TestCase):
+    """23 Nov 2026 - Andy's call: "let me think about..." seven times in 14 minutes. The voice model marks these
+    preambles phase "commentary": muted while they play, never on screen, logged."""
+
+    def test_in_node(self):
+        import shutil as sh
+        if not sh.which("node"):
+            self.skipTest("node not installed")
+        page = (WORK / "brief_lite" / "lite_page.html").read_text(encoding="utf-8")
+        code = page[page.index("function preamble(ev)"):page.index("async function rtEvent(ev)")]
+        js = "const logs=[];function vpLog(x){logs.push(x)}\nlet rt={audio:{muted:false}};\n" + code + r"""
+const r=[];
+r.push(preamble({type:"response.output_item.added",item:{id:"c1",type:"message",phase:"commentary"}}), rt.audio.muted);
+r.push(preamble({type:"response.output_audio_transcript.delta",item_id:"c1",delta:"Let me think"}));
+r.push(preamble({type:"response.output_item.done",item:{id:"c1",content:[{transcript:"Let me think about the lead time."}]}}), rt.audio.muted);
+r.push(preamble({type:"response.output_item.added",item:{id:"a1",type:"message",phase:"final_answer"}}), rt.audio.muted);
+r.push(preamble({type:"response.output_audio_transcript.delta",item_id:"a1",delta:"Six weeks - and the quantity?"}));
+console.log(JSON.stringify({r, logs}));"""
+        f = WORK / "preamble_check.js"
+        f.write_text(js, encoding="utf-8")
+        got = json.loads(subprocess.run(["node", str(f)], capture_output=True, text=True, check=True).stdout)
+        self.assertEqual(got["r"], [True, True, True, True, False, False, False, False])
+        self.assertIn("preamble silenced", got["logs"][0])
+
+    def test_the_client_card_once_per_chat(self):
+        page = (WORK / "brief_lite" / "lite_page.html").read_text(encoding="utf-8")
+        self.assertIn("if(!brandShown.has(k_))", page)
