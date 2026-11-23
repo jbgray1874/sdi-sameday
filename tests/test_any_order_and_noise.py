@@ -3601,3 +3601,32 @@ class TheEstimateInTheInternalBrief(unittest.TestCase):
         for want in ("COST TO MAKE", "before margin", "1.5 mm steel", "welding jig", "the lid hinge", "flat-packed",
                      "Cross-check from SDI", "GBP290.00", "11041"):
             self.assertIn(want, text)
+
+
+class AndysJumpToAConclusion(unittest.TestCase):
+    """23 Nov 2026 - Andy: "it still tried to jump to a conclusion". He described a reference ("a general assembly that
+    you could use to create the visual"), confirmed the past job with "Yes" - and it was drawn. Only a request counts."""
+
+    def test_talk_about_the_picture_is_not_asking_for_it(self):
+        for t in ("On file there may be reference to a general assembly that you could use to create the visual.",
+                  "the client wants a visual by Friday", "we've done renders like this before", "Yes."):
+            with self.subTest(t=t):
+                self.assertFalse(L.asks_for_visual(t, {}))
+
+    def test_a_request_still_is(self):
+        for t in ("Just render just give me a render first", "I want to see the render first.", "make the visual",
+                  "crack on and generate me a visual please", "can I see a render", "could you draw it up for me",
+                  "I'd like a render please"):
+            with self.subTest(t=t):
+                self.assertTrue(L.asks_for_visual(t, {}))
+
+    def test_confirming_the_past_job_does_not_draw(self):
+        c = L.app.test_client()
+        _, s = say(new_chat(), "Tesco want an external coal bunker", {"client": "Tesco", "unit_type": "coal bunker"})
+        for d, t in (("in", "On file there may be reference to a general assembly that you could use to create the visual."),
+                     ("out", "12148-01-GA1 - Rollershutter Bunker, Rev A - is that the one you want us to follow?"),
+                     ("in", "Yes.")):
+            L.log_msg(s["id"], d, t)
+        out = json.loads(c.post("/api/rt/tool", json={"session": s["id"], "name": "make_concepts",
+                                                      "arguments": {"output": "3D render"}}).get_json()["output"])
+        self.assertIn("Not drawn", out.get("error", ""))

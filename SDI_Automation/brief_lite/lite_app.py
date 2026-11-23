@@ -4575,10 +4575,25 @@ def this_design_asked(text, s):
                 and not any(v.get("kind") == "render" for v in s.get("visuals") or []))
 
 
+# 23 Nov 2026 (Andy: "it still tried to jump to a conclusion"): "on file there may be a GA you could use to create the
+# visual" was read as asking for it - any picture word next to "could" / "can" counted. Now only a request does: an
+# imperative or a want, aimed at the picture - and a sentence ABOUT making it ("you could use to create the visual",
+# "to help create the render") never counts.
+RENDER_REQUEST = re.compile(
+    r"\b(give me|send me|show me|make( me)?|draw( me)?|create|generate|produce|do( me)?|let'?s (see|have|do)|"
+    r"i('d| would)? (like|want|need) (to see |you to (make|draw|create|generate|do) )?|we('d| would)? (like|want|need)|"
+    r"can (i|we) (see|have|get)|could (i|we) (see|have|get)|can you (make|draw|create|generate|do|show)|"
+    r"could you (make|draw|create|generate|do|show)|please (make|draw|create|generate|do|show))\b"
+    r".{0,20}\b(render|visual|concept|picture|image|mock ?up|3d)s?\b", re.I)
+ABOUT_RENDER = re.compile(r"\b(use[ds]?|using|help(s|ed)?)\b.{0,15}\bto (make|create|draw|generate|do)\b|"
+                          r"\b(could|can|might|may) (be )?use[ds]? (it |that |them )?to\b", re.I)
+
+
 def asks_for_visual(text, b=None):
     """Did the AM ask, in these words, for something to be drawn? A plain yes counts only straight after the offer."""
     text = text or ""
-    if intent_wants_render({}, text) or GO_VISUAL.search(text) or GO_NOW.search(text) or FOCUS_RENDER.search(text) \
+    asked = RENDER_REQUEST.search(text) and not ABOUT_RENDER.search(text)
+    if asked or GO_VISUAL.search(text) or GO_NOW.search(text) or FOCUS_RENDER.search(text) \
             or re.search(r"\bnew (render|visual|concept|design)\b", text, re.I):
         return True
     return bool(b and b.get("_offer_asked") and not b.get("_render_asked") and CONFIRM_YES.search(text)
