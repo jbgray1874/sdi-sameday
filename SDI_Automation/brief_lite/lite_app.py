@@ -4241,6 +4241,7 @@ def handle(number, name, text, image_path=None, voice=False, ch=None, new=False,
         # the estimate stays internal, in the chat; the pack's budget page exists only if a markup is ever set
         save_session(s)
         b["_sheet_sig"], b["_sheet_pdf"] = sig, sheet
+        file_pack(s, sheet, "client pack")
         save_session(s)
         ch.document(sheet, f"Option {label} client pack - the concept, specification, views, sizes"
                     + (", indicative budget" if est_ and pack_markup_ is not None else "")
@@ -4250,6 +4251,7 @@ def handle(number, name, text, image_path=None, voice=False, ch=None, new=False,
             try:
                 det_ = estimate_detail_for(s, wait_s=5)
                 sdi_ = pdf_pack.price_sheet(s, est_, det_, pack_markup_, OUT, label)
+                file_pack(s, sdi_, "SDI pricing")
                 if sdi_:
                     ch.document(sdi_, f"SDI internal pricing - Option {label}: the cost, the {pack_markup_:g}% markup and "
                                       "the customer price on the client pack. For SDI only - never send to the client.",
@@ -4729,6 +4731,44 @@ DIRECTIONS = {"C": "a premium, minimal direction - fewer parts, more open space,
 
 # ---------------------------------------------------------------- the PDF
 
+# 23 Nov 2026 (James: "these packs all need to get written to our file system automated and not have to be found purely
+# through the app"): every client pack, SDI pricing sheet and internal brief is copied, as it's made, into a folder per
+# job on the share. K: is a per-logon drive letter a service can't see, so it's the share K: stands for. The folder is
+# ai_switch.json "packs_folder" ("" turns it off); a copy that fails never stops the pack, and is logged.
+PACKS_FOLDER = r"\\sdi-dc01\shareddata$\Shared\IT\AI & Automation\Design\SDI Scout\Tested client packs"
+
+
+def packs_folder():
+    try:
+        v = json.load(open(os.path.join(BASE, "studio_data", "ai_switch.json"))).get("packs_folder")
+    except Exception:                                        # noqa: BLE001
+        v = None
+    return PACKS_FOLDER if v is None else str(v).strip()
+
+
+def file_pack(s, path, what):
+    """Copy a pack into <packs folder>\\<client> - <project or unit> (<chat>)\\ in the background. -> the folder, or ''."""
+    root = packs_folder()
+    if not root or not path or not os.path.isfile(path):
+        return ""
+    b = s.get("brief") or {}
+    clean_ = lambda x: re.sub(r'[<>:"/\\|?*\x00-\x1f]+', " ", str(x or "")).strip(" .")[:60]
+    folder = os.path.join(root, f"{clean_(b.get('client')) or 'Client'} - "
+                                f"{clean_(b.get('project_name') or b.get('unit_type')) or 'Concept'} ({s['id']})")
+
+    def go():
+        import shutil
+        try:
+            os.makedirs(folder, exist_ok=True)
+            dst = os.path.join(folder, os.path.basename(path))
+            shutil.copy2(path, dst)
+            print(f"filed {s['id']} {what}: {dst}", flush=True)
+        except Exception as e:                               # noqa: BLE001
+            print(f"filing FAILED {s['id']} {what}: {type(e).__name__}: {str(e)[:200]} (folder {folder})", flush=True)
+    threading.Thread(target=go, daemon=True).start()
+    return folder
+
+
 def estimate_detail_for(s, wait_s=75):
     """The estimate that goes in the internal brief, in full: for the chosen design (or the newest), the most thorough
     one done - Estimate Lite, then the AI estimate, then past jobs. None done yet: the past-jobs one is worked out now
@@ -4790,7 +4830,9 @@ def build_pdf(s):
         print(f"brief {s['id']}: estimate failed - {type(e).__name__}: {str(e)[:160]}", flush=True)
     print(f"brief {s['id']}: estimate page - " + (f"{est['kind']} for option {est.get('label')}" if est else
           "NONE (no past job close enough and the AI estimate gave nothing)"), flush=True)
-    return pdf_pack.build(s, FIELDS, SECTIONS, OUT, estimate=est)
+    path = pdf_pack.build(s, FIELDS, SECTIONS, OUT, estimate=est)
+    file_pack(s, path, "internal brief")
+    return path
 
 
 # ---------------------------------------------------------------- web

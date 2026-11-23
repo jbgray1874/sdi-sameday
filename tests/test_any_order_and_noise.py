@@ -3809,3 +3809,28 @@ class TwoDocumentsSDIAndTheClient(unittest.TestCase):
     def test_sent_beside_the_pack_for_a_customer_price(self):
         src = (WORK / "brief_lite" / "lite_app.py").read_text(encoding="utf-8")
         self.assertIn('role="internal_price"', src)
+
+
+class PacksAreFiledOnTheShare(unittest.TestCase):
+    """23 Nov 2026 - James: "these packs all need to get written to our file system automated"."""
+
+    def test_copied_into_a_folder_per_job(self):
+        root = Path(tempfile.mkdtemp(prefix="packs-"))
+        src = root / "Concept_Tesco_x_A.pdf"
+        src.write_bytes(b"%PDF-1.4 test")
+        keep = L.packs_folder
+        try:
+            L.packs_folder = lambda: str(root / "Tested client packs")
+            folder = L.file_pack({"id": "abc123", "brief": {"client": "M&S", "project_name": "Wine bay: phase 2"}},
+                                 str(src), "client pack")
+            for _ in range(50):
+                if (Path(folder) / src.name).exists():
+                    break
+                time.sleep(0.05)
+        finally:
+            L.packs_folder = keep
+        self.assertTrue((Path(folder) / src.name).exists())
+        self.assertEqual(Path(folder).name, "M&S - Wine bay  phase 2 (abc123)")
+
+    def test_the_default_is_the_share_k_stands_for(self):
+        self.assertEqual(L.PACKS_FOLDER, r"\\sdi-dc01\shareddata$\Shared\IT\AI & Automation\Design\SDI Scout\Tested client packs")
