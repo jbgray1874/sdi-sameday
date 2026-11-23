@@ -607,7 +607,8 @@ def tool_result(s, replies, saved_now=None, not_saved=None, read_back=None):
     if read_back:
         # 21 Nov 2026: names are saved as heard, never refused - so each is read back once, as a person would check it
         names = {"account_manager": "account manager", "customer_name": "customer contact", "project_name": "project",
-                 "job_number": "job number"}
+                 "job_number": "job number", "size": "size (assumed - say it's a typical one they can change)",
+                 "shelf_load": "shelf load (assumed)"}
         head["read_back"] = ("In your next line, read these back ONCE as a quick check, then ask your next question: "
                              + "; ".join(f"{names.get(k, k)} {v}" for k, v in read_back.items())
                              + " - right? If the AM corrects one, record_answers the correction. Never say you couldn't "

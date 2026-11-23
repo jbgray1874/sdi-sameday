@@ -4289,8 +4289,19 @@ def handle(number, name, text, image_path=None, voice=False, ch=None, new=False,
         ch.ask((ack.strip() + "\n\n" if ack.strip() else "") + ROUTE_Q.format(past=f" (like {past})" if past else ""),
                field="design_route", options=ROUTE_OPTS)
         return ch, s
+    if b.get("_ref_more") and not b.get("_ref_job") and not b.get("_ref_confirm") and not b.get("_ref_ask") \
+            and (b.get("_ref_more_asked") or b.get("_ref_not_on_file")) and not renders:
+        # 23 Nov 2026 (Muhammad): 84122 confirmed, not on file, and "I couldn't find the past job you mentioned" came
+        # back every time he asked for the render. Asked once; asked again for the render, it's drawn as a new design.
+        n_ = b.get("_ref_not_on_file")
+        drop_ref(b)
+        b["design_route"] = "new"
+        ch.text((f"Job {n_} isn't in SDI's past jobs, so " if n_ else "I couldn't pin down the past job, so ")
+                + "I'm drawing it as a new design - say a job number any time to follow one.")
     if (b.get("_ref_confirm") or b.get("_ref_ask") or (b.get("_ref_more") and not b.get("_ref_job"))) \
             and b.get("design_route") != "new" and not renders and b["output"] not in ("Brief only", "GA only"):
+        if b.get("_ref_more"):
+            b["_ref_more_asked"] = 1
         # 3 Nov 2026 (Muhammad): the past job they asked for is still unclear - ask again; never draw something odd
         save_session(s)
         if b.get("_ref_confirm"):
@@ -4397,7 +4408,7 @@ def handle(number, name, text, image_path=None, voice=False, ch=None, new=False,
     return convo.ask_next(s, ch, t, ack=ack)
 
 
-ASSUME = re.compile(r"\b(assume|assuming|your(self| call| choice)|(on )?your own|up to you|you (choose|decide|pick)|(choose|pick) (one|it|a size)|any size|standard size|typical size|whatever you think|just (make|create|do|give|draw)|rough (render|one|visual)|"
+ASSUME = re.compile(r"\b(assume|assuming|your(self| call| choice| suggestion)|(what|that|the) ?(size|site|one)?( that)? you('ve| have)? (just )?(said|told|suggested|mentioned|gave)|(on )?your own|up to you|you (choose|decide|pick)|(choose|pick) (one|it|a size)|any size|standard size|typical size|whatever you think|just (make|create|do|give|draw)|rough (render|one|visual)|"
                     r"make it now|from (the )?past work|use (the )?past work|"
                     r"(make|create|give me|do) (a|one|the|me a) (rough|quick) (render|visual|concept)|go ahead|don'?t ask|ask later|later)\b", re.I)
 GO_NOW = re.compile(r"\b(just (make|do|draw|create) (it|one|a render|the render)|make it now|right away|straight away|"
@@ -4538,6 +4549,15 @@ GO_VISUAL = re.compile(r"\b(crack on|cracking on|generate|visuali[sz]e|draw (it|
                        r"(make|do|draw|give me|create|produce) (me )?(the|a|its|an?) ?(ga|technical|drawing|design|option))\b", re.I)
 NOT_YET = re.compile(r"^\W*((so|ok(ay)?|right|well|um+|erm+|uh)\W+){0,2}(no\b|nope|nah|not (yet|now|just yet)|later|"
                      r"keep going|carry on|hold (off|on)|wait)", re.I)
+
+
+def this_design_asked(text, s):
+    """'I want to see the render first' before anything is drawn is THIS design, not a past job's drawings (Muhammad,
+    23 Nov 2026: answered "I couldn't find a drawing or render for that one on W:")."""
+    t = text or ""
+    return bool(re.search(r"\b(render|visual|concept|design|picture)s?\b", t, re.I)
+                and not re.search(r"\b(past|old|previous|before|history|job|drawings?|ga|file|pdf|\d{3,})\b", t, re.I)
+                and not any(v.get("kind") == "render" for v in s.get("visuals") or []))
 
 
 def asks_for_visual(text, b=None):
@@ -4773,7 +4793,8 @@ def api_rt_tool():
     if not s["brief"].get("_render_asked"):
         heard = _am_lines(s["id"])[:5 if js.get("name") in ("make_concepts", "more_options") else 1]
         # a plain "yes" is an ask only as the newest line, straight after Sid's offer - never an older yes
-        if any(asks_for_visual(x, s["brief"] if i == 0 else None) for i, x in enumerate(heard)):
+        if any(asks_for_visual(x, s["brief"] if i == 0 else None) for i, x in enumerate(heard)) or \
+                (heard and CONFIRM_YES.search(heard[0]) and not NOT_YET.search(heard[0]) and _voice_offered_visual(s["id"])):
             s["brief"]["_render_asked"] = 1
             save_session(s)
     if js.get("name") in ("make_concepts", "more_options") and not s["brief"].get("_render_asked"):
@@ -5053,7 +5074,8 @@ def api_rt_tool():
                        "and depth).") for k in sent if k not in saved_now}
         if dropped:
             not_saved = {**(not_saved or {}), **dropped}
-    read_back = {k: s["brief"].get(k) for k in (saved_now or []) if k in READ_BACK and convo.real(s["brief"].get(k))}
+    read_back = {k: s["brief"].get(k) for k in (saved_now or []) if convo.real(s["brief"].get(k))
+                 and (k in READ_BACK or "(assumed)" in str(s["brief"].get(k)))}
     out_ = {"turn": jid, "slow": False, "output": rt.tool_result(s, JOBS[jid]["ch"].out, saved_now=saved_now,
                                                                  not_saved=not_saved, read_back=read_back)}
     _told_direction(s)
@@ -5155,8 +5177,9 @@ def api_rt_log():
 
     b = s["brief"]
     kind = t = None
-    if text and SHOW_REF.search(text) and (b.get("_ref_confirm") or b.get("_ref_ask") or b.get("_ref_job") or b.get("_ref_more")
-                                           or re.search(r"\d[\s:\-.,/]*\d[\s:\-.,/]*\d", text) or b.get("liked_job")):
+    if text and SHOW_REF.search(text) and not this_design_asked(text, s) \
+            and (b.get("_ref_confirm") or b.get("_ref_ask") or b.get("_ref_job") or b.get("_ref_more")
+                 or re.search(r"\d[\s:\-.,/]*\d[\s:\-.,/]*\d", text) or b.get("liked_job")):
         kind, t = "show_ref", {"updates": {}, "intent": "answer", "reply": ""}
     elif b.get("client") and PAST_Q.search(text):
         kind, t = "show_past", {"updates": {}, "intent": "show_past", "reply": ""}
@@ -5164,6 +5187,10 @@ def api_rt_log():
             and asks_for_visual(text, b) and (ASSUME.search(text) or b.get("_assume")) \
             and (not b.get("_flow") or (convo.pack_of(b) in ("client", "both") and b.get("design_route"))):
         kind, t = "make_concepts", {"updates": {}, "intent": "want_visuals", "assume": True, "reply": ""}
+        # 23 Nov 2026 (Muhammad: six asks, no render): this start skipped the record that the AM asked, so the turn
+        # saw "not asked" and answered with the offer - and the voice's own make_concepts was turned away as "already on it"
+        b["_render_asked"] = 1
+        save_session(s)
     if kind and not RT_BUSY.get(s["id"]):
         jid = _start_turn(s["number"], s.get("name") or "Web", text, t_override=t, lock=True, quiet=True,
                           sid=s["id"], project=s.get("project"))
@@ -5228,6 +5255,21 @@ def _am_lines(sid, n=5):
                        (sid, n)).fetchall()
     con.close()
     return [r["text"] or "" for r in rows]
+
+
+OFFERED_VISUAL = re.compile(r"\b(shall|should|can|could|do you want me to|want me to|ready for me to|happy for me to)\b.{0,25}"
+                            r"\b(make|draw|do|create|generate|render|show)\b.{0,25}\b(visual|render|concept|design|it|one)\b",
+                            re.I)
+
+
+def _voice_offered_visual(sid):
+    """The voice's last line offered to draw it ("Shall I make the visual now?") - so a plain yes next is the AM asking.
+    23 Nov 2026 (Muhammad): Sid offered, he said "Yes" three times, and it was refused as "the AM hasn't asked"."""
+    con = db()
+    r = con.execute("SELECT text FROM messages WHERE session=? AND dir='out' AND text IS NOT NULL ORDER BY at DESC LIMIT 1",
+                    (sid,)).fetchone()
+    con.close()
+    return bool(r and OFFERED_VISUAL.search(r["text"] or ""))
 
 
 def _last_am_line(sid):
@@ -5408,6 +5450,12 @@ def _answers_not_heard(s, updates):
             # said yes to is theirs, though they never said its number
             b_ = s["brief"]
             nums_v -= {x for x in (str(b_.get("_ref_job") or ""), _job_no((b_.get("_ref_confirm") or {}).get("label"))) if x}
+        if nums_v - said_n and k in ("size", "shelf_load") and ASSUME.search(" ".join((r["text"] or "") for r in rows[:2])):
+            # 23 Nov 2026 (Muhammad: "just assume on your own" / "take that size you have just told"): asked to assume,
+            # the voice's typical size is kept - marked assumed and read back once, never passed off as said
+            if "assumed" not in v.lower():
+                updates[k] = f"{v} (assumed)"
+            continue
         if nums_v - said_n:   # every number saved must have been said (2 m -> 2000 mm, 120 cm -> 1200 mm are fine)
             bad[k] = (f"the numbers in '{v}' were not in what the AM said (\"{last[:80]}\"). Ask again for this one - "
                       "never guess numbers.")
@@ -5445,6 +5493,8 @@ PAST_Q = re.compile(r"\b(show|see|list|pull up|bring up|open|display)\b.{0,40}\b
                     r"|\b(check|look (at|through|up|into)|find|search|go through|dig out)\b.{0,40}\b(history|"
                     r"(past|previous|old) (work|jobs?|projects?|units?)|(sdi|we)('ve| have|'s| has)? (done|made|built))\b"
                     r"|\bwhat (have|has) (we|sdi) (done|made|built)\b"
+                    # 23 Nov 2026 (Muhammad: "tell me what, what we have done for them before") - said the other way round
+                    r"|\bwhat (we|sdi)('ve| have| has)? (done|made|built)\b"
                     # 12 Nov 2026 (Muhammad): "have we made any such thing for Boots?", "tell me other jobs other than..."
                     r"|\b(have|has|did) (we|sdi) (ever |already )?(made|done|built|make|do|build)\b"
                     r"|\b(tell|give|show|any|what|list|find)\b.{0,20}\b(other|more|different|similar) (past |previous )?"

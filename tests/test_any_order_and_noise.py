@@ -3505,3 +3505,56 @@ class ClientLogosFromThePortalLibrary(unittest.TestCase):
                 self.assertEqual(logo("TTI"), "milwaukee.svg")        # TTI's documents carry Milwaukee's mark
         finally:
             pdf_pack.PORTAL_LOGOS = old
+
+
+class MuhammadsRenderThatNeverCame(unittest.TestCase):
+    """23 Nov 2026 - Muhammad asked for a render six times ("give me a render first", "Yes", "I want to see the render
+    first") and nothing was drawn: the listener started it without recording that he'd asked, so the turn answered with
+    the offer, and the voice's own make_concepts was turned away as "already on it"."""
+
+    def setUp(self):
+        self.c = L.app.test_client()
+        _, self.s = say(new_chat(), "Sainsbury's want a freestanding unit", {"client": "Sainsbury's", "unit_type": "FSDU"})
+        s = L._session_by_id(self.s["id"])
+        s["brief"].update({"size": "1200 x 900 x 700 mm", "materials": "powder coated", "_pack": "both",
+                           "design_route": "new", "_assume": True})
+        L.save_session(s)
+        self.started = []
+        self.keep = (L._start_turn, L._busy_until_done)
+
+        def fake_turn(*a, **k):
+            self.started.append(k.get("t_override"))
+            L.JOBS["fake"] = {"ch": L.Channel("pending"), "done": True, "session": self.s["id"], "brief": {}, "error": None}
+            return "fake"
+        L._start_turn, L._busy_until_done = fake_turn, (lambda *a: None)
+
+    def tearDown(self):
+        L._start_turn, L._busy_until_done = self.keep
+
+    def test_the_listener_records_that_he_asked(self):
+        self.c.post("/api/rt/log", json={"session": self.s["id"], "role": "user",
+                                         "text": "Just render just give me a render first and then ask all these questions."})
+        self.assertEqual(len(self.started), 1)
+        b = L._session_by_id(self.s["id"])["brief"]
+        self.assertEqual(b.get("_render_asked"), 1)
+        self.assertNotEqual(L.convo.stage(L._session_by_id(self.s["id"])), "offer")
+
+    def test_a_yes_to_the_voices_own_offer_draws(self):
+        L.log_msg(self.s["id"], "out", "Nothing new was drawn. Shall I make the visual now?")
+        L.log_msg(self.s["id"], "in", "Yes,")
+        out = json.loads(self.c.post("/api/rt/tool", json={"session": self.s["id"], "name": "make_concepts",
+                                                           "arguments": {"output": "3D render"}}).get_json()["output"])
+        self.assertTrue(out.get("started"), out)
+
+    def test_see_the_render_first_is_this_design_not_a_past_jobs_drawings(self):
+        s = L._session_by_id(self.s["id"])
+        self.assertTrue(L.this_design_asked("I want to see the render first.", s))
+        self.assertFalse(L.this_design_asked("show me the drawings for 12148", s))
+        self.assertFalse(L.this_design_asked("can I see the render of that past job", s))
+
+    def test_an_assumed_size_is_kept_marked_and_read_back(self):
+        L.log_msg(self.s["id"], "out", "Even a rough range is fine, like about 1.5 metres tall and 600 wide.")
+        L.log_msg(self.s["id"], "in", "Yeah, take that size that you have just told.")
+        ups = {"size": "1500 x 600 x 600 mm"}
+        self.assertEqual(L._answers_not_heard(L._session_by_id(self.s["id"]), ups), {})
+        self.assertIn("(assumed)", ups["size"])
