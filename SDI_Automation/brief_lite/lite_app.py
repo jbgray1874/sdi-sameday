@@ -1575,6 +1575,8 @@ def auto_estimate_start(s, label):
             rec.update(line=f"No automatic estimate for Option {label} ({type(ex).__name__}).", status="error")
         if rec.get("line"):
             log_msg(sid, "out", rec["line"])
+        print(f"estimate {sid} option {label}: {rec.get('status')} {rec.get('kind') or ''} - "   # 23 Nov 2026: in the log
+              f"{(rec.get('line') or '')[:160]}" + (" (+ past-jobs check)" if rec.get("quick") else ""), flush=True)
     threading.Thread(target=go, daemon=True).start()
     return rec
 
@@ -4401,6 +4403,7 @@ def handle(number, name, text, image_path=None, voice=False, ch=None, new=False,
             return convo.ask_next(s, ch)
         craft.log("showroom", "options_shown", who_of(s), s["id"], craft.context_of(b),
                   {"labels": [v["label"] for v in made], "directions": {v["label"]: ((b.get("_dirs") or {}).get(v["label"]) or {}).get("name", "") for v in made}})
+        JUST_DRAWN[s["id"]] = time.time()     # the voice asking for it a moment later is told it's on screen
         # 23 Nov 2026 (Muhammad: "estimate also still missing" - it came only once a design was chosen): the estimate for
         # the first option is worked out as soon as the options are on screen; choosing another works out that one's
         try:
@@ -4706,8 +4709,11 @@ def build_pdf(s):
     import pdf_pack
     try:
         est = estimate_detail_for(s)
-    except Exception:                                        # noqa: BLE001
+    except Exception as e:                                   # noqa: BLE001
         est = None
+        print(f"brief {s['id']}: estimate failed - {type(e).__name__}: {str(e)[:160]}", flush=True)
+    print(f"brief {s['id']}: estimate page - " + (f"{est['kind']} for option {est.get('label')}" if est else
+          "NONE (no past job close enough and the AI estimate gave nothing)"), flush=True)
     return pdf_pack.build(s, FIELDS, SECTIONS, OUT, estimate=est)
 
 
@@ -5131,7 +5137,16 @@ def api_rt_tool():
         return jsonify({"slow": False, "output": json.dumps({"error": "Not shown: the AM didn't ask for past work. If they asked to "
                         "see the client pack, render, GA or brief PDF, it's already in the chat - say it's on screen just above "
                         "(the page scrolls to it). Otherwise answer what they actually asked."})})
-    if js.get("name") in ("make_concepts", "show_past_work") and RT_BUSY.get(s["id"]):
+    if js.get("name") == "make_concepts" and time.time() - JUST_DRAWN.get(s["id"], 0) < 90 \
+            and any(v.get("kind") == "render" for v in s["visuals"]):
+        # 23 Nov 2026 (replaying Muhammad's call): Brief Lite drew it from what the AM said, and the voice's own call a
+        # moment later came back "nothing drawn" - which it would have said out loud
+        return jsonify({"slow": False, "output": json.dumps({"note": "It's on screen now - just drawn from what the AM said. "
+                        "Tell them in one line and ask what they think: any changes, or is it the one?"})})
+    # 23 Nov 2026 (replaying Muhammad's call): a render asked for while past work was being looked up was turned away
+    # as "already on it" - only the same kind of job is the same thing being done
+    if js.get("name") in ("make_concepts", "show_past_work") and \
+            BUSY_KIND.get(RT_BUSY.get(s["id"]), "") == BUSY_KIND.get(js.get("name")):
         # Brief Lite already started it from what the AM said - don't do it twice
         return jsonify({"slow": False, "output": json.dumps({"note": f"Already on it ({RT_BUSY[s['id']]}) - it appears on screen "
                                                                        "shortly. Just tell the AM it's coming and carry on."})})
@@ -5280,7 +5295,7 @@ def api_rt_log():
         # saw "not asked" and answered with the offer - and the voice's own make_concepts was turned away as "already on it"
         b["_render_asked"] = 1
         save_session(s)
-    if kind and not RT_BUSY.get(s["id"]):
+    if kind and BUSY_KIND.get(RT_BUSY.get(s["id"]), "") != BUSY_KIND.get(kind):
         jid = _start_turn(s["number"], s.get("name") or "Web", text, t_override=t, lock=True, quiet=True,
                           sid=s["id"], project=s.get("project"))
         _busy_until_done(s["id"], kind, jid)
@@ -5385,8 +5400,11 @@ def _digits(text):
     t = re.sub(r"\b(twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety)[- ](one|two|three|four|five|six|seven|eight|nine)\b",
                lambda m: str(NUM_WORDS[m.group(1)] + NUM_WORDS[m.group(2)]), t)
     t = re.sub(r"\b(one|two|three|four|five|six|seven|eight|nine) hundred\b", lambda m: str(NUM_WORDS[m.group(1)] * 100), t)
-    return re.sub(r"\b(" + "|".join(sorted((k for k in NUM_WORDS if k != "half"), key=len, reverse=True)) + r")\b",
-                  lambda m: str(NUM_WORDS[m.group(1)]), t)
+    t = re.sub(r"\b(" + "|".join(sorted((k for k in NUM_WORDS if k != "half"), key=len, reverse=True)) + r")\b",
+               lambda m: str(NUM_WORDS[m.group(1)]), t)
+    # 23 Nov 2026 (Muhammad: "eight four one double two" refused as never said): "double 2" is 2 2, "triple 0" 0 0 0
+    t = re.sub(r"\bdouble (\d)\b", r"\1 \1", t)
+    return re.sub(r"\btriple (\d)\b", r"\1 \1 \1", t)
 
 
 _MULT = {"k": 1000, "grand": 1000, "thousand": 1000, "m": 10 ** 6, "mil": 10 ** 6, "million": 10 ** 6}
@@ -5592,6 +5610,13 @@ PAST_Q = re.compile(r"\b(show|see|list|pull up|bring up|open|display)\b.{0,40}\b
                     # couldn't put them on screen
                     r"|\b(can|could) (i|we) see (those|them|these)\b|\b(pull|bring) (those|them|these) up\b"
                     r"|\blook at what\b.{0,30}\b(files?|jobs?|work|drawings?)\b", re.I)
+
+
+JUST_DRAWN = {}      # chat -> when options were last drawn
+
+
+BUSY_KIND = {"make_concepts": "render", "more_options": "render", "change_option": "render",
+             "show_past": "past", "show_past_work": "past", "show_ref": "past"}
 
 
 def _busy_until_done(sid, kind, jid):
