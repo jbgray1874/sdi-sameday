@@ -4245,6 +4245,17 @@ def handle(number, name, text, image_path=None, voice=False, ch=None, new=False,
         ch.document(sheet, f"Option {label} client pack - the concept, specification, views, sizes"
                     + (", indicative budget" if est_ and pack_markup_ is not None else "")
                     + " and next steps - ready to send the client for approval", role="sheet")
+        if est_ and pack_markup_ is not None:
+            # 23 Nov 2026 (James: "two documents - one for SDI and one for the client"): SDI's own pricing, beside the pack
+            try:
+                det_ = estimate_detail_for(s, wait_s=5)
+                sdi_ = pdf_pack.price_sheet(s, est_, det_, pack_markup_, OUT, label)
+                if sdi_:
+                    ch.document(sdi_, f"SDI internal pricing - Option {label}: the cost, the {pack_markup_:g}% markup and "
+                                      "the customer price on the client pack. For SDI only - never send to the client.",
+                                role="internal_price")
+            except Exception as e:                       # noqa: BLE001
+                print(f"pricing sheet {s['id']}: {type(e).__name__}: {str(e)[:160]}", flush=True)
         try:             # 21 Nov 2026: and its estimate, every time - worked out in the background, shown when ready
             auto_estimate_start(s, label)
             ch.flush()

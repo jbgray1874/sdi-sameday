@@ -643,6 +643,47 @@ def estimate_story(est):
     return story
 
 
+def price_sheet(session, figures, estimate, markup_pct, out_dir, label="A"):
+    """SDI's own pricing for the client pack (23 Nov 2026 - James: "two documents - one for SDI to see and one for the
+    client. Then the 35 percent addition is clear on the SDI one but built into the client one"). One A4 page, internal:
+    each quantity's cost, the markup and the customer price - the same rounded figures the client pack shows - then the
+    estimate itself in full. estimate: {kind, label, data} as for the internal brief."""
+    import client_pack
+    brief = session.get("brief") or {}
+    # figures: exactly what the client pack priced from (so the two always agree); estimate: the same estimate in full
+    prices = (figures or {}).get("prices") or []
+    bud = client_pack.budget(figures, markup_pct)
+    if not bud or not bud["rows"]:
+        return None
+    cost = {int(p["qty"]): float(p["unit_gbp"]) for p in prices or []}
+    title = f"{brief.get('client') or 'Client'} | {brief.get('project_name') or brief.get('unit_type') or 'Concept'}"
+    path = _safe_output(out_dir, f"SDI_Pricing_{_slug(brief.get('client'))}_{_slug(session.get('id'))}_{label}.pdf")
+    c = canvas.Canvas(path, pagesize=A4)
+    c.setTitle(f"SDI internal pricing - {title}")
+    c.setAuthor("SDI Displays")
+    header_footer(c, type("Page", (), {"page": 1})(), title, 1)
+    gbp = lambda v: f"GBP{float(v):,.2f}"
+    rows = []
+    for r in bud["rows"]:
+        k = cost.get(r["qty"], 0.0)
+        rows.append([f"{r['qty']:,}", gbp(k), gbp(k * markup_pct / 100.0), f"GBP{r['unit']:,}", f"GBP{r['total']:,}"])
+    story = [_p(f"SDI internal pricing - Option {label}", H1),
+             _p("INTERNAL - FOR SDI ONLY. Never send to the client. The client pack shows only the customer price, with the "
+                "markup built in.", SMALL),
+             _p(f"Cost (from the {dict(quick='past jobs estimate', ai='AI estimate', lite='Estimate Lite').get((figures or {}).get('kind'), 'estimate')}) "
+                f"+ {markup_pct:g}% markup = customer price", H2),
+             _table(["Quantity", "Cost per unit", f"Markup {markup_pct:g}%", "Customer price per unit", "Customer order total"],
+                    rows, [24, 34, 32, 44, 40]),
+             _p("The customer price is rounded as on the client pack (to the nearest GBP5 above GBP100). Excludes VAT, "
+                "delivery and installation unless stated.", SMALL)]
+    if estimate:
+        story += estimate_story(dict(estimate, customer_markup=None))
+    _flow(c, story, 18*mm, A4[1]-26*mm, 174*mm, 250*mm)
+    c.showPage()
+    c.save()
+    return path
+
+
 def build(session, fields, sections, out_dir, estimate=None):
     brief, refs, visuals = session.get("brief") or {}, session.get("refs") or [], session.get("visuals") or []
     title = f"{brief.get('project_name') or brief.get('unit_type') or 'Project brief'} | {brief.get('client') or 'Client to confirm'}"

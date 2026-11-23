@@ -3770,3 +3770,42 @@ class AStrayChangeIsAskedAbout(unittest.TestCase):
         out = json.loads(c.post("/api/rt/tool", json={"session": s["id"], "name": "change_option",
                                                       "arguments": {"label": "B", "change": "x"}}).get_json()["output"])
         self.assertIn("Sorry, what was that", out["error"])
+
+
+class TwoDocumentsSDIAndTheClient(unittest.TestCase):
+    """23 Nov 2026 - James: "can we produce two documents - one for SDI to see and one for the client? Then the 35
+    percent addition is clear on the SDI one but built into the client one"."""
+
+    def test_the_sdi_sheet_shows_the_markup_the_client_pack_does_not(self):
+        import shutil as sh
+        import client_pack
+        import pdf_pack
+        if not sh.which("pdftotext"):
+            self.skipTest("pdftotext not installed")
+        fig = {"kind": "ai", "prices": [{"qty": 10, "unit_gbp": 200.0}, {"qty": 250, "unit_gbp": 160.0}]}
+        d = Path(tempfile.mkdtemp(prefix="price-"))
+        keep = pdf_pack._safe_output
+        try:
+            pdf_pack._safe_output = lambda out, n: str(d / n)
+            sdi = pdf_pack.price_sheet({"id": "p1", "brief": {"client": "Tesco"}}, fig,
+                                       {"kind": "ai", "label": "A", "data": dict(fig)}, 35, str(d), "A")
+        finally:
+            pdf_pack._safe_output = keep
+        t = " ".join(subprocess.run(["pdftotext", sdi, "-"], capture_output=True, text=True).stdout.split())
+        for want in ("INTERNAL - FOR SDI ONLY", "Markup 35%", "GBP200.00", "GBP70.00", "GBP270", "GBP160.00", "GBP215"):
+            self.assertIn(want, t)
+        # the client pack, from the same figures: the same customer prices, and no markup anywhere
+        r = Path(tempfile.mkdtemp(prefix="pack-")) / "r.png"
+        from PIL import Image
+        Image.new("RGB", (300, 200)).save(r)
+        path, _n = client_pack.build(str(r.parent / "p.pdf"), {"brief": {"client": "Tesco", "volume_qty": "250"}, "refs": []},
+                                     str(r), est=fig, markup_pct=35)
+        c = " ".join(subprocess.run(["pdftotext", path, "-"], capture_output=True, text=True).stdout.split())
+        self.assertIn("£270", c)
+        self.assertIn("£215", c)
+        for never in ("35%", "markup", "Markup", "£200", "£160"):
+            self.assertNotIn(never, c)
+
+    def test_sent_beside_the_pack_for_a_customer_price(self):
+        src = (WORK / "brief_lite" / "lite_app.py").read_text(encoding="utf-8")
+        self.assertIn('role="internal_price"', src)
