@@ -94,6 +94,7 @@ button{font:inherit;cursor:pointer}a{color:inherit}
 .opt .dir{font-weight:700;font-size:13.5px}.opt .src{color:var(--muted);font-size:12px;margin:2px 0 10px}
 .acts{display:flex;gap:8px;flex-wrap:wrap}
 .estrow{margin-top:10px;padding-top:8px;border-top:1px solid var(--line,#e3e3dc);font-size:12px;color:var(--muted)}.estrow b{color:inherit}
+body.el-off .estb .el{display:none}body.el-off .estb{grid-template-columns:repeat(2,1fr)}
 .estb{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:6px}.estb .btn{display:flex;flex-direction:column;align-items:center;padding:6px 4px;font-size:13px;line-height:1.2}.estb small{font-size:11px;font-weight:400;opacity:.75}
 .btn{height:36px;padding:0 14px;border-radius:10px;border:1px solid var(--line);background:var(--card);color:var(--ink);font-weight:600;font-size:13px;display:inline-flex;align-items:center;gap:6px;text-decoration:none}
 .btn:hover{background:var(--soft)}
@@ -1255,6 +1256,9 @@ function drawChars(){const box=document.getElementById("chars");if(!box)return;
  box.innerHTML=`<div class="chrow">${Object.keys(CHARS).map(k=>`<button class="chr${k===CH.key?" on":""}" role="radio" aria-checked="${k===CH.key}" aria-label="${CHARS[k].name} - ${CHARS[k].tagline}" title="${CHARS[k].name} - ${CHARS[k].tagline}" data-char="${k}" type="button">${avHtml(k)}<span>${CHARS[k].name}</span></button>`).join("")}</div><div class="chsel">${CH.tagline}</div>`}
 document.addEventListener("click",e=>{const b=e.target.closest&&e.target.closest("[data-char]");if(b){e.preventDefault();pickChar(b.dataset.char)}});
 // a button that says something for you ("AI estimate", "Estimate Lite") - as if typed
+// 23 Nov 2026: Estimate Lite waits for SDI's new estimating server - its button shows only when it's switched on
+document.body.classList.add("el-off");
+fetch("/api/characters").then(r=>r.json()).then(j=>{if(j&&j.estimate_lite)document.body.classList.remove("el-off")}).catch(()=>{});
 document.addEventListener("click",e=>{const b=e.target.closest&&e.target.closest("[data-say]");if(b&&typeof send==="function"){e.preventDefault();send(b.dataset.say)}});
 drawChars();voFace();document.addEventListener("DOMContentLoaded",()=>{drawChars();voFace()});
 // 21 Nov 2026 (James: "3 d visuals that can rotate"): the unit as boxes at the brief's exact sizes (model3d.py), drawn
@@ -1436,7 +1440,7 @@ function render(x){
    ${x.check_note&&!x.check_ok?`<div class="note">⚠ ${esc(x.check_note)}</div>`:""}
    <div class="acts"><button class="btn pri" data-a="use">✓ Use this</button><button class="btn" data-a="chg">✎ Change…</button><a class="btn ghost" href="${x.url}" download>⬇</a></div>
    <div class="estrow"><b>Estimate this design</b> (internal guide to the cost to make - not a selling price, not for the client)
-    <div class="estb"><button class="btn" type="button" data-say="Quick estimate for option ${esc(L)}" title="SDI's closest past job, adjusted for this design">Past jobs<small>seconds</small></button><button class="btn" type="button" data-say="AI estimate for option ${esc(L)}" title="The AI model costs the design part by part">AI estimate<small>about a minute</small></button><button class="btn" type="button" data-say="Estimate Lite for option ${esc(L)}" title="SDI's estimating engine prices it - the longest and most thorough">Estimate Lite<small>5-15 minutes</small></button></div></div></div>`;
+    <div class="estb"><button class="btn" type="button" data-say="Quick estimate for option ${esc(L)}" title="SDI's closest past job, adjusted for this design">Past jobs<small>seconds</small></button><button class="btn" type="button" data-say="AI estimate for option ${esc(L)}" title="The AI model costs the design part by part">AI estimate<small>about a minute</small></button><button class="btn el" type="button" data-say="Estimate Lite for option ${esc(L)}" title="SDI's estimating engine prices it - the longest and most thorough">Estimate Lite<small>5-15 minutes</small></button></div></div></div>`;
   c.querySelector('[data-a="use"]').onclick=()=>{document.querySelectorAll(".opt").forEach(o=>o.classList.toggle("chosen",o===c));send(`Option ${L} is the one - send me the client sheet`);whyChips(c,"option_chosen")};
   c.querySelector('[data-a="chg"]').onclick=()=>{t.value=`Option ${L}: `;t.focus()};
   picFeedback(c,L,x.kind||"render");

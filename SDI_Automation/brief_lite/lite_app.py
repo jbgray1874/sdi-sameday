@@ -1729,7 +1729,21 @@ def estimate_lite_start(s):
     return el.latest(DB, s["id"]), ""
 
 
+def estimate_lite_on():
+    """23 Nov 2026 (James: "the estimate slots are needed for a TTI conference. We will wait for the new server ... the
+    2 estimate options available for now is good"): Estimate Lite is off until studio_data\\ai_switch.json has
+    "estimate_lite_on": true; asked for meanwhile, the AI estimate is done instead."""
+    try:
+        return json.load(open(os.path.join(BASE, "studio_data", "ai_switch.json"))).get("estimate_lite_on") is True
+    except Exception:                                        # noqa: BLE001
+        return False
+
+
 def estimate_lite_turn(s, ch):
+    if not estimate_lite_on():
+        ch.text("Estimate Lite - SDI's estimating system - comes in when the new estimating server does. Here's the AI "
+                "estimate meanwhile, costed line by line.")
+        return ai_estimate_turn(s, ch)
     rec, why = estimate_lite_start(s)
     if not rec:
         ch.text(f"I couldn't start Estimate Lite: {why}.")
@@ -4907,6 +4921,10 @@ def api_rt_tool():
         return jsonify({"slow": False, "ai_estimate": e, "output": _said(json.dumps({"say": ae_.say(e), "note": (
             "Say it in your own words: internal only, never for the client; the cost to make each and the one-off setup; "
             "the biggest cost; how sure it is. The card with every line is on screen.")}))})
+    if js.get("name") == "estimate_lite" and not estimate_lite_on():
+        return jsonify({"slow": False, "output": json.dumps({"error": "Estimate Lite isn't switched on yet - it comes with "
+                        "SDI's new estimating server. Say so in one line and offer the AI estimate (call ai_estimate if "
+                        "they want it)."})})
     if js.get("name") == "estimate_lite":
         rec, why = estimate_lite_start(s)
         if not rec:
@@ -5910,7 +5928,7 @@ def api_avatar(key):
 @app.route("/api/characters")
 def api_characters():
     import characters
-    return jsonify({"characters": characters.public(), "default": characters.DEFAULT})
+    return jsonify({"characters": characters.public(), "default": characters.DEFAULT, "estimate_lite": estimate_lite_on()})
 
 
 @app.route("/api/me")

@@ -3688,3 +3688,16 @@ console.log(JSON.stringify({a,b,sent,logs:logs.length}));"""
         src = (WORK / "brief_lite" / "lite_app.py").read_text(encoding="utf-8")
         i = src.index('craft.log("showroom", "options_shown"')
         self.assertIn("auto_estimate_start(s, made[0][\"label\"])", src[i:i + 900])
+
+
+class EstimateLiteWaitsForTheNewServer(unittest.TestCase):
+    """23 Nov 2026 - James: the estimating runners are needed for the TTI conference; Estimate Lite waits for the new
+    server. Off unless "estimate_lite_on": true - asked for meanwhile, the AI estimate is done instead."""
+
+    def test_off_by_default_and_the_ai_estimate_instead(self):
+        self.assertFalse(L.estimate_lite_on())
+        src = (WORK / "brief_lite" / "lite_app.py").read_text(encoding="utf-8")
+        i = src.index("def estimate_lite_turn(s, ch):")
+        self.assertIn("return ai_estimate_turn(s, ch)", src[i:i + 600])
+        page = (WORK / "brief_lite" / "lite_page.html").read_text(encoding="utf-8")
+        self.assertIn('body.el-off .estb .el{display:none}', page)
