@@ -1581,6 +1581,20 @@ def auto_estimate_start(s, label):
     return rec
 
 
+PRICE_INTERNAL = re.compile(r"\binternal\b|\bcost price\b|\b(just )?for us\b|\bin[- ]house\b|\bour (own )?use\b", re.I)
+PRICE_CUSTOMER = re.compile(r"\b(customer|client|selling|sell|external)\b", re.I)
+
+
+def price_for_said(text):
+    """'customer' or 'internal' when the AM says which the estimate is for, else None."""
+    t = text or ""
+    if PRICE_INTERNAL.search(t):
+        return "internal"
+    if PRICE_CUSTOMER.search(t) and (re.search(r"\b(price|pricing|quote|cost|one)\b", t, re.I) or len(t.split()) <= 4):
+        return "customer"
+    return None
+
+
 def client_pack_settings():
     """The client pack's settings in studio_data\\ai_switch.json: client_pack_markup_pct (SDI's markup on its cost to make,
     for the pack's indicative budget - no page until it's set) and client_pack_views (the four views, made automatically)."""
@@ -1593,7 +1607,11 @@ def client_pack_settings():
         mk = float(mk) if mk is not None and str(mk).strip() != "" else None
     except (TypeError, ValueError):
         mk = None
-    return {"markup": mk, "views": j.get("client_pack_views", True) is not False}
+    try:
+        cm = float(j.get("customer_markup_pct", 35))
+    except (TypeError, ValueError):
+        cm = 35.0
+    return {"markup": mk, "views": j.get("client_pack_views", True) is not False, "customer_markup": cm}
 
 
 def estimate_for_pack(s, label):
@@ -3378,6 +3396,14 @@ def handle(number, name, text, image_path=None, voice=False, ch=None, new=False,
     first = not b.get("briefing_date")
     if first:   # Andy: the briefing date fills itself in and is read back to the briefer
         b["briefing_date"] = f"{date.today():%a %d %b %Y}"
+    pf_ = price_for_said(text)
+    if pf_ and (b.get("_pack_waiting") or re.search(r"\bprice\b", text or "", re.I)):
+        b["_price_for"] = pf_              # 23 Nov 2026 (Matt): internal price, or a customer price with SDI's margin
+    if b.get("_pack_waiting") and b.get("_price_for") and pf_ and not record_only and t_override is None:
+        lab_ = b.pop("_pack_waiting")      # the pack that was waiting for that answer is made now
+        save_session(s)
+        t_override = {"updates": {}, "intent": "approve_visual", "change_request": f"option {lab_}", "reply": ""}
+        text = f"Option {lab_} is the one"
     if t_override is not None:          # live voice: the voice model already decided what they meant
         t = dict(t_override)
     elif picked_output:
@@ -4041,6 +4067,10 @@ def handle(number, name, text, image_path=None, voice=False, ch=None, new=False,
     if (t.get("intent") == "views" or (t_override is None and VIEWS_ASK.search(text or ""))) \
             and any(v.get("kind") == "render" for v in s["visuals"]):
         return views_turn(s, ch, (t.get("views_text") or "") + " " + (text or ""))
+    if intent == "change_visual" and NO_CHANGE.search(text or ""):
+        intent = "answer"                     # 23 Nov 2026 (Matt): "I did not ask for any changes" is not a change
+        ch.text("Sorry - nothing's being changed. What would you like to do next?")
+        return ch, s
     if intent == "change_visual" and s["visuals"] and not HD_ASK.search(text or ""):   # "make A HD" is the HD redraw below, not a change
         # 20 Nov 2026 (Matt: "why have you changed the size on the latest render?"): "500mm x 500mm x 1500mm" with a
         # change was read as 500 high and 1500 deep for an FSDU, and drawn. A new size that looks wrong for the unit is
@@ -4102,6 +4132,19 @@ def handle(number, name, text, image_path=None, voice=False, ch=None, new=False,
     if intent == "approve_visual" and s["visuals"]:
         chosen = pick_visual(s, (t.get("change_request") or "") + " " + (text or ""))
         label = chosen.get("label") or "A"
+        if t.get("price_for") in ("customer", "internal"):
+            b["_price_for"] = t["price_for"]
+        if b.get("_price_for"):
+            b.pop("_pack_waiting", None)
+        if not b.get("_price_for") and chosen.get("kind") == "render":
+            # 23 Nov 2026 (Matt: "have the model ask us if this is an internal price required or a customer price, and if
+            # it's a customer price the margin is applied"): asked once, before the pack is made
+            b["_pack_waiting"] = label
+            save_session(s)
+            ch.ask(f"Option {label} - lovely. Before I make the client pack: is the estimate a customer price (it goes on "
+                   "the pack, with SDI's margin added) or an internal price (it stays on the internal brief)?",
+                   field="_price_for", options=["Customer price", "Internal price"])
+            return ch, s
         if b.get("_craft_chosen") != f"{label}|{chosen.get('path')}":
             b["_craft_chosen"] = f"{label}|{chosen.get('path')}"
             latest = {}
@@ -4185,8 +4228,9 @@ def handle(number, name, text, image_path=None, voice=False, ch=None, new=False,
             m3_ = model3d_for(s)
         except Exception:                                    # noqa: BLE001
             m3_ = None
+        pack_markup_ = pack_cfg["customer_markup"] if b.get("_price_for") == "customer" else None
         sheet = pdf_pack.client_sheet(s, [shown] + ([ga] if ga else []), OUT, estimate=est_,
-                                      markup_pct=pack_cfg["markup"], story=(b.get("_dirs") or {}).get(label)
+                                      markup_pct=pack_markup_, story=(b.get("_dirs") or {}).get(label)
                                       if isinstance(b.get("_dirs"), dict) else None, model=m3_)
         # 21 Nov 2026 (James: "don't want that on a client statement ... leave the estimate as is"): no budget page -
         # the estimate stays internal, in the chat; the pack's budget page exists only if a markup is ever set
@@ -4194,7 +4238,7 @@ def handle(number, name, text, image_path=None, voice=False, ch=None, new=False,
         b["_sheet_sig"], b["_sheet_pdf"] = sig, sheet
         save_session(s)
         ch.document(sheet, f"Option {label} client pack - the concept, specification, views, sizes"
-                    + (", indicative budget" if est_ and pack_cfg["markup"] is not None else "")
+                    + (", indicative budget" if est_ and pack_markup_ is not None else "")
                     + " and next steps - ready to send the client for approval", role="sheet")
         try:             # 21 Nov 2026: and its estimate, every time - worked out in the background, shown when ready
             auto_estimate_start(s, label)
@@ -4723,6 +4767,8 @@ def build_pdf(s):
     import pdf_pack
     try:
         est = estimate_detail_for(s)
+        if est and s["brief"].get("_price_for") == "customer":
+            est["customer_markup"] = client_pack_settings()["customer_markup"]
     except Exception as e:                                   # noqa: BLE001
         est = None
         print(f"brief {s['id']}: estimate failed - {type(e).__name__}: {str(e)[:160]}", flush=True)
@@ -4973,6 +5019,10 @@ def api_rt_tool():
             return jsonify({"slow": False, "output": _said(json.dumps({"error": (
                 f"Not redrawn yet: the size reads as {sz_} (height x width x depth), but {'; and '.join(clash_)}. Say it "
                 "back in one line and ask which is the height; record_answers the size they confirm, then change_option.")}))})
+        if NO_CHANGE.search(last_ or ""):
+            return jsonify({"slow": False, "output": _said(json.dumps({"error": (
+                f"Not changed: the AM said there's nothing to change (\"{last_[:80]}\"). Say sorry in a few words - "
+                "nothing is being redrawn - and ask what they'd like to do next. Never redraw until they ask for a change.")}))})
         if half_heard_change(last_):
             return jsonify({"slow": False, "output": _said(json.dumps({"error": (
                 f"Not changed: the AM's last words \"{last_[:60]}\" don't say what to change - probably half-heard. Say you "
@@ -5359,6 +5409,14 @@ def latest_option(s):
 CHANGE_SAID = re.compile(r"\b(\w+er|more|less|add\w*|remove|without|with|no|colou?rs?|red|blue|green|black|white|gr[ae]y|gold|"
                          r"silver|pink|purple|orange|yellow|brown|logo|header|shel(f|ves)|light\w*|graphics?|size|finish|matt|"
                          r"gloss|wood|acrylic|metal|steel|glass|yes|yeah|yep|go|do it|please|ok(ay)?|sure|right)\b", re.I)
+
+
+# 23 Nov 2026 (Matt: "I've not asked for any changes here, it's picked up the word changes and started to make changes"):
+# "I did not ask for any changes" was drawn as Option D "with your changes". Saying there's nothing to change is not a change.
+NO_CHANGE = re.compile(r"\b(did ?n[o']?t|didn'?t|have ?n[o']?t|haven'?t|never|not|don'?t|do not|no)\b.{0,20}"
+                       r"\b(ask(ed)?|want(ed)?|need(ed)?|request(ed)?|say|said|mean|make|made)\b.{0,20}\b(any |a |for |the )?"
+                       r"(changes?|anything changed|redraw|new (one|option))\b|\bno (more )?changes?\b|\bnothing to change\b|"
+                       r"\b(don'?t|do not) change (it|anything|a thing)\b(?!.{0,30}\b(just|but|make|add|swap)\b)|\bleave it( as it is| alone)?\b|\bwhy (are|did) you (chang|mak|redraw)", re.I)
 
 
 def half_heard_change(line):

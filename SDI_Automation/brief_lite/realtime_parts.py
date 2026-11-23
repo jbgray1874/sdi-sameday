@@ -191,7 +191,12 @@ TOOLS = [
      "description": "The AM picks a concept (A, B, C...). Draws its GA if wanted and makes the one-page client sheet. Its "
                     "estimate is then worked out automatically (past jobs, or the AI estimate) and you'll be told when it's "
                     "on screen - don't call ballpark for it yourself.",
-     "parameters": {"type": "object", "properties": {"label": {"type": "string"}}, "required": ["label"]}},
+     "parameters": {"type": "object", "properties": {"label": {"type": "string"},
+                    "price_for": {"type": "string", "enum": ["customer", "internal"],
+                                  "description": "Only once the AM has said: is the estimate a customer price (goes on "
+                                                 "the client pack with SDI's margin) or an internal price? If you're told "
+                                                 "to ask, ask, then call choose_option again with their answer."}},
+                    "required": ["label"]}},
     {"type": "function", "name": "change_option",
      "description": "Change a concept: e.g. label B, change 'white header, 4 shelves'.",
      "parameters": {"type": "object", "properties": {"label": {"type": "string"}, "change": {"type": "string"}}, "required": ["label", "change"]}},
@@ -533,7 +538,9 @@ def tool_intent(name, a):
                     "n_renders": a.get("n"), "reply": "", "assume": True, "go": out != "GA only"}   # none said: A and B
     if name == "choose_option":
         L = str(a.get("label") or "A").strip().upper()[:1]
-        return f"Option {L} is the one", {"updates": {}, "intent": "approve_visual", "change_request": f"option {L}", "reply": ""}
+        pf = a.get("price_for") if a.get("price_for") in ("customer", "internal") else None
+        return f"Option {L} is the one", {"updates": {}, "intent": "approve_visual", "change_request": f"option {L}", "reply": "",
+                                          **({"price_for": pf} if pf else {})}
     if name == "change_option":
         L = str(a.get("label") or "A").strip().upper()[:1]
         return f"Option {L}: {a.get('change', '')}", {"updates": {}, "intent": "change_visual",

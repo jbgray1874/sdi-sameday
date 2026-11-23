@@ -3701,3 +3701,46 @@ class EstimateLiteWaitsForTheNewServer(unittest.TestCase):
         self.assertIn("return ai_estimate_turn(s, ch)", src[i:i + 600])
         page = (WORK / "brief_lite" / "lite_page.html").read_text(encoding="utf-8")
         self.assertIn('body.el-off .estb .el{display:none}', page)
+
+
+class MattsFeedback23Nov(unittest.TestCase):
+    """23 Nov 2026 - Matt: "I've not asked for any changes here, it's picked up the word changes and started to make
+    changes"; and "have the model ask us if this is an internal price or a customer price, and if it's a customer price
+    the margin is applied"."""
+
+    def test_saying_there_is_nothing_to_change_is_not_a_change(self):
+        for t in ("I did not ask for any changes...", "I didn't ask for any changes", "no changes, it's fine",
+                  "leave it as it is", "why are you changing it?"):
+            with self.subTest(t=t):
+                self.assertTrue(L.NO_CHANGE.search(t))
+        for t in ("make the header blue", "don't change the colour, just make it bigger", "no, make it taller"):
+            with self.subTest(t=t):
+                self.assertFalse(L.NO_CHANGE.search(t))
+
+    def test_the_voice_is_stopped_from_redrawing(self):
+        c = L.app.test_client()
+        _, s = say(new_chat(), "Tesco want a gondola end", {"client": "Tesco", "unit_type": "gondola end"})
+        L.log_msg(s["id"], "in", "I did not ask for any changes...")
+        out = json.loads(c.post("/api/rt/tool", json={"session": s["id"], "name": "change_option",
+                                                      "arguments": {"label": "B", "change": "x"}}).get_json()["output"])
+        self.assertIn("nothing to change", out["error"])
+
+    def test_customer_or_internal(self):
+        self.assertEqual(L.price_for_said("Customer price"), "customer")
+        self.assertEqual(L.price_for_said("it's a customer price"), "customer")
+        self.assertEqual(L.price_for_said("Internal price"), "internal")
+        self.assertEqual(L.price_for_said("just for us, internal"), "internal")
+        self.assertIsNone(L.price_for_said("the client wants it by Friday"))
+        self.assertEqual(L.client_pack_settings()["customer_markup"], 35.0)
+
+    def test_choose_option_carries_the_answer(self):
+        self.assertEqual(rt.tool_intent("choose_option", {"label": "A", "price_for": "customer"})[1]["price_for"], "customer")
+
+    def test_the_internal_brief_shows_the_customer_price(self):
+        import pdf_pack
+        story = pdf_pack.estimate_story({"kind": "quick", "label": "A", "customer_markup": 35.0, "data": {
+            "prices": [{"qty": 10, "unit_gbp": 200.0}], "base": {"job": "1", "quoted": 190, "qty": 10, "today": 200}}})
+        text = " ".join(getattr(f, "text", "") or "" for f in story)
+        self.assertIn("Customer price (SDI's margin applied)", text)
+        cells = " ".join(str(getattr(c, "text", c)) for f in story if hasattr(f, "_cellvalues") for r in f._cellvalues for c in r)
+        self.assertIn("GBP270.00", cells)               # 200 + 35%

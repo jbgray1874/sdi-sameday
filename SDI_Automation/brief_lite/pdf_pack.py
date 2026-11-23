@@ -576,6 +576,14 @@ def estimate_story(est):
         story.append(_table(["Quantity", "Cost per unit", "Cost for the quantity"],
                             [[f"{int(p['qty']):,}", gbp(p["unit_gbp"]), gbp(float(p["unit_gbp"]) * int(p["qty"]))]
                              for p in prices], [40, 60, 74]))
+    if prices and est.get("customer_markup") is not None:
+        k = 1 + float(est["customer_markup"]) / 100.0
+        story += [_p("Customer price (SDI's margin applied)", H2),
+                  _table(["Quantity", "Price per unit", "Price for the quantity"],
+                         [[f"{int(p['qty']):,}", gbp(float(p["unit_gbp"]) * k), gbp(float(p["unit_gbp"]) * k * int(p["qty"]))]
+                          for p in prices], [40, 60, 74]),
+                  _p(f"Cost plus {est['customer_markup']:g}% - the price on the client pack. The client pack never shows the "
+                     "margin.", SMALL)]
     conf = str(d.get("confidence") or "")
     if kind == "quick":
         base = d.get("base") or {}
