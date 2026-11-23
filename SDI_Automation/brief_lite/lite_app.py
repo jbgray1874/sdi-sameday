@@ -4071,6 +4071,11 @@ def handle(number, name, text, image_path=None, voice=False, ch=None, new=False,
         intent = "answer"                     # 23 Nov 2026 (Matt): "I did not ask for any changes" is not a change
         ch.text("Sorry - nothing's being changed. What would you like to do next?")
         return ch, s
+    if intent == "change_visual" and t_override is None and text and not change_is_clear(text, s["id"]) \
+            and not re.match(r"^\W*(ok(ay)?\W+)?(show me|let'?s see|go on then)\b", text, re.I) \
+            and any(v.get("kind") == "render" for v in s["visuals"]):
+        ch.text("Sorry - what would you like changed? (For example the header colour, the shelves, or the size.)")
+        return ch, s                          # 23 Nov 2026 (Matt): a stray "change" is asked about, never drawn
     if intent == "change_visual" and s["visuals"] and not HD_ASK.search(text or ""):   # "make A HD" is the HD redraw below, not a change
         # 20 Nov 2026 (Matt: "why have you changed the size on the latest render?"): "500mm x 500mm x 1500mm" with a
         # change was read as 500 high and 1500 deep for an FSDU, and drawn. A new size that looks wrong for the unit is
@@ -5023,6 +5028,12 @@ def api_rt_tool():
             return jsonify({"slow": False, "output": _said(json.dumps({"error": (
                 f"Not changed: the AM said there's nothing to change (\"{last_[:80]}\"). Say sorry in a few words - "
                 "nothing is being redrawn - and ask what they'd like to do next. Never redraw until they ask for a change.")}))})
+        if not change_is_clear(last_, s["id"]) and not re.match(r"^\W*(ok(ay)?\W+)?(show me|let'?s see|go on then)\b",
+                                                                 last_ or "", re.I):
+            return jsonify({"slow": False, "output": _said(json.dumps({"error": (
+                f"Not changed: the AM's words \"{last_[:80]}\" don't say what to change - maybe a stray word or noise. "
+                "Ask in one short line: 'Sorry, what was that - did you want something changed?' If they say what, "
+                "read it back in a few words and change_option once they say yes.")}))})
         if half_heard_change(last_):
             return jsonify({"slow": False, "output": _said(json.dumps({"error": (
                 f"Not changed: the AM's last words \"{last_[:60]}\" don't say what to change - probably half-heard. Say you "
@@ -5417,6 +5428,32 @@ NO_CHANGE = re.compile(r"\b(did ?n[o']?t|didn'?t|have ?n[o']?t|haven'?t|never|no
                        r"\b(ask(ed)?|want(ed)?|need(ed)?|request(ed)?|say|said|mean|make|made)\b.{0,20}\b(any |a |for |the )?"
                        r"(changes?|anything changed|redraw|new (one|option))\b|\bno (more )?changes?\b|\bnothing to change\b|"
                        r"\b(don'?t|do not) change (it|anything|a thing)\b(?!.{0,30}\b(just|but|make|add|swap)\b)|\bleave it( as it is| alone)?\b|\bwhy (are|did) you (chang|mak|redraw)", re.I)
+
+
+# 23 Nov 2026 (Matt: "Sid can ask 'I'm sorry, what did you say' if it picks up a stray word like 'change'"): a change is
+# drawn only when the AM's words say WHAT to change - a part, a colour, a material, a size, a number, bigger / smaller -
+# or they said yes to Sid reading the change back. Otherwise Sid asks.
+CHANGE_DETAIL = re.compile(r"\b(\d+|colou?rs?|red|blue|green|black|white|gr[ae]y|gold|silver|pink|purple|orange|yellow|brown|navy|"
+                           r"logo|header|shel(f|ves)|lights?|lighting|led|graphics?|base|plinth|top|side|back|front|door|lid|"
+                           r"hook|peg|tray|drawer|sign|panel|frame|wood|oak|timber|acrylic|metal|steel|glass|chrome|matt|gloss|"
+                           r"finish|size|height|width|depth|taller|shorter|wider|narrower|bigger|smaller|deeper|shallower|darker|"
+                           r"lighter|brighter|more|less|fewer|extra|without|add|remove|swap|replace|instead|rounded|curved|"
+                           r"square|angled|branding|brand|product|font|text|wording|price|mm|cm|metres?)\b", re.I)
+READ_BACK_CHANGE = re.compile(r"\b(shall|should|want me to|do you want|happy for me to)\b.{0,60}\b(change|make|redraw|update|"
+                              r"swap|add|remove)\b", re.I)
+
+
+def change_is_clear(line, sid=None):
+    """The AM's words say what to change - or they said yes to Sid reading the change back."""
+    if CHANGE_DETAIL.search(line or ""):
+        return True
+    if sid and CONFIRM_YES.search(line or "") and not NOT_YET.search(line or ""):
+        con = db()
+        r = con.execute("SELECT text FROM messages WHERE session=? AND dir='out' AND text IS NOT NULL ORDER BY at DESC LIMIT 1",
+                        (sid,)).fetchone()
+        con.close()
+        return bool(r and READ_BACK_CHANGE.search(r["text"] or ""))
+    return False
 
 
 def half_heard_change(line):

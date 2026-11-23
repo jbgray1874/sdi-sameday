@@ -3744,3 +3744,29 @@ class MattsFeedback23Nov(unittest.TestCase):
         self.assertIn("Customer price (SDI's margin applied)", text)
         cells = " ".join(str(getattr(c, "text", c)) for f in story if hasattr(f, "_cellvalues") for r in f._cellvalues for c in r)
         self.assertIn("GBP270.00", cells)               # 200 + 35%
+
+
+class AStrayChangeIsAskedAbout(unittest.TestCase):
+    """23 Nov 2026 - Matt: "Sid can ask 'I'm sorry, what did you say' if it picks up a stray word like 'change'"."""
+
+    def test_only_a_change_that_says_what(self):
+        for t in ("make the header blue", "swap the shelves to oak", "can it be 200 taller", "add a logo on the side",
+                  "bigger please"):
+            with self.subTest(t=t):
+                self.assertTrue(L.change_is_clear(t))
+        for t in ("I think there might be changes later on", "changes", "Photos laptop", "what was that about changes"):
+            with self.subTest(t=t):
+                self.assertFalse(L.change_is_clear(t))
+
+    def test_a_yes_to_the_read_back(self):
+        _, s = say(new_chat(), "Tesco want a gondola end", {"client": "Tesco", "unit_type": "gondola end"})
+        L.log_msg(s["id"], "out", "So Option B with a blue header - shall I make that change?")
+        self.assertTrue(L.change_is_clear("Yes please", s["id"]))
+
+    def test_the_voice_asks_instead_of_redrawing(self):
+        c = L.app.test_client()
+        _, s = say(new_chat(), "Tesco want a gondola end", {"client": "Tesco", "unit_type": "gondola end"})
+        L.log_msg(s["id"], "in", "I think there might be some changes later on")
+        out = json.loads(c.post("/api/rt/tool", json={"session": s["id"], "name": "change_option",
+                                                      "arguments": {"label": "B", "change": "x"}}).get_json()["output"])
+        self.assertIn("Sorry, what was that", out["error"])
