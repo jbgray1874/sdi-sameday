@@ -1623,9 +1623,7 @@ def ai_estimate_for(s):
     """The frontier model's line-by-line costing of the design on screen (ai_estimate.py), or (None, why)."""
     import ai_estimate
     import ballpark
-    base = _est_render(s)
-    if not base:
-        return None, "there's no design on screen yet to cost - make the visual first"
+    base = _est_render(s) or {}                           # nothing drawn yet: costed from the brief alone (23 Nov 2026)
     img = base.get("hd_path") if base.get("hd_path") and os.path.exists(base.get("hd_path")) else base.get("path")
     bp = ballpark_for(s)
     quotes = (bp or {}).get("basis") or []
@@ -4403,6 +4401,14 @@ def handle(number, name, text, image_path=None, voice=False, ch=None, new=False,
             return convo.ask_next(s, ch)
         craft.log("showroom", "options_shown", who_of(s), s["id"], craft.context_of(b),
                   {"labels": [v["label"] for v in made], "directions": {v["label"]: ((b.get("_dirs") or {}).get(v["label"]) or {}).get("name", "") for v in made}})
+        # 23 Nov 2026 (Muhammad: "estimate also still missing" - it came only once a design was chosen): the estimate for
+        # the first option is worked out as soon as the options are on screen; choosing another works out that one's
+        try:
+            auto_estimate_start(s, made[0]["label"])
+            ch.flush()
+            ch.out.append({"type": "text", "role": "auto_estimate", "label": made[0]["label"], "text": ""})
+        except Exception:                                    # noqa: BLE001
+            pass
         if len(made) > 1:
             threading.Thread(target=craft.predict, daemon=True, args=("showroom", s["id"], [{"label": v["label"], "path": v["path"]} for v in made],
                                                                    who_of(s), b.get("client") or "", CLIP)).start()
@@ -4686,7 +4692,10 @@ def estimate_detail_for(s, wait_s=75):
                 time.sleep(0.5)
             return done()
         q = quick_estimate_for(s)                            # no design yet: from the brief and SDI's past jobs
-        return {"kind": "quick", "label": label, "data": q} if q else None
+        if q:
+            return {"kind": "quick", "label": label, "data": q}
+        e, _why = ai_estimate_for(s)                         # no close past job either: the AI costs the brief
+        return {"kind": "ai", "label": label, "data": e} if e else None
     except Exception:                                        # noqa: BLE001
         return None
 

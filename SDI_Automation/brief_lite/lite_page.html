@@ -1907,7 +1907,16 @@ function preamble(ev){if(!rt)return false;rt.comm=rt.comm||new Set();const it=ev
   const said=((it.content||[]).map(c=>c.transcript||c.text||"").join(" ")).trim();vpLog("voice chatter: preamble silenced - \""+said.slice(0,120)+"\"");return true}
  if(ty==="response.done"){if(rt.audio)rt.audio.muted=false;rt.comm.clear();return false}
  return !!(ev.item_id&&rt.comm.has(ev.item_id))}       // its transcript, bit by bit: never shown
+// 23 Nov 2026 (Muhammad: "sometimes it repeats the same sentence twice"): a reply that opens with the same words as the
+// last one, within 20 seconds, is stopped as it starts - the sound cleared, its bubble removed - and logged.
+const sameStart=s=>(s||"").toLowerCase().replace(/[^a-z0-9 ]/g,"").replace(/\s+/g," ").trim().slice(0,36);
+function saidAgain(){if(!rt||rt.repChecked||(rt.said||"").length<36)return false;rt.repChecked=true;
+ if(!rt.prevSaid||Date.now()-(rt.prevAt||0)>20000||sameStart(rt.said)!==sameStart(rt.prevSaid))return false;
+ rtSay({type:"response.cancel"});rtSay({type:"output_audio_buffer.clear"});
+ if(rt.bubble&&!rt.bubble.dataset.done){const r=rt.bubble.closest(".row")||rt.bubble;r.remove();rt.bubble=null}
+ vpLog("voice chatter: repeat stopped - \""+rt.said.slice(0,100)+"\"");rt.said="";return true}
 async function rtEvent(ev){const ty=ev.type||"";
+ if(ty==="response.done"&&rt&&(rt.said||"").trim()){rt.prevSaid=rt.said;rt.prevAt=Date.now()}
  if(preamble(ev))return;
  if(rt&&!rt.heard&&/^(response\.created|response\.(output_)?audio_transcript\.delta|output_audio_buffer\.started)$/.test(ty))spokeNow();
  if(ty==="input_audio_buffer.speech_started"){clearTimeout(rt.replyT);rt.replyPending=false;clearTimeout(rt.owedT);clearTimeout(rt.againT);if(rt.speaking&&!rt.noisy&&(rt.lvl||0)>Math.max(0.05,(rt.floor||0)*4)){rtSay({type:"response.cancel"});rtSay({type:"output_audio_buffer.clear"});rt.pendingCreate=false}rt.inTurn=true;rt.peak=0;rt.speaking=false;talkUI(true,"Listening…");rt.youLive="";
@@ -1918,8 +1927,9 @@ async function rtEvent(ev){const ty=ev.type||"";
  else if(ty==="conversation.item.input_audio_transcription.completed"){rtHeard(ev.transcript,ev.item_id)}   // 3 Nov 2026: junk is dropped silently, nothing on screen
  if(ty==="conversation.item.input_audio_transcription.completed"){const tx=junkHeard(ev.transcript)?"":(ev.transcript||"").trim();
   if(rt.userRow){if(tx)rt.userRow.querySelector(".bub").textContent=tx;else rt.userRow.remove();rt.userRow=null}else if(tx)row(esc(tx),true)}
- else if(ty==="response.created"){rt.inResp=true;rt.spoke=false;rt.said="";if(!LS.showing&&!rt.rendering)lsBlur(true)}
- else if(ty==="response.output_audio_transcript.delta"||ty==="response.audio_transcript.delta"){rt.said=(rt.said||"")+(ev.delta||"");rt.spoke=/\?/.test(rt.said);
+ else if(ty==="response.created"){rt.inResp=true;rt.spoke=false;rt.said="";rt.repChecked=false;if(!LS.showing&&!rt.rendering)lsBlur(true)}
+ else if(ty==="response.output_audio_transcript.delta"||ty==="response.audio_transcript.delta"){rt.said=(rt.said||"")+(ev.delta||"");
+  if(saidAgain())return;rt.spoke=/\?/.test(rt.said);
   if(!rt.bubble||rt.bubble.dataset.done){rt.bubble=row("",false).querySelector(".bub");rt.bubble.classList.add("askb")}
   rt.bubble.textContent+=ev.delta||"";rt.lastSdi=rt.bubble.textContent;voCap(rt.bubble.textContent,"sdi");rt.speaking=true;talkUI(true,"Speaking… (just talk to interrupt)");scrollEnd()}
  else if(ty==="output_audio_buffer.started"){rt.speaking=true}

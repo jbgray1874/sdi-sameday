@@ -2550,7 +2550,9 @@ class TheAssistantIsCalledSidTests(unittest.TestCase):
     def test_a_new_call_opens_with_sid_here_and_so_does_a_call_on_an_open_brief(self):
         who = new_chat()
         s = L.get_session(who, "Test", new=True)                         # nothing said yet: a brand-new call
-        self.assertIn(", Sid here - good to hear from you. What's the client after?", rt.instructions(s))
+        # 23 Nov 2026 (Muhammad): the pack is asked first, in the greeting
+        self.assertIn(", Sid here - good to hear from you. Is this one for the client pack, the internal brief, or both?",
+                      rt.instructions(s))
         _, s = say(who, "Boots want a counter unit", {"client": "Boots", "unit_type": "counter unit"})
         self.assertIn("Open with 'Hi, Sid here'", rt.instructions(s))   # the same brief, picked up on a call
         mid = rt.instructions(s, mid_call=True)                         # after each answer: no greeting again
@@ -3659,3 +3661,30 @@ console.log(JSON.stringify({r, logs}));"""
     def test_the_client_card_once_per_chat(self):
         page = (WORK / "brief_lite" / "lite_page.html").read_text(encoding="utf-8")
         self.assertIn("if(!brandShown.has(k_))", page)
+
+
+class FeedbackOn23Nov(unittest.TestCase):
+    """23 Nov 2026 - testing feedback: a sentence said twice; the estimate missing until a design was chosen."""
+
+    def test_the_same_sentence_again_is_stopped(self):
+        import shutil as sh
+        if not sh.which("node"):
+            self.skipTest("node not installed")
+        page = (WORK / "brief_lite" / "lite_page.html").read_text(encoding="utf-8")
+        code = page[page.index("const sameStart="):page.index("async function rtEvent(ev)")]
+        js = "const logs=[],sent=[];function vpLog(x){logs.push(x)}function rtSay(o){sent.push(o.type)}\n" + code + r"""
+let rt={prevSaid:"Free-standing, great. Have they mentioned a unit they like?",prevAt:Date.now(),said:"",repChecked:false};
+rt.said="Free-standing, great. Have they mentioned a unit they like, or sent";const a=saidAgain();
+rt={prevSaid:"Free-standing, great. Have they mentioned a unit they like?",prevAt:Date.now(),said:"",repChecked:false};
+rt.said="Brand colours, that works. Does it need lighting, an LED header";const b=saidAgain();
+console.log(JSON.stringify({a,b,sent,logs:logs.length}));"""
+        f = WORK / "repeat_check.js"
+        f.write_text(js, encoding="utf-8")
+        got = json.loads(subprocess.run(["node", str(f)], capture_output=True, text=True, check=True).stdout)
+        self.assertEqual((got["a"], got["b"]), (True, False))
+        self.assertEqual(got["sent"], ["response.cancel", "output_audio_buffer.clear"])
+
+    def test_the_estimate_starts_when_the_options_appear(self):
+        src = (WORK / "brief_lite" / "lite_app.py").read_text(encoding="utf-8")
+        i = src.index('craft.log("showroom", "options_shown"')
+        self.assertIn("auto_estimate_start(s, made[0][\"label\"])", src[i:i + 900])

@@ -393,9 +393,14 @@ def instructions(s, mid_call=False):
         + ("\n# Now\nThe call is under way: carry straight on from the last thing said - no greeting, no recap. "
            "BRIEF SO FAR is what's saved; anything the AM said that isn't in it yet, record with record_answers."
            if mid_call else "\n# Start\n"
+        # 23 Nov 2026 (Muhammad: "it doesn't ask which pack I want at the beginning"): the pack is the first question
         + (f"A short, warm greeting{(' by first name, ' + name) if name else ''}, right for the time of day, saying who you are, then ask "
-           f"what the client is after - like a colleague who's glad to hear from them ('Hi {name or 'there'}, Sid here - good to hear "
-           "from you. What's the client after?')." if not known.get("client") and not convo_text else
+           f"which pack they need - like a colleague who's glad to hear from them ('Hi {name or 'there'}, Sid here - good to hear "
+           "from you. Is this one for the client pack, the internal brief, or both?'). When they've answered (set_pack), ask "
+           "what the client is after." if not known.get("client") and not convo_text and not convo.pack_of(b) else
+           f"A short, warm greeting{(' by first name, ' + name) if name else ''}, right for the time of day, saying who you are, then ask "
+           f"what the client is after ('Hi {name or 'there'}, Sid here - good to hear from you. What's the client after?')."
+           if not known.get("client") and not convo_text else
            "This is the same brief you were already working on: don't greet them as new, and don't ask again for "
            "anything in BRIEF SO FAR or the conversation. Open with 'Hi, Sid here', then say in one short line where you got "
            "to, then ask the next question.")), c)
