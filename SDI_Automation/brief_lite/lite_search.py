@@ -67,6 +67,39 @@ class _Jobs:
 # although the job index (projects.db) was there and the service could read W:. Now the job index loads on its own,
 # and picture matching is an extra: on when the picture index and CLIP are there, and without them past jobs are
 # still found - by number, name, drawing titles, client and the kind of unit.
+# 24 Nov 2026: the indexes store K:\ and W:\ paths, but a session without the mapped drives (Remote Desktop on the
+# server, a service) can't see them. Each drive's UNC share, used when the letter isn't there. ai_switch.json
+# "drive_map" can change or add one without a release.
+DRIVE_MAP = {"K": r"\\sdi-dc01\shareddata$\Shared", "W": r"\\sdi-dc01\CAD"}
+_drive_ok = {}
+
+
+def _drive_map():
+    m = dict(DRIVE_MAP)
+    try:
+        j = json.load(open(os.path.join(BASE, "studio_data", "ai_switch.json"), encoding="utf-8"))
+        m.update({str(k).rstrip(":\\/").upper(): str(v) for k, v in (j.get("drive_map") or {}).items() if v})
+    except Exception:                                          # noqa: BLE001
+        pass
+    return m
+
+
+def real_path(p):
+    """A stored K:\ / W:\ path as this session can open it: as stored when its drive is there, else on the drive's UNC
+    share (DRIVE_MAP). Unchanged when neither is there (the caller's own exists-check then says so)."""
+    p = str(p or "")
+    m = re.match(r"^([A-Za-z]):[\\/](.*)$", p)
+    if not m:
+        return p
+    d = m.group(1).upper()
+    if d not in _drive_ok:
+        _drive_ok[d] = os.path.isdir(f"{d}:\\")
+    if _drive_ok[d]:
+        return p
+    root = _drive_map().get(d)
+    return os.path.join(root, m.group(2)) if root else p
+
+
 def _load():
     """The job index (projects.db): plain SQL, quick, no GPU. Everything that finds a past job needs only this."""
     with _lock:
@@ -605,7 +638,7 @@ def job_drawing_pages(job, n=2, hint=""):
         png = os.path.join(d, re.sub(r"[^\w-]+", "_", f"{job}_{nm}")[:120] + ".png")
         try:
             if not os.path.exists(png):
-                doc = fitz.open(src)
+                doc = fitz.open(real_path(src))
                 doc[0].get_pixmap(dpi=110).save(png)
                 doc.close()
             out.append(png)
@@ -627,6 +660,7 @@ def job_pictures(job, n=3, hint=""):
     out = []
     t0 = time.time()
     for src, _, _ in rows:
+        src = real_path(src)
         if os.path.exists(src):
             out.append(src)
         if len(out) >= n or time.time() - t0 > WALK_SECONDS:     # files moved on W: - don't check hundreds of them

@@ -2990,6 +2990,26 @@ def _fake_sdi_template(path):
     return path
 
 
+class MappedDrivesFallBackToTheirShareTests(unittest.TestCase):
+    """24 Nov 2026: the estimate check on the server found 12,079 estimates but opened none - the index says K:\\, and
+    a Remote Desktop session there has no K:. A drive that isn't there is read from its UNC share."""
+
+    def test_k_and_w_fall_back_to_their_shares(self):
+        import lite_search as ls
+        ls._drive_ok.clear()
+        try:
+            ls._drive_ok.update(K=False, W=False)
+            self.assertEqual(ls.real_path(r"K:\Estimating\x.xls").replace("/", "\\"),
+                             r"\\sdi-dc01\shareddata$\Shared\Estimating\x.xls")
+            self.assertTrue(ls.real_path(r"W:\12345\a.png").replace("/", "\\").startswith(r"\\sdi-dc01\CAD\12345"))
+            ls._drive_ok["K"] = True
+            self.assertEqual(ls.real_path(r"K:\Estimating\x.xls"), r"K:\Estimating\x.xls")    # mapped: as stored
+            self.assertEqual(ls.real_path(r"Q:\x"), r"Q:\x")                                    # unknown drive: unchanged
+            self.assertEqual(ls.real_path("/srv/a.png"), "/srv/a.png")
+        finally:
+            ls._drive_ok.clear()
+
+
 class CostedSDIsWayTests(unittest.TestCase):
     """24 Nov 2026 (James: "base one of your internal estimate views on [SDI's estimate sheet]"): the AI writes the
     bill of materials and route; SDI's own sheet - its rates and its sums - prices it. Checked against a completed SDI

@@ -401,7 +401,9 @@ def main():
         import sdi_sheet
         SHEET_RATES = sdi_sheet.load_rates()
         print("AI estimate costed SDI's way, from " + sdi_sheet.TEMPLATE if SHEET_RATES else
-              "No SDI estimate template on the server - testing the AI's own pricing", flush=True)
+              ("SDI's estimate template is at " + sdi_sheet.TEMPLATE + " but no rates could be read from it"
+               if os.path.exists(sdi_sheet.TEMPLATE) else "No SDI estimate template at " + sdi_sheet.TEMPLATE)
+              + ("" if SHEET_RATES else " - testing the AI's own pricing"), flush=True)
 
     import lite_search as ls
     out = os.path.join(HERE, "out", "estimate_check", datetime.now().strftime("%Y-%m-%d_%H%M"))
@@ -411,11 +413,15 @@ def main():
 
     setups = setup_from_quantities(rows)
     print(f"{len(setups)} jobs estimated at 2+ quantities (setup worked out from those)", flush=True)
+    for r in rows:                                   # K:\ as stored, or its UNC share when K: isn't mapped here
+        r["path"] = ls.real_path(r.get("path"))
     recent = [r for r in rows if (year_of(r["est_date"]) or 0) >= a.since and r.get("path") and os.path.exists(r["path"])]
     random.Random(a.seed).shuffle(recent)
     sheets = [read_sheet_figures(r["path"]) for r in recent[:a.sheets]]
     header = next((s_["header"] for s_ in sheets if s_ and s_["header"]), [])
-    print(f"read {sum(1 for s_ in sheets if s_)} sheets for rates and one-off lines", flush=True)
+    print(f"read {sum(1 for s_ in sheets if s_)} sheets for rates and one-off lines"
+          + ("" if recent else f" - none of the estimate files could be opened (e.g. {rows[0].get('path') if rows else '-'})"),
+          flush=True)
 
     best = {}
     for r in rows:
