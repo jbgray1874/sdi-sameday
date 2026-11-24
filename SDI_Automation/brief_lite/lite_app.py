@@ -1664,6 +1664,25 @@ def estimate_for_pack(s, label):
 
 
 AI_ESTIMATE_RUNS = 3          # the AI estimate is costed this many times at once; the middle one is kept
+_SDI_RATES = {"mtime": None, "v": None}
+
+
+def sdi_rates():
+    """SDI's rates off its blank estimate workbook (studio_data/estimate_template.xlsx - kept off GitHub), read again
+    when the file changes; None when it isn't there (the AI estimate then prices lines itself, as before)."""
+    import sdi_sheet
+    try:
+        mt = os.path.getmtime(sdi_sheet.TEMPLATE)
+    except OSError:
+        return None
+    if _SDI_RATES["mtime"] != mt:
+        try:
+            _SDI_RATES.update(mtime=mt, v=sdi_sheet.load_rates())
+        except Exception as ex:                              # noqa: BLE001
+            print("SDI estimate template:", str(ex)[:160], flush=True)
+            _SDI_RATES.update(mtime=mt, v=None)
+    return _SDI_RATES["v"]
+
 
 
 def ai_estimate_for(s):
@@ -1683,7 +1702,7 @@ def ai_estimate_for(s):
             return ""
         content = ([{"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": img_b64}}]
                    if img_b64 else []) + [{"type": "text", "text": prompt}]
-        r = claude_create(timeout=120, model=DIRECTOR_MODEL, max_tokens=3000, output_config={"effort": "low"},
+        r = claude_create(timeout=150, model=DIRECTOR_MODEL, max_tokens=6000, output_config={"effort": "low"},
                           messages=[{"role": "user", "content": content}])
         try:
             log_cost(s["id"], "ai-estimate", usd(DIRECTOR_MODEL, r.usage))
@@ -1694,17 +1713,30 @@ def ai_estimate_for(s):
     from concurrent.futures import ThreadPoolExecutor
     qty = ballpark._qty(b.get("volume_qty"))
     norms = ai_estimate.load_norms()
+    rates = sdi_rates()           # 24 Nov 2026: SDI's own estimate sheet on the server -> costed SDI's way
     errs = []
 
     def one(_):
         try:
-            return ai_estimate.estimate(b, img if img and os.path.exists(img) else None, quotes, ask, qty, norms=norms)
+            return ai_estimate.estimate_best(b, img if img and os.path.exists(img) else None, quotes, ask, qty,
+                                             norms=norms, rates=rates)
         except Exception as ex:                              # noqa: BLE001
             errs.append(type(ex).__name__)
             return None
     with ThreadPoolExecutor(max_workers=AI_ESTIMATE_RUNS) as ex:
         runs = list(ex.map(one, range(AI_ESTIMATE_RUNS)))
     e = ai_estimate.steady(runs, qty)
+    if e and e.get("method") == "sdi":
+        try:                     # SDI's own workbook with this bill of materials and route in - a DRAFT to check
+            import sdi_sheet
+            path = os.path.join(OUT, f"{s['id']}_SDI_estimate_{b.get('_est_for') or (base.get('label') or 'A')}.xlsx")
+            sdi_sheet.fill_workbook(rates, e["plan"], path, {
+                "customer": b.get("client"), "description": b.get("unit_type"), "quantity": qty or 10,
+                "note": "DRAFT from the concept render - SDI Live's AI wrote the bill of materials and route; SDI's "
+                        "rates price it. Check every line before quoting."})
+            e["workbook"] = path
+        except Exception as ex:                              # noqa: BLE001
+            print("SDI workbook:", str(ex)[:160], flush=True)
     if e:
         return e, ""
     return None, (f"the model didn't answer ({errs[0]})" if errs else "the model gave no costed lines")
@@ -1719,7 +1751,8 @@ def ai_estimate_turn(s, ch):
         return ch, s
     e["label"] = ((_est_render(s) or {}).get("label")) or "A"
     s["brief"]["_ai_estimate"] = {k: e.get(k) for k in ("prices", "unit_variable", "setup_total", "confidence", "label", "split",
-                                                         "per_unit", "setup", "assumptions", "risk", "yardstick")}
+                                                         "per_unit", "setup", "assumptions", "risk", "yardstick",
+                                                         "method", "workbook", "sdi", "runs")}
     save_session(s)
     ch.ai_estimate(e, ai_estimate.say(e))
     return ch, s
@@ -4370,6 +4403,9 @@ def handle(number, name, text, image_path=None, voice=False, ch=None, new=False,
         save_session(s)
         b["_sheet_sig"], b["_sheet_pdf"] = sig, sheet
         file_pack(s, sheet, "client pack")
+        auto_ = AUTO_EST.get(s["id"]) or {}               # 24 Nov 2026: and the estimate on SDI's own sheet, beside it
+        if auto_.get("label") == label and (auto_.get("data") or {}).get("workbook"):
+            file_pack(s, auto_["data"]["workbook"], "SDI estimate sheet")
         save_session(s)
         ch.document(sheet, f"Option {label} client pack - the concept, specification, views, sizes"
                     + (", indicative budget" if est_ and pack_markup_ is not None else "")
@@ -6176,6 +6212,23 @@ def api_page_problem():
     who = signed_in_user() or "not signed in"
     print(f"[page] {datetime.now():%H:%M:%S} {who} chat={chat or '-'} {what}", flush=True)
     return jsonify({"ok": True})
+
+
+@app.route("/api/sdi-workbook/<sid>")
+def api_sdi_workbook(sid):
+    """24 Nov 2026: the AI estimate written into SDI's own estimate workbook - a DRAFT for the estimators."""
+    import glob
+    if not re.fullmatch(r"[A-Za-z0-9_-]{4,64}", sid or ""):
+        abort(404)
+    auto = AUTO_EST.get(sid) or {}
+    path = (auto.get("data") or {}).get("workbook") if auto.get("kind") == "ai" else None
+    if not path or not os.path.exists(path):        # the newest one made for this chat (after a restart too)
+        found = sorted(glob.glob(os.path.join(OUT, f"{sid}_SDI_estimate_*.xlsx")), key=os.path.getmtime)
+        path = found[-1] if found else None
+    if not path or os.path.dirname(os.path.abspath(path)) != os.path.abspath(OUT):
+        abort(404)
+    return send_file(path, as_attachment=True, download_name=os.path.basename(path).replace(f"{sid}_", "").replace(
+        "SDI_estimate", "SDI_estimate_DRAFT"))
 
 
 @app.route("/api/auto-estimate/<sid>")

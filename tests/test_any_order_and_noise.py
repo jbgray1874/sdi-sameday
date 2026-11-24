@@ -2966,6 +2966,113 @@ class MoreViewsOfTheChosenDesignTests(unittest.TestCase):
         self.assertIn('"Every angle"', src)
 
 
+def _fake_sdi_template(path):
+    """A stand-in for SDI's blank estimate workbook, laid out the same, with MADE-UP rates (the real one stays on the
+    server - the repository is public)."""
+    import openpyxl
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Estimate"
+    ws["L3"], ws["L5"], ws["AF137"], ws["M227"] = 1000, 1000, 5, 0
+    ws["M225"] = "=((M147+M223)/(100%-M227))/0.9"
+    for i, (name, rate, dept, setup) in enumerate([("Fold", 60, "FOLD", 30), ("Weld (CO2)", 60, "WELD", 30),
+                                                   ("Laser (Metal)", 120, "LASM", 10), ("P.Coat", 300, "P/C", 15),
+                                                   ("Assemble/pack (Metal)", 30, "PACM", 15)]):
+        for c, v in zip((8, 9, 10, 11), (name, rate, dept, setup)):
+            ws.cell(235 + i, c, v)
+    for i, (g, sp) in enumerate([(1, 100), (2, 50), (5, 20)]):
+        ws.cell(93 + i, 25, g)
+        ws.cell(93 + i, 26, sp)
+    for i, (g, m) in enumerate([(3, 20000), (5, 6000)]):
+        ws.cell(271 + i, 8, g)
+        ws.cell(271 + i, 9, m)
+    wb.save(path)
+    return path
+
+
+class CostedSDIsWayTests(unittest.TestCase):
+    """24 Nov 2026 (James: "base one of your internal estimate views on [SDI's estimate sheet]"): the AI writes the
+    bill of materials and route; SDI's own sheet - its rates and its sums - prices it. Checked against a completed SDI
+    sheet (12517) to the penny; here against hand-worked sums on made-up rates."""
+
+    def setUp(self):
+        import tempfile
+        import sdi_sheet
+        self.dir = tempfile.mkdtemp()
+        self.rates = sdi_sheet.load_rates(_fake_sdi_template(os.path.join(self.dir, "t.xlsx")))
+        self.plan = {"sheet_parts": [{"description": "Side", "qty": 2, "length_mm": 1000, "width_mm": 400, "gauge_mm": 1}],
+                     "wire_parts": [{"description": "Rail", "qty": 4, "gauge_mm": 5, "length_mm": 600}],
+                     "bought_in": [{"description": "Castor", "qty": 4, "price_gbp": 2.5}],
+                     "operations": [{"operation": "Fold", "part": "Side", "qty": 8, "per_hour": 200},
+                                    {"operation": "laser metal", "part": "ignored - worked out from the part", "qty": 2,
+                                     "per_hour": 1}]}
+
+    def test_the_rates_come_off_sdis_workbook(self):
+        r = self.rates
+        self.assertEqual((r["steel_t"], r["wire_t"], r["powder_kg"], r["downtime"], r["rebate"]), (1000, 1000, 5, 0.9, 0))
+        self.assertEqual(r["ops"]["Fold"], {"dept": "FOLD", "rate": 60, "setup": 30})
+
+    def test_sdis_sums_by_hand(self):
+        import math
+        import sdi_sheet as ss
+        self.assertEqual(ss.nest(1000, 400), 2 * 2)               # INT(1170/410) x INT(2500/1020)
+        st = ss.steel_part(self.rates, self.plan["sheet_parts"][0])
+        sheet_cost = 1000 * (2.5 * 1.25 * 1 * 7.85) / 1000
+        self.assertAlmostEqual(st["cost"], math.ceil(sheet_cost / 4 * 100) / 100 * 2 * 1.04, places=6)
+        self.assertAlmostEqual(st["laser_per_hour"], 3600 / (60 / 4 + 2800 / 100), places=6)
+        w = ss.wire_part(self.rates, self.plan["wire_parts"][0])
+        self.assertAlmostEqual(w["cost"], 1000 / 6000 / 1000 * 600 * 4 * 1.04, places=6)
+        c = ss.cost(self.rates, self.plan, 10)
+        fold = 60 / 200 * 8 + 60 / 60 * 30 / 10
+        laser = 120 / st["laser_per_hour"] * 2 + 120 / 60 * 10 / 10
+        self.assertAlmostEqual(c["labour"], fold + laser, places=2)    # the AI's own laser line is ignored
+        powder = 2 * (1.0 * 0.4 * 2) / 6 * 5
+        self.assertAlmostEqual(c["material"], st["cost"] + w["cost"] + 2.5 * 4 * 1.04 + powder, places=2)
+        self.assertAlmostEqual(c["unit"], (c["material"] + c["labour"]) / 0.9, places=2)
+
+    def test_it_feeds_the_cards_and_the_agreed_figure_unchanged(self):
+        import ai_estimate
+        import sdi_sheet as ss
+        e = ai_estimate.from_sheet(self.plan, self.rates, 10)
+        self.assertEqual(e["method"], "sdi")
+        at10 = next(p["unit_gbp"] for p in e["prices"] if p["qty"] == 10)
+        self.assertAlmostEqual(e["unit_variable"] + e["setup_total"] / 10, at10, delta=0.05)
+        self.assertAlmostEqual(at10, ss.cost(self.rates, self.plan, 10)["unit"], delta=0.01)
+        at1 = next(p["unit_gbp"] for p in e["prices"] if p["qty"] == 1)
+        self.assertGreater(at1, at10)                             # set-up minutes over fewer units
+
+    def test_the_ai_is_asked_for_a_bill_of_materials_in_sdis_terms(self):
+        import ai_estimate
+        seen = {}
+        e = ai_estimate.estimate_best({"unit_type": "FSDU"}, None, [], lambda p, i: seen.update(p=p) or json.dumps(self.plan),
+                                      10, rates=self.rates)
+        self.assertIn("Fold, Weld (CO2), P.Coat", seen["p"])
+        self.assertNotIn("Laser (Metal),", seen["p"])
+        self.assertNotIn("£60", seen["p"])                         # no rates sent - the sheet prices it
+        self.assertEqual(e["method"], "sdi")
+        old = ai_estimate.estimate_best({"unit_type": "FSDU"}, None, [], lambda p, i: "{}", 10, rates=None, norms={})
+        self.assertIsNone(old)                                     # no workbook: the old way (here, no lines)
+
+    def test_the_draft_workbook_is_sdis_own_sheet_filled_in(self):
+        import openpyxl
+        import sdi_sheet as ss
+        path = ss.fill_workbook(self.rates, self.plan, os.path.join(self.dir, "out.xlsx"),
+                                {"customer": "Boots", "description": "FSDU", "quantity": 10})
+        ws = openpyxl.load_workbook(path)["Estimate"]
+        self.assertEqual((ws["D3"].value, ws["D6"].value, ws["C93"].value, ws["H93"].value), ("Boots", 10, "Side", 1))
+        self.assertEqual((ws["C11"].value, ws["K11"].value), ("Castor", 4))
+        self.assertIsNone(ws["C12"].value)                         # powder: the sheet adds it itself
+        self.assertEqual((ws["C83"].value, ws["F83"].value), ("Rail", 5))
+        self.assertEqual([ws.cell(r, 3).value for r in (151, 152)], ["Laser (Metal)", "Fold"])
+
+    def test_the_real_rates_never_go_in_git(self):
+        import sdi_sheet
+        self.assertIn("studio_data", sdi_sheet.TEMPLATE)
+        ignore = (Path(__file__).resolve().parent.parent / ".gitignore").read_text(encoding="utf-8")
+        self.assertIn("studio_data/", ignore)
+        self.assertEqual(L.app.test_client().get("/api/sdi-workbook/../etc").status_code, 404)
+
+
 class OneAgreedFigureForTheClientTests(unittest.TestCase):
     """24 Nov 2026 (James: "a rounded / what we deem accurate number for the client and the internal workings on the
     documents only internal see"): the AI and past-jobs estimates weighed into one figure; the AI run three times."""

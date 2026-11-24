@@ -58,6 +58,7 @@ SETUP_WORDS = re.compile(r"set ?up|tooling|\btool\b|jig|fixture|programm|first[-
 
 kind_of = ai_estimate.kind_of
 RUNS = 3
+SHEET_RATES = None        # SDI's rates from its blank estimate workbook - the AI estimate is then costed SDI's way
 
 
 def year_of(d):
@@ -218,7 +219,7 @@ def ask_ai(spend):
     def ask(prompt, img_b64):
         content = ([{"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": img_b64}}]
                    if img_b64 else []) + [{"type": "text", "text": prompt}]
-        r = client().messages.create(model=DIRECTOR_MODEL, max_tokens=3000, output_config={"effort": "low"},
+        r = client().messages.create(model=DIRECTOR_MODEL, max_tokens=6000, output_config={"effort": "low"},
                                      messages=[{"role": "user", "content": content}])
         spend.add(DIRECTOR_MODEL, r.usage)
         return "".join(getattr(x, "text", "") for x in r.content)
@@ -289,7 +290,8 @@ def check_one(job, whole, spend, ls, norms_in):
            "sdi_labour": round(to_today(float(job["labour_cost"]), job["est_date"]), 2) if job.get("labour_cost") else None}
     def one_run(_):                           # as SDI Live: costed RUNS times at once, the middle one kept
         try:
-            return ai_estimate.estimate(brief, None, basis, lambda p, _i: ask_ai(spend)(p, b64), q, norms=norms_in)
+            return ai_estimate.estimate_best(brief, None, basis, lambda p, _i: ask_ai(spend)(p, b64), q, norms=norms_in,
+                                             rates=SHEET_RATES)
         except Exception as ex:                                # noqa: BLE001
             row["ai_error"] = type(ex).__name__
             return None
@@ -389,11 +391,17 @@ def main():
     ap.add_argument("--sheets", type=int, default=150, help="estimate sheets to read for rates and one-off lines")
     ap.add_argument("--dry", action="store_true", help="only the free part: setup and rates from the sheets")
     ap.add_argument("--seed", type=int, default=7)
+    ap.add_argument("--old-ai", action="store_true", help="test the AI's own line-by-line pricing, not SDI's sheet")
     ap.add_argument("--use-norms", action="store_true", help="test the AI estimate WITH studio_data\\estimate_norms.json "
                                                              "(after calibrating, to see it got closer)")
     a = ap.parse_args()
-    global RUNS
+    global RUNS, SHEET_RATES
     RUNS = max(1, a.runs)
+    if not a.old_ai:
+        import sdi_sheet
+        SHEET_RATES = sdi_sheet.load_rates()
+        print("AI estimate costed SDI's way, from " + sdi_sheet.TEMPLATE if SHEET_RATES else
+              "No SDI estimate template on the server - testing the AI's own pricing", flush=True)
 
     import lite_search as ls
     out = os.path.join(HERE, "out", "estimate_check", datetime.now().strftime("%Y-%m-%d_%H%M"))
@@ -472,7 +480,8 @@ def main():
     with open(os.path.join(out, "estimate_norms.proposed.json"), "w", encoding="utf-8") as fh:
         json.dump(nm, fh, indent=2)
 
-    L = [f"SDI Live estimate check - {datetime.now():%d %b %Y %H:%M}" + (" - WITH SDI's figures" if a.use_norms else ""), ""]
+    L = [f"SDI Live estimate check - {datetime.now():%d %b %Y %H:%M}" + (" - WITH SDI's figures" if a.use_norms else "")
+         + (" - AI estimate costed on SDI's sheet" if SHEET_RATES else " - AI estimate priced by the AI itself"), ""]
     if results:
         L += [f"{len(results)} past SDI jobs estimated by both of SDI Live's estimates and compared with SDI's own estimate "
               f"sheet (all in today's money). AI spend ${spend.usd:.2f}.", "",

@@ -203,3 +203,101 @@ def say(e):
     return (f"AI estimate - internal, not for the client: a cost to make of about £{at['unit_gbp']:,.0f} a unit at {at['qty']} "
             f"(£{e['unit_variable']:,.0f} a unit to make, plus £{e['setup_total']:,.0f} one-off setup shared over the "
             f"order) - cost before margin, not a selling price. Confidence: {e['confidence'].split(' - ')[0]}.")
+
+
+# ── 24 Nov 2026: costed SDI's way - the AI writes the bill of materials and route, SDI's own sheet prices them ──────
+# James: "base one of your internal estimate views on that [SDI's estimate sheet]". With SDI's blank workbook on the
+# server (sdi_sheet.TEMPLATE), the model no longer names a single price for labour or steel: it lists what's in the
+# unit and how SDI would make it, in the sheet's own terms, and sdi_sheet.cost does the sums with SDI's rates.
+SHEET_PROMPT = """You are a senior estimator at SDI Displays (UK retail display manufacturer: sheet steel, wire, tube,
+acrylic, timber, print, LED). From the picture and brief below, write the BILL OF MATERIALS and MANUFACTURING ROUTE for
+ONE unit, the way SDI's estimate sheet wants it. Do NOT price labour or steel - SDI's sheet does that from your
+quantities. Think of how the unit is really made: every panel, shelf, bracket, upright and fixing.
+
+THE BRIEF:
+{brief}
+
+SDI'S PAST QUOTES FOR THE CLOSEST JOBS (per unit, today's money) - a sense of scale only:
+{quotes}
+
+SDI'S OPERATIONS (use these exact names): {ops}
+The Laser (Metal) time of each steel part is worked out by SDI's sheet from its size - don't list it.
+
+Answer with JSON only:
+{{"sheet_parts": [{{"description": "...", "qty": <per unit>, "length_mm": <flat blank>, "width_mm": <flat blank>,
+   "gauge_mm": <0.7-10>, "holes": <count>, "internal_cut_mm": <internal cut length>, "powder_coat": true}}],
+ "wire_parts": [{{"description": "...", "qty": <per unit>, "gauge_mm": <2-10>, "length_mm": <cut length>}}],
+ "other_sheet": [{{"description": "...", "material": "e.g. 5mm clear acrylic / 18mm MDF", "qty": <per unit>,
+   "length_mm": ..., "width_mm": ..., "thickness_mm": ..., "sheet_length_mm": 2440, "sheet_width_mm": 1220,
+   "cost_per_sheet": <GBP, UK trade 2026>}}],
+ "bought_in": [{{"description": "fixings, castors, LED strip and driver, graphics, packaging box...", "qty": <per unit>,
+   "price_gbp": <each, UK trade 2026>}}],
+ "operations": [{{"operation": "<one of SDI's operations>", "part": "<which part(s)>", "qty": <times per unit>,
+   "per_hour": <how many of these an operator does an hour>}}],
+ "assumptions": ["..."], "biggest_risk": "..."}}
+Flat blank sizes for folded parts (include the flanges). Fold: one line per part with qty = parts x bends. Every
+welded, coated, assembled and packed step gets its line. Be realistic, not generous."""
+
+
+def plan_from(raw):
+    """The model's JSON -> the plan, or {} - lenient about a stray word around it."""
+    m = re.search(r"\{.*\}", raw or "", re.S)
+    try:
+        got = json.loads(m.group(0)) if m else {}
+    except ValueError:
+        return {}
+    return got if isinstance(got, dict) else {}
+
+
+def from_sheet(plan, rates, brief_qty=None, yardstick=None):
+    """A plan costed by SDI's sheet -> the same shape as work_out (so the cards, the agreed figure and the pack all take
+    it as they are), plus 'method': 'sdi', the plan and SDI's material / labour per unit. None without parts."""
+    import sdi_sheet
+    if not (plan.get("sheet_parts") or plan.get("wire_parts") or plan.get("other_sheet") or plan.get("bought_in")):
+        return None
+    q = int(brief_qty or 10)
+    c = sdi_sheet.cost(rates, plan, q)
+    k = 1 / (1 - (rates.get("rebate") or 0.0)) / (rates.get("downtime") or sdi_sheet.DOWNTIME)
+    per = [{"group": ln["group"], "what": ln["what"][:140], "gbp": round(ln["gbp"] * k, 2)} for ln in c["lines"]]
+    setup = [{"what": f"Set-up: {ln['operation']} ({ln['setup_mins']:g} min)", "gbp": round(ln["setup_total"] * k, 2)}
+             for ln in c["labour_lines"] if ln["setup_total"]]
+    qtys = sorted({1, 10} | ({int(brief_qty)} if brief_qty else set()))
+    prices = sdi_sheet.prices(rates, plan, qtys)
+    unit_var = round(sum(x["gbp"] for x in per), 2)
+    split = {g: round(sum(x["gbp"] for x in per if x["group"] == g), 2) for g in GROUPS}
+    conf = "medium - SDI's rates and sums on the AI's bill of materials and route"
+    if yardstick:
+        at = next((p["unit_gbp"] for p in prices if p["qty"] == (yardstick.get("qty") or 1)), prices[0]["unit_gbp"])
+        if at < 0.4 * yardstick["today"] or at > 2.5 * yardstick["today"]:
+            conf = (f"low - a long way from SDI's {yardstick['job']} (£{yardstick['today']:,.0f} a unit today); check the "
+                    "bill of materials")
+    return {"per_unit": per, "setup": setup, "unit_variable": unit_var, "setup_total": round(sum(x["gbp"] for x in setup), 2),
+            "prices": prices, "split": {kk: v for kk, v in split.items() if v}, "confidence": conf,
+            "assumptions": [str(a)[:160] for a in (plan.get("assumptions") or [])][:6],
+            "risk": str(plan.get("biggest_risk") or "")[:200], "yardstick": yardstick, "method": "sdi", "plan": plan,
+            "sdi": {"material": c["material"], "labour": c["labour"], "at_qty": q, "powder_kg": c["powder_kg"]},
+            "kind": kind_of(" ".join(str(x.get("description", "")) for x in (plan.get("sheet_parts") or [])[:3])),
+            "calibrated": False}
+
+
+def estimate_sdi(brief, image_path, quotes_today, ask, brief_qty=None, rates=None):
+    """The AI's bill of materials and route for the picture, costed by SDI's own sheet (sdi_sheet). None if no plan."""
+    qs = "\n".join(f"- {q['job']} {q.get('name', '')}: £{q['today']:,.0f} a unit at qty {q.get('qty') or 1}"
+                   for q in quotes_today[:5]) or "- none close enough"
+    img = None
+    if image_path:
+        try:
+            with open(image_path, "rb") as fh:
+                img = base64.b64encode(fh.read()).decode("ascii")
+        except OSError:
+            img = None
+    ops = ", ".join(n for n in rates["ops"] if n != "Laser (Metal)")
+    raw = ask(SHEET_PROMPT.format(brief=brief_text(brief), quotes=qs, ops=ops), img)
+    return from_sheet(plan_from(raw), rates, brief_qty, quotes_today[0] if quotes_today else None)
+
+
+def estimate_best(brief, image_path, quotes_today, ask, brief_qty=None, norms=None, rates=None):
+    """SDI's way when SDI's sheet is on the server (rates), else the model's own line-by-line costing."""
+    if rates:
+        return estimate_sdi(brief, image_path, quotes_today, ask, brief_qty, rates)
+    return estimate(brief, image_path, quotes_today, ask, brief_qty, norms=norms)
