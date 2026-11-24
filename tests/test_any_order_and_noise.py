@@ -3834,3 +3834,45 @@ class PacksAreFiledOnTheShare(unittest.TestCase):
 
     def test_the_default_is_the_share_k_stands_for(self):
         self.assertEqual(L.PACKS_FOLDER, r"\\sdi-dc01\shareddata$\Shared\IT\AI & Automation\Design\SDI Scout\Tested client packs")
+
+
+class ChatsOf23And24Nov(unittest.TestCase):
+    """24 Nov 2026 - from reading yesterday's and today's chats."""
+
+    def test_the_estimation_is_an_estimate(self):
+        for t in ("give me the estimation of this render", "Could you do the estimation for this?", "estimate for option B"):
+            with self.subTest(t=t):
+                self.assertTrue(L.PRICE_ASK.search(t))
+
+    def test_make_the_client_pack_for_option_a_is_not_a_change(self):
+        self.assertTrue(L.PACK_FOR.search("make the client pack for thsi option a"))
+        self.assertFalse(L.CHANGE_DETAIL.search(L.PACK_FOR.sub("", "make the client pack for thsi option a")))
+        self.assertTrue(L.CHANGE_DETAIL.search(L.PACK_FOR.sub("", "make the client pack but with a blue header")))
+
+    def test_no_past_job_close_enough_gives_the_ai_estimate(self):
+        src = (WORK / "brief_lite" / "lite_app.py").read_text(encoding="utf-8")
+        i = src.index("def ballpark_turn(s, ch):")
+        self.assertIn("return ai_estimate_turn(s, ch)", src[i:i + 1200])
+
+    def test_never_a_goodbye_the_am_didnt_start(self):
+        self.assertIn("Never say goodbye or wind the call up yourself", open(rt.__file__, encoding="utf-8").read())
+
+    def test_at_the_end_of_is_not_window(self):
+        import sqlite3
+        con = sqlite3.connect(":memory:", check_same_thread=False)
+        con.row_factory = sqlite3.Row
+        con.execute("CREATE TABLE messages (session, dir, text, at)")
+        con.execute("INSERT INTO messages VALUES ('x','in','At the end of','2026-11-24T10:00:00')")
+
+        class C:
+            def execute(self, *a):
+                return con.execute(*a)
+
+            def close(self):
+                pass
+        keep = L.db
+        try:
+            L.db = lambda: C()
+            self.assertIn("placement", L._answers_not_heard({"id": "x", "brief": {}}, {"placement": "Window"}))
+        finally:
+            L.db = keep

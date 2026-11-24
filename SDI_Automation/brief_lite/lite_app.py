@@ -1453,7 +1453,8 @@ VIEWS_ASK = re.compile(r"\b(more|other|different|extra|all( the)?|several|multip
 
 
 PRICE_ASK = re.compile(r"\b(budget(ary)? (price|pricing|cost|figure|number)s?|ballpark|guide price|rough (price|cost)|"
-                       r"quick (estimate|price)|(past|old|previous|similar)[- ]jobs? (estimate|price|pricing)|estimate (from|on|off) (past|old|previous|similar) jobs|(get|give me|do|run) (an? |the )?estimate|price (it|this|that) up|"
+                       r"quick (estimate|price)|(past|old|previous|similar)[- ]jobs? (estimate|price|pricing)|estimate (from|on|off) (past|old|previous|similar) jobs|(get|give me|do|run|need|want|make) (me )?(an? |the |my )?estimat(e|ion)s?|estimat(e|ion)s? (of|for|on) (this|that|it|the|option)|"
+                       r"price (it|this|that) up|cost (it|this|that) up|"
                        r"indicative (price|cost)|(any|some) (budget )?pricing|how much (would|will|does|might) (it|this|that|one|"
                        r"each|they) (cost|be)|what (would|will|does|might) (it|this|that|each) cost|cost per unit|"
                        r"price per unit|unit (price|cost))\b", re.I)
@@ -1696,9 +1697,9 @@ def ballpark_turn(s, ch):
         return ch, s
     bp = ballpark_for(s)
     if not bp:
-        ch.text("I haven't got a past SDI quote close enough to give a guide price for this one. Estimate Lite can price "
-                "it part by part from the concept - say \"Estimate Lite\" when there's a design on screen.")
-        return ch, s
+        # 24 Nov 2026 (Muhammad's chat: "Quick estimate for option B" -> "say Estimate Lite", which is off): the AI estimate
+        ch.text("SDI hasn't a past job close enough to price this from, so here's the AI estimate - costed line by line.")
+        return ai_estimate_turn(s, ch)
     s["brief"]["_ballpark"] = {k: v for k, v in bp.items() if k != "basis"}
     save_session(s)
     ch.ballpark(bp, ballpark.say(bp))
@@ -3421,6 +3422,13 @@ def handle(number, name, text, image_path=None, voice=False, ch=None, new=False,
             t["reply"] = (t.get("reply") or "") + "\n\n_🎨 SDI Live - type *menu* for SDI Debrief Intelligence (studio jobs), *stop* to close this brief._"
     # A different client than the open brief means a new brief - never carry Boots' unit over into a Lindt enquiry
     upd = t.get("updates") or {}
+    # 24 Nov 2026 (Matt, typed: account manager? "me!" -> "I can't tell who 'me' is"): it's whoever is signed in
+    me_ = who_of(s)
+    if me_ and t_override is None and re.match(r"^\W*(me|myself|it'?s me|that'?s me|i am|i'?m the (am|account manager))\W*$",
+                                               text or "", re.I) and ("account_manager" in (b.get("_asking") or [])
+                                                                     or re.search(r"\baccount manager\b", _last_bot_line(s["id"]), re.I)):
+        upd["account_manager"] = me_
+        t["updates"] = upd
     # 28 Oct 2026: "SDI Displays" (a misheard pack answer) was saved as the client - then "Tesco" counted as a new client
     # and split the brief in two. SDI is us, never the client.
     if re.match(r"\s*sdi\b", str(upd.get("client") or ""), re.I):
@@ -4067,6 +4075,10 @@ def handle(number, name, text, image_path=None, voice=False, ch=None, new=False,
     if (t.get("intent") == "views" or (t_override is None and VIEWS_ASK.search(text or ""))) \
             and any(v.get("kind") == "render" for v in s["visuals"]):
         return views_turn(s, ch, (t.get("views_text") or "") + " " + (text or ""))
+    if intent == "change_visual" and PACK_FOR.search(text or "") and not CHANGE_DETAIL.search(re.sub(PACK_FOR, "", text or "")):
+        # 24 Nov 2026 (Muhammad: "make the client pack for this option a" -> "making Option B: Option A with your changes")
+        intent = "approve_visual"
+        t["change_request"] = text
     if intent == "change_visual" and NO_CHANGE.search(text or ""):
         intent = "answer"                     # 23 Nov 2026 (Matt): "I did not ask for any changes" is not a change
         ch.text("Sorry - nothing's being changed. What would you like to do next?")
@@ -5509,6 +5521,10 @@ def change_is_clear(line, sid=None):
     return False
 
 
+PACK_FOR = re.compile(r"\b(make|send|do|create|generate|give me|build|want|need)\b.{0,25}\b(client pack|client sheet|the pack|"
+                      r"finali[sz]e|its ga)\b", re.I)
+
+
 def half_heard_change(line):
     """Two words or fewer that don't say what to change ('Photos laptop', 'Jump route') - not a change to draw."""
     # 20 Nov 2026 (Matt and Andy: "Show me." -> "Sorry, I didn't quite catch that"): Sid had told them to say "show
@@ -5540,6 +5556,14 @@ def _voice_offered_visual(sid):
                     (sid,)).fetchone()
     con.close()
     return bool(r and OFFERED_VISUAL.search(r["text"] or ""))
+
+
+def _last_bot_line(sid):
+    con = db()
+    r = con.execute("SELECT text FROM messages WHERE session=? AND dir='out' AND text IS NOT NULL ORDER BY at DESC LIMIT 1",
+                    (sid,)).fetchone()
+    con.close()
+    return (r["text"] if r else "") or ""
 
 
 def _last_am_line(sid):
@@ -5736,7 +5760,9 @@ def _answers_not_heard(s, updates):
         alpha = [w for w in vw if not w.isdigit()]
         if _date_field(k) and said_date:
             continue
-        if alpha and not any(like(w) for w in alpha) and len(last.split()) <= 3 and not SHORT_OK.match(_digits(last)):
+        # 24 Nov 2026 (Muhammad: "At the end of" saved as "Window"): a few words that share nothing with the answer don't
+        # answer it - up to six words now (was three)
+        if alpha and not any(like(w) for w in alpha) and len(last.split()) <= 6 and not SHORT_OK.match(_digits(last)):
             bad[k] = (f"the AM's last words \"{last[:80]}\" don't answer it - probably noise or half-heard. Say you didn't "
                       "quite catch that and ask the SAME question again. Do not move on.")
     return bad

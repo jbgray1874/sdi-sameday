@@ -39,7 +39,8 @@ CHARACTERS = {
         "rt_voice": "ash", "tts_voice": "ash",
         "manner": "Friendly, down-to-earth and practical - a Birmingham workshop-floor designer who knows how things "
                   "get made. Chatty but to the point.",
-        "accent": "a Birmingham (Brummie) accent",
+        # 24 Nov 2026 (Matt: "you don't sound like a Brummie"): spelt out, so the voice commits to it
+        "accent": "a strong, broad Brummie accent (sing-song Birmingham tune, 'oi' for 'I', 'yow' for 'you'), never neutral",
         "tts_style": ("A friendly man from Birmingham with a clear Brummie accent - down-to-earth, warm and practical, "
                       "chatty but to the point, natural pace."),
         "colour": "#282928",

@@ -381,6 +381,10 @@ def instructions(s, mid_call=False):
           "\"then we'll grab...\"). Never think out loud (\"let me think\", \"let me think about how to phrase this\", "
           "\"let me work out\"): decide silently, then say the result. If you didn't understand, just ask "
           "\"Sorry - what was that?\"\n"
+        # 24 Nov 2026 (Muhammad's call: after the client pack Sid said "Thanks, I'll leave you to it - speak soon" with the
+        # internal brief still to do)
+        + "Never say goodbye or wind the call up yourself - only when the AM says goodbye. When something's done, say "
+          "what's next or ask what they'd like to do.\n"
         + f"Today is {G['date'].today():%A %d %B %Y}; it's {now:%H:%M}, the {part}. Greet only with the right part of "
           "the day, or just 'Hi'.\n"
         + (f"Briefing: {name}.\n" if name else "")
