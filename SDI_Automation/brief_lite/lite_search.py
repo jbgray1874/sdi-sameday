@@ -300,6 +300,23 @@ def estimate_text(job_nos):
     return out
 
 
+# A job has many estimate sheets (header, shelf, the whole bay...). Put the WHOLE-unit one first: named after a fixture,
+# not a part, and the most expensive of those - so "quoted £964 a unit" means the bay, not a £2 logo block.
+PART_WORDS = re.compile(r"\b(headers?|shel(?:f|ves)|brackets?|panels?|graphics?|decals?|lens(?:es)?|logos?|blocks?|strips?|hooks?|"
+                        r"labels?|stickers?|tickets?|clips?|spares?|kickers?|caps?|covers?|inserts?|castors?|knobs?|mirrors?|"
+                        r"uprights?|toppers?|plinths?|rails?|trims?|kits?|wobblers?|shrouds?)\b", re.I)
+WHOLE_WORDS = re.compile(r"\b(bay|bays|fsdu|gondola|unit|stand|display|pod|kiosk|counter|plinth|totem|table|cabinet|wall|end)\b", re.I)
+
+
+def is_whole_unit(description):
+    d = description or ""
+    return bool(WHOLE_WORDS.search(d) and not PART_WORDS.search(d))
+
+
+def whole_unit_key(e):
+    return (not is_whole_unit(e.get("description")), -(e.get("unit_cost") or 0))
+
+
 def estimates_for(job_nos):
     path = os.path.join(HERE, "knowledge.db")
     if not job_nos or not os.path.exists(path):
@@ -316,15 +333,8 @@ def estimates_for(job_nos):
     except sqlite3.Error:
         pass
     con.close()
-    # A job has many estimate sheets (header, shelf, the whole bay...). Put the WHOLE-unit one first: named after a fixture,
-    # not a part, and the most expensive of those - so "quoted £964 a unit" means the bay, not a £2 logo block.
-    part = re.compile(r"\b(headers?|shel(?:f|ves)|brackets?|panels?|graphics?|decals?|lens(?:es)?|logos?|blocks?|strips?|hooks?|"
-                      r"labels?|stickers?|tickets?|clips?|spares?|kickers?|caps?|covers?|inserts?|castors?|knobs?|mirrors?|"
-                      r"uprights?|toppers?|plinths?|rails?|trims?|kits?|wobblers?|shrouds?)\b", re.I)
-    whole = re.compile(r"\b(bay|bays|fsdu|gondola|unit|stand|display|pod|kiosk|counter|plinth|totem|table|cabinet|wall|end)\b", re.I)
     for j, rows in out.items():
-        rows.sort(key=lambda e: (not (whole.search(e["description"] or "") and not part.search(e["description"] or "")),
-                                 -(e["unit_cost"] or 0)))
+        rows.sort(key=whole_unit_key)
     return out
 
 

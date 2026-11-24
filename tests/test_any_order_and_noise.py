@@ -2966,6 +2966,62 @@ class MoreViewsOfTheChosenDesignTests(unittest.TestCase):
         self.assertIn('"Every angle"', src)
 
 
+class EstimatesUseSDIsOwnFiguresTests(unittest.TestCase):
+    """24 Nov 2026 (James: "get the estimating right to start with"): estimate_check.py measures both estimates against
+    SDI's real estimate sheets and proposes SDI's figures; once checked they sit in studio_data/estimate_norms.json."""
+
+    LINES = {"per_unit": [{"group": "materials", "what": "MDF", "gbp": 200}, {"group": "labour", "what": "build", "gbp": 100}],
+             "setup": [{"what": "jigs", "gbp": 6000}, {"what": "programming", "gbp": 2800}], "assumptions": ["x"]}
+    NORMS = {"setup_by_kind": {"fsdu": {"n": 12, "median_gbp": 1500, "high_gbp": 2400}},
+             "ai_correction_by_kind": {"fsdu": 0.8}, "rates": {"shop": 38, "assembly": 30, "design": 60}}
+
+    def test_without_the_file_nothing_changes(self):
+        import ai_estimate
+        e = ai_estimate.work_out(self.LINES, 10, None, {}, "fsdu")
+        self.assertEqual((e["unit_variable"], e["setup_total"]), (300, 8800))
+        self.assertFalse(e["calibrated"])
+        seen = {}
+        ai_estimate.estimate({"unit_type": "FSDU"}, None, [], lambda p, i: seen.update(p=p) or json.dumps(self.LINES), 10, norms={})
+        self.assertIn("about £45 an hour, assembly about £35, design / CAD about £75", seen["p"])
+
+    def test_sdis_figures_bring_a_wild_setup_back_and_correct_the_total(self):
+        import ai_estimate
+        e = ai_estimate.work_out(self.LINES, 10, None, self.NORMS, "fsdu")
+        self.assertAlmostEqual(e["setup_total"], 2400 * 0.8, delta=1)          # SDI's top setup, then the correction
+        self.assertEqual(e["unit_variable"], 240)
+        self.assertTrue(e["calibrated"])
+        self.assertTrue(any("setup brought down" in a for a in e["assumptions"]))
+        self.assertTrue(any("x0.80" in a for a in e["assumptions"]))
+        other = ai_estimate.work_out(self.LINES, 10, None, self.NORMS, "counter")   # no figures for a counter: as it was
+        self.assertEqual(other["setup_total"], 8800)
+
+    def test_the_model_is_told_sdis_rates_and_usual_setup(self):
+        import ai_estimate
+        seen = {}
+        ai_estimate.estimate({"unit_type": "FSDU for crisps"}, None, [], lambda p, i: seen.update(p=p) or "{}", 10,
+                             norms=self.NORMS)
+        self.assertIn("about £38 an hour, assembly about £30, design / CAD about £60", seen["p"])
+        self.assertIn("usually about £1,500", seen["p"])
+
+    def test_setup_falls_out_of_two_quantities_on_the_sheets(self):
+        import estimate_check as ec
+        rows = [{"job_no": "1", "description": "FSDU", "drawing_no": "D1", "qty": q, "unit_cost": 300 + 2000 / q,
+                 "est_date": f"{__import__('datetime').date.today().year}-01-01"} for q in (10, 50)]
+        got = ec.setup_from_quantities(rows)
+        self.assertEqual(len(got), 1)
+        self.assertAlmostEqual(got[0]["setup"], 2000, delta=1)
+        self.assertAlmostEqual(got[0]["make"], 300, delta=1)
+        self.assertEqual(got[0]["kind"], "fsdu")
+
+    def test_a_job_is_never_its_own_yardstick(self):
+        import estimate_check as ec
+        job = {"job_no": "5", "description": "FSDU", "customer": "Boots", "est_date": "2024-05-01", "drawing_no": "D5"}
+        whole = [dict(job, unit_cost=500, qty=10),
+                 {"job_no": "6", "description": "FSDU", "customer": "Boots", "est_date": "2023-01-01", "unit_cost": 400, "qty": 10},
+                 {"job_no": "7", "description": "FSDU", "customer": "Boots", "est_date": "2025-01-01", "unit_cost": 400, "qty": 10}]
+        self.assertEqual([q["job"] for q in ec.yardstick(job, whole)], ["6"])     # not itself, nothing from after it
+
+
 class The3DModelMatchesTheGATests(unittest.TestCase):
     """24 Nov 2026 (Matt): the spinning 3D model must match the GA. The GA is drawn from the chosen render, so its
     shelves, header and plinth are read off it and the 3D is built from those, laid out as the GA lays them out."""
