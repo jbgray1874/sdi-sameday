@@ -2966,6 +2966,60 @@ class MoreViewsOfTheChosenDesignTests(unittest.TestCase):
         self.assertIn('"Every angle"', src)
 
 
+class The3DModelMatchesTheGATests(unittest.TestCase):
+    """24 Nov 2026 (Matt): the spinning 3D model must match the GA. The GA is drawn from the chosen render, so its
+    shelves, header and plinth are read off it and the 3D is built from those, laid out as the GA lays them out."""
+
+    def test_the_make_up_read_off_the_ga_builds_the_model(self):
+        import model3d
+        b = {"client": "Boots", "unit_type": "FSDU", "size": "1800 x 600 x 400 mm", "materials": "white"}
+        mk = L.ga_make_up({"shelves": 3, "shelf_heights": [120, 600, 1100], "header_height": 300, "plinth_height": 100},
+                          b, (1800, 600, 400))
+        self.assertEqual((mk["shelves"], mk["header"], mk["plinth"], mk["shelf_heights"]), (3, 300, 100, [120, 600, 1100]))
+        m = model3d.model(b, "#003DA5", make_up=mk)
+        shelves = sorted(p["y"] + p["h"] for p in m["parts"] if p["name"].startswith("shelf"))
+        self.assertEqual(shelves, [120, 600, 1100])                      # each shelf's top where the GA puts it
+        hdr = next(p for p in m["parts"] if p["name"] == "header")
+        self.assertEqual((hdr["y"], hdr["h"]), (1500, 300))
+        self.assertEqual(next(p for p in m["parts"] if p["name"] == "plinth")["h"], 100)
+        for p in m["parts"]:
+            self.assertLessEqual(p["y"] + p["h"], 1800.01, p)
+
+    def test_nonsense_read_off_the_ga_keeps_the_briefs_make_up(self):
+        b = {"unit_type": "FSDU", "size": "1800 x 600 x 400 mm"}
+        mk = L.ga_make_up({"shelves": 40, "shelf_heights": [5000], "header_height": 1700, "plinth_height": -3}, b, (1800, 600, 400))
+        import ga_draw
+        want = ga_draw.make_up(b, 1800, 600, 400)
+        self.assertEqual((mk["shelves"], mk["header"], mk["plinth"]), (want["shelves"], want["header"], want["plinth"]))
+        self.assertNotIn("shelf_heights", mk)
+
+    def test_the_chosen_options_ga_is_the_one_used(self):
+        b = {"client": "Boots", "unit_type": "FSDU", "size": "1800 x 600 x 400 mm"}
+        s = {"brief": b, "visuals": [
+            {"kind": "technical", "from_option": "A", "size": b["size"], "make_up": L.ga_make_up({"shelves": 2}, b, (1800, 600, 400))},
+            {"kind": "technical", "from_option": "B", "size": b["size"], "make_up": L.ga_make_up({"shelves": 5}, b, (1800, 600, 400))},
+            {"kind": "technical", "from_option": "A", "size": "900 x 600 x 400 mm", "make_up": {"shelves": 9, "header": 0, "plinth": 0}}]}
+        self.assertEqual(L.model3d_for(s, "A")["shelves"], 2)          # A's GA at today's size, not the old-size one
+        self.assertEqual(L.model3d_for(s, "B")["shelves"], 5)
+        self.assertEqual(L.model3d_for(s)["shelves"], 5)                # no option named: the latest GA
+
+    def test_the_brief_says_header_and_shelves_in_its_other_answers(self):
+        import ga_draw
+        mk = ga_draw.make_up({"unit_type": "Counter unit", "lighting": "LED header", "products_held": "mars bars, 2 shelves"},
+                             400, 300, 300)
+        self.assertEqual(mk["shelves"], 2)
+        self.assertTrue(0 < mk["header"] <= 100)                       # a counter unit's header in proportion
+
+    def test_parts_are_painted_far_to_near(self):
+        import model3d
+        m = model3d.model({"unit_type": "FSDU", "size": "1800 x 600 x 400 mm", "materials": "white", "lighting": "header"})
+        names = [m["parts"][i]["name"] for i in model3d.draw_order(m["parts"], (-0.5, 0.3, 0.8))]   # from the front left
+        self.assertLess(names.index("back"), names.index("shelf 1"))
+        self.assertLess(names.index("right side"), names.index("shelf 1"))
+        self.assertGreater(names.index("left side"), names.index("shelf 2"))
+        self.assertIn("function m3dOrder", PAGE)
+
+
 class ARotatable3DModelTests(unittest.TestCase):
     """21 Nov 2026 (James: "3 d visuals that can rotate"): the brief's exact sizes as a model to turn, free and instant."""
 

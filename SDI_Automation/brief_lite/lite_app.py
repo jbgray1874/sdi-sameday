@@ -1776,12 +1776,17 @@ MODEL3D_ASK = re.compile(r"\b(3d|three[- ]d) (model|view|version)\b|\bspin (it|r
                          r"\bturn(table| it round in 3d)\b|\b360\b", re.I)
 
 
-def model3d_for(s):
-    """The brief as a 3D model to spin (model3d.py), coloured as the brand the AM named or the client - or None."""
+def model3d_for(s, label=None):
+    """The brief as a 3D model to spin (model3d.py), coloured as the brand the AM named or the client - or None.
+    24 Nov 2026 (Matt: the 3D should match the GA): built from the make-up of the GA on screen - that option's GA
+    when there is one, else the latest - so its shelves, header and plinth are the GA's; the brief's words otherwise."""
     import model3d
     b = s["brief"]
     look = BRAND_LOOK.get(_brand_slug(_named_brand(b) or b.get("client")))
-    return model3d.model(b, look[0] if look else "#F6D946")
+    gas = [v for v in s.get("visuals") or [] if v.get("kind") == "technical" and v.get("make_up")
+           and (not v.get("size") or v.get("size") == b.get("size"))]
+    ga = (next((v for v in reversed(gas) if label and v.get("from_option") == label), None) or (gas[-1] if gas else None))
+    return model3d.model(b, look[0] if look else "#F6D946", make_up=(ga or {}).get("make_up"))
 
 
 def model3d_turn(s, ch):
@@ -2162,16 +2167,19 @@ def make_ga_ai(s, base_visual, retry_note=""):
     open(path, "wb").write(data)
     bad = ga_sizes_wrong(path, hwd)
     if bad and not retry_note:   # 3 Nov 2026: one more go, told exactly what was wrong, before the plain code-drawn GA
+        GA_READ.pop(path, None)
         print("GA sizes wrong, trying once more:", bad, flush=True)
         h_, w_, d_ = hwd
         return make_ga_ai(s, base_visual, retry_note=(
             f"\nYOUR LAST DRAWING HAD THE WRONG NUMBERS ({bad}). Write ONLY these: H {h_}, W {w_}, D {d_} mm - nothing copied "
             "from any reference drawing."))
     if bad:   # 2 Nov 2026 (Muhammad: 'the GA must be really accurate') - wrong numbers never reach the client pack
+        GA_READ.pop(path, None)
         print("GA sizes wrong, using the code-drawn GA:", bad, flush=True)
         return None, f"the drawn GA had the wrong sizes ({bad})"
     s["visuals"].append({"path": path, "kind": "technical", "label": "GA", "made_by": "ai",
                          "from_option": base_visual.get("label"), "size": s["brief"].get("size"),
+                         "make_up": ga_make_up(GA_READ.pop(path, None), s["brief"], hwd),
                          "at": datetime.now().isoformat(timespec="seconds")})
     return path, None
 
@@ -2211,8 +2219,13 @@ def make_ga_text(s):
     log_cost(s["id"], "image-ga", cost)
     path = os.path.join(OUT, f"{s['id']}_GA_{len(s['visuals']) + 1}.png")
     open(path, "wb").write(data)
+    import pdf_pack
+    hwd_ = pdf_pack.parse_size(b.get("size"))
+    if hwd_:                     # 24 Nov 2026: read its make-up too, so the 3D model matches this GA
+        ga_sizes_wrong(path, hwd_)
     s["visuals"].append({"path": path, "kind": "technical", "label": "GA", "made_by": "ai", "from_option": None,
-                         "size": b.get("size"), "at": datetime.now().isoformat(timespec="seconds")})
+                         "size": b.get("size"), "make_up": ga_make_up(GA_READ.pop(path, None), b, hwd_) if hwd_ else None,
+                         "at": datetime.now().isoformat(timespec="seconds")})
     return path, None
 
 
@@ -2275,6 +2288,52 @@ def size_from_ref_job(b):
         b["_size_from_ref"] = b["_ref_job"]
 
 
+GA_READ = {}                     # GA picture path -> what the check read off it (sizes and make-up)
+
+
+def ga_make_up(read, brief, hwd):
+    """The unit's make-up as the drawn GA shows it (shelves, where they sit, header, plinth), sanity-checked against the
+    overall size; anything not read keeps the brief's own make-up (ga_draw.make_up). None without a size."""
+    import ga_draw
+    if not hwd or len(hwd) < 3:
+        return None
+    h, w, d = (float(v) for v in hwd[:3])
+    mk = dict(ga_draw.make_up(brief, h, w, d))
+    read = read or {}
+
+    def num(k, top):
+        try:
+            v = float(read.get(k))
+        except (TypeError, ValueError):
+            return None
+        return v if 0 <= v <= top else None
+    hd, pl = num("header_height", h * 0.45), num("plinth_height", h * 0.3)
+    if hd is not None:
+        mk["header"] = int(round(hd))
+    if pl is not None:
+        mk["plinth"] = int(round(pl))
+    try:
+        n = int(read.get("shelves") or 0)
+    except (TypeError, ValueError):
+        n = 0
+    if 1 <= n <= 12:
+        mk["shelves"] = n
+    lo, hi = mk["plinth"], h - mk["header"]
+    hs = []
+    for v in read.get("shelf_heights") or []:
+        try:
+            v = float(v)
+        except (TypeError, ValueError):
+            continue
+        if lo - 1 <= v <= hi:
+            hs.append(round(v))
+    hs = sorted(set(hs))
+    if hs and (not 1 <= n <= 12 or len(hs) == n):
+        mk["shelves"], mk["shelf_heights"] = len(hs), hs
+    mk["from_ga"] = bool(read)
+    return mk
+
+
 def ga_sizes_wrong(path, hwd):
     """Read the overall height, width and depth written on a drawn GA (one Haiku vision call, ~0.2p). Returns what is
     wrong, or '' when they match the brief (within 2%) or can't be checked."""
@@ -2287,9 +2346,16 @@ def ga_sizes_wrong(path, hwd):
         im.thumbnail((1400, 1400))
         buf = io.BytesIO()
         im.save(buf, "JPEG", quality=90)
-        tool = {"name": "ga_sizes", "description": "The overall dimensions written on this technical drawing, in mm.",
+        tool = {"name": "ga_sizes", "description": "The overall dimensions written on this technical drawing, in mm, and "
+                "what the unit is made of as drawn (so the spinning 3D model matches this GA).",
                 "input_schema": {"type": "object", "properties": {
-                    "height": {"type": "number"}, "width": {"type": "number"}, "depth": {"type": "number"}},
+                    "height": {"type": "number"}, "width": {"type": "number"}, "depth": {"type": "number"},
+                    "shelves": {"type": "integer", "description": "Number of shelves or tiers drawn, including a base shelf"},
+                    "shelf_heights": {"type": "array", "items": {"type": "number"},
+                                      "description": "Height of each shelf's top above the floor, mm, lowest first - "
+                                                     "read from the drawing's dimensions, or estimated from where it sits"},
+                    "header_height": {"type": "number", "description": "Height of the header / top sign panel, mm; 0 if none"},
+                    "plinth_height": {"type": "number", "description": "Height of the plinth / kick base, mm; 0 if none"}},
                     "required": ["height", "width", "depth"]}}
         resp = claude_create(timeout=60,
             model=CHEAP_MODEL, max_tokens=400, thinking={"type": "disabled"},
@@ -2297,11 +2363,13 @@ def ga_sizes_wrong(path, hwd):
             messages=[{"role": "user", "content": [
                 {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": base64.b64encode(buf.getvalue()).decode()}},
                 {"type": "text", "text": "Read the OVERALL height, width and depth dimension lines written on this GA drawing "
-                                         "(the largest figures on each view). Use 0 for any you can't find."}]}])
+                                         "(the largest figures on each view). Use 0 for any you can't find. Then count the shelves and read where "
+                                         "they sit, and the header and plinth heights, as this drawing shows them."}]}])
         log_cost("check", "ga-check", usd(CHEAP_MODEL, resp.usage))
         got = next(x.input for x in resp.content if x.type == "tool_use")
     except Exception:
         return ""
+    GA_READ[path] = got          # 24 Nov 2026 (Matt): the make-up read here builds the 3D model, so the two match
     out = []
     for nm, want in zip(("height", "width", "depth"), hwd):
         v = float(got.get(nm) or 0)
@@ -2340,7 +2408,7 @@ def make_ga_code(s):
     brand = re.search(r"\b(no ?7|[A-Z][A-Za-z0-9&']{1,15})\b", name)
     _, mk = ga_draw.draw(s["brief"], hwd, path, brand.group(1) if brand else (s["brief"].get("client") or ""))
     s["visuals"].append({"path": path, "kind": "technical", "label": "GA", "made_by": "code",
-                         "make_up": mk, "at": datetime.now().isoformat(timespec="seconds")})
+                         "size": s["brief"].get("size"), "make_up": mk, "at": datetime.now().isoformat(timespec="seconds")})
     return path, None
 
 
@@ -4252,7 +4320,7 @@ def handle(number, name, text, image_path=None, voice=False, ch=None, new=False,
             time.sleep(0.5)
         est_ = estimate_for_pack(s, label)
         try:
-            m3_ = model3d_for(s)
+            m3_ = model3d_for(s, label)
         except Exception:                                    # noqa: BLE001
             m3_ = None
         pack_markup_ = pack_cfg["customer_markup"] if b.get("_price_for") == "customer" else None
@@ -4290,7 +4358,7 @@ def handle(number, name, text, image_path=None, voice=False, ch=None, new=False,
             ch.image(ga_card, f"Concept GA of Option {label} - {b.get('size')} as briefed. Parts are named from the concept; "
                               "not for manufacture.", role="option", label="GA", kind="technical", from_option=label)
             try:         # 21 Nov 2026: and the same sizes in 3D, to turn round - free, made from the brief
-                m3 = model3d_for(s)
+                m3 = model3d_for(s, label)
                 if m3:
                     ch.model3d(m3, f"Option {label} in 3D at {b.get('size')} - drag it to turn it.")
             except Exception as e:

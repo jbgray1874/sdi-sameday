@@ -309,15 +309,18 @@ def model_pictures(model, out_dir, stem):
             yr = py * math.cos(e) - zr * math.sin(e)
             depth = zr * math.cos(e) + py * math.sin(e)
             return xr, -yr, depth
+        import model3d
+        rank = {i: r for r, i in enumerate(model3d.draw_order(parts, (-math.sin(a) * math.cos(e), math.sin(e),
+                                                                     math.cos(a) * math.cos(e))))}
         faces = []
-        for p in parts:
+        for pi, p in enumerate(parts):
             x, y, z, w_, h_, d_ = (float(p[k]) for k in ("x", "y", "z", "w", "h", "d"))
             v = [(x + dx * w_, y + dy * h_, z + dz * d_) for dx in (0, 1) for dy in (0, 1) for dz in (0, 1)]
             col = tuple(int(p["colour"][i:i + 2], 16) for i in (1, 3, 5))
             for idx, shade in (((1, 3, 7, 5), 1.0), ((0, 2, 6, 4), 0.62), ((4, 5, 7, 6), 0.82), ((0, 1, 3, 2), 0.82),
                                ((2, 3, 7, 6), 1.08), ((0, 1, 5, 4), 0.5)):
                 pts = [proj(*v[i]) for i in idx]
-                faces.append((sum(q[2] for q in pts) / 4, [(q[0], q[1]) for q in pts],
+                faces.append(((rank[pi], sum(q[2] for q in pts) / 4), [(q[0], q[1]) for q in pts],
                               tuple(max(0, min(255, int(ch * shade))) for ch in col)))
         xs = [q[0] for f in faces for q in f[1]]
         ys = [q[1] for f in faces for q in f[1]]
@@ -329,7 +332,7 @@ def model_pictures(model, out_dir, stem):
         oy = (size - (max(ys) - min(ys)) * sc) / 2 - min(ys) * sc
         base_y = oy + max(ys) * sc
         dr.ellipse((size * 0.18, base_y - 16, size * 0.82, base_y + 24), fill=(226, 224, 216))      # its shadow
-        for _d, pts, col in sorted(faces, key=lambda f: f[0]):          # far faces first
+        for _d, pts, col in sorted(faces, key=lambda f: f[0]):          # far parts first (model3d.draw_order)
             dr.polygon([(ox + px * sc, oy + py * sc) for px, py in pts], fill=col, outline=(60, 60, 58))
         path = os.path.join(out_dir, f"{stem}_model_{name}.png")
         im.save(path)

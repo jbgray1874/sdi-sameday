@@ -29,9 +29,10 @@ def _font(size, bold=False):
 
 def make_up(brief, h, w, d):
     """What the unit is made of, from the brief's words. Defaults are typical SDI proportions, labelled as such."""
-    text = " ".join(str(brief.get(k) or "") for k in ("unit_type", "materials", "colours_graphics", "narrative", "placement")).lower()
+    text = " ".join(str(brief.get(k) or "") for k in ("unit_type", "materials", "colours_graphics", "narrative", "placement",
+                                                   "lighting", "products_held", "shelves")).lower()
     floor = h >= 1200 or "floor" in text or "fsdu" in text
-    header = 0 if re.search(r"no header|without header", text) else (min(350, max(180, round(h * 0.16 / 10) * 10)) if ("header" in text or floor) else 0)
+    header = 0 if re.search(r"no header|without header", text) else (min(350, max(min(180, round(h * 0.25 / 10) * 10), round(h * 0.16 / 10) * 10)) if ("header" in text or floor) else 0)
     plinth = (min(120, max(60, round(h * 0.055 / 10) * 10))) if floor else 0
     # "4 shelves" / "five tiers" - but not "No7 shelf" (a product line, not a count)
     words = {"two": 2, "three": 3, "four": 4, "five": 5, "six": 6}
