@@ -346,6 +346,8 @@ BASIS = {
     "ai": "Costed line by line - materials, manufacture, finish and packing - from this concept and brief, and checked "
           "against comparable SDI projects.",
     "quick": "Based on comparable SDI projects, adjusted for this design.",
+    "agreed": "Costed line by line - materials, manufacture, finish and packing - from this concept and brief, and "
+              "weighed against what comparable SDI projects cost.",
 }
 
 
@@ -354,7 +356,8 @@ def budget(est, markup_pct):
     if not est or markup_pct is None or not est.get("prices"):
         return None
     k = 1 + float(markup_pct) / 100.0
-    rnd = lambda v: int(round(v / 5.0)) * 5 if v >= 100 else int(round(v))
+    import agreed
+    rnd = agreed.client_price            # 24 Nov 2026: rounded to what an estimate from a concept can honestly claim
     rows = [{"qty": int(p["qty"]), "unit": rnd(float(p["unit_gbp"]) * k)} for p in est["prices"] if p.get("unit_gbp")]
     rows = sorted({r["qty"]: r for r in rows}.values(), key=lambda r: r["qty"])
     for r in rows:

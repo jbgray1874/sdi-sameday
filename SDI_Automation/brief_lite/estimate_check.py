@@ -43,6 +43,7 @@ try:
 except ImportError:
     pass
 
+import agreed            # noqa: E402
 import ai_estimate        # noqa: E402
 import ballpark           # noqa: E402
 
@@ -56,6 +57,7 @@ SETUP_WORDS = re.compile(r"set ?up|tooling|\btool\b|jig|fixture|programm|first[-
 
 
 kind_of = ai_estimate.kind_of
+RUNS = 3
 
 
 def year_of(d):
@@ -285,16 +287,25 @@ def check_one(job, whole, spend, ls, norms_in):
            "sdi_unit": round(to_today(float(job["unit_cost"]), job["est_date"]), 2),
            "sdi_material": round(to_today(float(job["material_cost"]), job["est_date"]), 2) if job.get("material_cost") else None,
            "sdi_labour": round(to_today(float(job["labour_cost"]), job["est_date"]), 2) if job.get("labour_cost") else None}
-    try:
-        e = ai_estimate.estimate(brief, None, basis, lambda p, _i: ask_ai(spend)(p, b64), q, norms=norms_in)
-    except Exception as ex:                                    # noqa: BLE001
-        e, row["ai_error"] = None, type(ex).__name__
+    def one_run(_):                           # as SDI Live: costed RUNS times at once, the middle one kept
+        try:
+            return ai_estimate.estimate(brief, None, basis, lambda p, _i: ask_ai(spend)(p, b64), q, norms=norms_in)
+        except Exception as ex:                                # noqa: BLE001
+            row["ai_error"] = type(ex).__name__
+            return None
+    with ThreadPoolExecutor(max_workers=RUNS) as ex_:
+        runs = list(ex_.map(one_run, range(RUNS)))
+    e = ai_estimate.steady(runs, q)
+    if e:
+        row["ai_runs"] = " / ".join(f"{v:,.0f}" for v in e.get("runs") or [])
+        row["ai_spread_pct"] = e.get("spread_pct")
     if e:
         sp = e.get("split") or {}
         row.update(ai_unit=at_qty(e["prices"], q), ai_make=e["unit_variable"], ai_setup=e["setup_total"],
                    ai_material=round(sp.get("materials", 0) + sp.get("bought-in", 0), 2),
                    ai_labour=round(sp.get("labour", 0) + sp.get("finish", 0) + sp.get("packing", 0), 2),
                    ai_setup_lines="; ".join(f"{x['what'][:40]} £{x['gbp']:,.0f}" for x in e.get("setup") or [])[:300])
+    qk = None
     if basis:
         try:
             qk = ballpark.quick(brief, quotes, ask_quick(spend), q)
@@ -302,9 +313,12 @@ def check_one(job, whole, spend, ls, norms_in):
             qk, row["quick_error"] = None, type(ex).__name__
         if qk:
             row.update(quick_unit=at_qty(qk["prices"], q), quick_base=qk["base"]["job"])
-    for k in ("ai_unit", "ai_make", "quick_unit"):
+    g = agreed.agree(e, qk, q, norms_in) if (e or qk) else None
+    if g:
+        row["agreed_unit"] = g["unit"]
+    for k in ("ai_unit", "ai_make", "quick_unit", "agreed_unit"):
         if row.get(k) and row["sdi_unit"]:
-            row[k.replace("_unit", "").replace("_make", "_make") + "_err_pct"] = round(100 * (row[k] / row["sdi_unit"] - 1), 1)
+            row[k.replace("_unit", "") + "_err_pct"] = round(100 * (row[k] / row["sdi_unit"] - 1), 1)
     for k in ("material", "labour"):
         if row.get(f"ai_{k}") and row.get(f"sdi_{k}"):
             row[f"ai_{k}_err_pct"] = round(100 * (row[f"ai_{k}"] / row[f"sdi_{k}"] - 1), 1)
@@ -360,7 +374,8 @@ def norms(setups, sheets, results):
         if s and s["n"] >= 3:
             corr[k] = s["correction"]
     allk = how_close([r.get("ai_err_pct") for r in results])
-    return {"made": datetime.now().isoformat(timespec="seconds"), "setup_by_kind": setup, "rates_by_operation": rates,
+    acc = {k: (how_close([r.get(f"{k}_err_pct") for r in results]) or {}).get("typical_miss_pct") for k in ("ai", "quick")}
+    return {"accuracy": acc if all(acc.values()) else {},"made": datetime.now().isoformat(timespec="seconds"), "setup_by_kind": setup, "rates_by_operation": rates,
             "one_off_lines": one, "ai_correction_by_kind": corr, "ai_correction_all": (allk or {}).get("correction")}
 
 
@@ -369,13 +384,16 @@ def main():
     ap.add_argument("--jobs", type=int, default=40, help="past jobs to estimate (default 40)")
     ap.add_argument("--since", type=int, default=2022, help="only estimate sheets from this year on (default 2022)")
     ap.add_argument("--workers", type=int, default=3, help="jobs at once (default 3)")
-    ap.add_argument("--max-usd", type=float, default=8.0, help="stop starting new jobs past this AI spend (default $8)")
+    ap.add_argument("--max-usd", type=float, default=15.0, help="stop starting new jobs past this AI spend (default $15)")
+    ap.add_argument("--runs", type=int, default=3, help="AI estimate runs per job, the middle kept, as SDI Live (default 3)")
     ap.add_argument("--sheets", type=int, default=150, help="estimate sheets to read for rates and one-off lines")
     ap.add_argument("--dry", action="store_true", help="only the free part: setup and rates from the sheets")
     ap.add_argument("--seed", type=int, default=7)
     ap.add_argument("--use-norms", action="store_true", help="test the AI estimate WITH studio_data\\estimate_norms.json "
                                                              "(after calibrating, to see it got closer)")
     a = ap.parse_args()
+    global RUNS
+    RUNS = max(1, a.runs)
 
     import lite_search as ls
     out = os.path.join(HERE, "out", "estimate_check", datetime.now().strftime("%Y-%m-%d_%H%M"))
@@ -462,6 +480,8 @@ def main():
               pct_line("AI estimate", how_close([r.get("ai_err_pct") for r in results])),
               pct_line("AI estimate without the setup", how_close([r.get("ai_make_err_pct") for r in results])),
               pct_line("Past jobs estimate", how_close([r.get("quick_err_pct") for r in results])),
+              pct_line("Agreed figure (the two weighed together - what the client pack uses)",
+                       how_close([r.get("agreed_err_pct") for r in results])),
               pct_line("AI materials vs the sheet's materials", how_close([r.get("ai_material_err_pct") for r in results])),
               pct_line("AI labour vs the sheet's labour", how_close([r.get("ai_labour_err_pct") for r in results])), "",
               "BY KIND OF UNIT (AI estimate / past jobs):"]
@@ -471,6 +491,9 @@ def main():
             L.append(f"  {k:<12} {len(mine):>2} jobs   AI typically {sa['typical_miss_pct'] if sa else '-'}% out "
                      f"(bias {sa['bias_pct'] if sa else '-'}%)   past jobs {sq['typical_miss_pct'] if sq else '-'}% out "
                      f"(bias {sq['bias_pct'] if sq else '-'}%)")
+        spreads = [r["ai_spread_pct"] for r in results if r.get("ai_spread_pct") is not None]
+        if spreads:
+            L += ["", f"AI's {RUNS} runs per job: typically {statistics.median(spreads):.0f}% apart (the middle one is kept)."]
         ai_setups = [r["ai_setup"] for r in results if r.get("ai_setup") is not None]
         if ai_setups:
             L += ["", f"AI setup: median £{statistics.median(ai_setups):,.0f}, from £{min(ai_setups):,.0f} to "

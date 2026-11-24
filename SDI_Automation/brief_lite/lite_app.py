@@ -1473,11 +1473,25 @@ def ballpark_for(s):
                            "qty": e.get("qty"), "date": e.get("date") or r.get("last") or r.get("first"),
                            "material_cost": e.get("material_cost"), "labour_cost": e.get("labour_cost"),
                            "materials": e.get("materials"), "processes": e.get("processes")})
+    quotes = quotes[:4]
+    try:                 # 24 Nov 2026: plus SDI's own estimates for the same kind of unit, most alike first
+        import ai_estimate
+        import lite_search
+        kind = ai_estimate.kind_of(f"{b.get('unit_type') or ''} {b.get('other_notes') or ''}")
+        bw = lite_search.words(" ".join(str(b.get(k) or "") for k in ("unit_type", "materials", "finish", "lighting",
+                                                                         "products_held", "colours_graphics")))
+        for e in lite_search.similar_estimates(bw, kind, b.get("client") or "", seen, k=6 - len(quotes)):
+            quotes.append({"job": str(e["job_no"]), "name": (e.get("description") or "")[:60], "unit_cost": e["unit_cost"],
+                           "qty": e.get("qty"), "date": e.get("date"), "material_cost": e.get("material_cost"),
+                           "labour_cost": e.get("labour_cost"), "materials": e.get("materials"),
+                           "processes": e.get("processes"), "why": f"same kind of unit ({kind})"})
+    except Exception as ex:                                  # noqa: BLE001
+        print("similar estimates:", str(ex)[:120], flush=True)
     renders = [v for v in s.get("visuals", []) if v.get("kind") == "render"]
     lab = (renders[-1].get("label") if renders else None) or "A"
     band = ((b.get("_dirs") or {}).get(lab) or {}).get("cost", "") if isinstance(b.get("_dirs"), dict) else ""
-    s["_quotes"] = quotes[:5]
-    return ballpark.work_out(quotes[:5], ballpark._qty(b.get("volume_qty")), band)
+    s["_quotes"] = quotes[:6]
+    return ballpark.work_out(quotes[:6], ballpark._qty(b.get("volume_qty")), band)
 
 
 def quick_estimate_for(s):
@@ -1534,6 +1548,7 @@ AUTO_EST = {}            # chat -> {"label", "status": running|done|error, "kind
 
 
 def auto_estimate_start(s, label):
+    import agreed
     import ai_estimate
     import ballpark
     sid = s["id"]
@@ -1565,9 +1580,12 @@ def auto_estimate_start(s, label):
                     e, why = None, type(ex_).__name__
             if q:
                 rec.update(quick=q, quick_line=ballpark.say_quick(q))
+            g = agreed.agree(e, q, ballpark._qty(snap["brief"].get("volume_qty")), ai_estimate.load_norms())
+            if g:                       # 24 Nov 2026: ONE figure from the two, for the pack - workings stay internal
+                rec["agreed"] = g
             if e:
                 e["label"] = label
-                rec.update(kind="ai", data=e, line=ai_estimate.say(e), status="done")
+                rec.update(kind="ai", data=e, line=agreed.say(g) if g and q else ai_estimate.say(e), status="done")
             elif q:
                 rec.update(kind="quick", data=q, line=ballpark.say_quick(q), status="done")
             else:
@@ -1616,8 +1634,9 @@ def client_pack_settings():
 
 
 def estimate_for_pack(s, label):
-    """The estimate for this option that goes in the pack - the most thorough one done: Estimate Lite, then the AI
-    estimate, then past jobs. {kind, prices, split?, setup_total?} or None."""
+    """The estimate for this option that goes in the pack - the most thorough one done: Estimate Lite, then the agreed
+    figure (the AI and past-jobs estimates weighed together, agreed.py), then the AI estimate, then past jobs.
+    {kind, prices, split?, setup_total?} or None."""
     try:
         import estimate_lite as el
         rec = el.latest(DB, s["id"])
@@ -1625,10 +1644,14 @@ def estimate_for_pack(s, label):
         rec = None
     if rec and rec.get("status") == "done" and (rec.get("label") or "A") == label and (rec.get("result") or {}).get("prices"):
         return {"kind": "lite", "prices": rec["result"]["prices"]}
+    auto = AUTO_EST.get(s["id"]) or {}
+    g = auto.get("agreed") if auto.get("label") == label and auto.get("status") == "done" else None
+    if g and g.get("prices"):          # 24 Nov 2026: the two estimates weighed together - the figure the client sees
+        return {"kind": "agreed" if g.get("gap_pct") is not None else auto.get("kind") or "ai", "prices": g["prices"],
+                "split": g.get("split"), "setup_total": g.get("setup_total")}
     ai = s["brief"].get("_ai_estimate") or {}
     if ai.get("label") == label and ai.get("prices"):
         return {"kind": "ai", "prices": ai["prices"], "split": ai.get("split"), "setup_total": ai.get("setup_total")}
-    auto = AUTO_EST.get(s["id"]) or {}
     if auto.get("label") == label and auto.get("status") == "done" and (auto.get("data") or {}).get("prices"):
         d = auto["data"]
         if auto.get("kind") == "ai":
@@ -1638,6 +1661,9 @@ def estimate_for_pack(s, label):
     if q.get("prices"):
         return {"kind": "quick", "prices": q["prices"]}
     return None
+
+
+AI_ESTIMATE_RUNS = 3          # the AI estimate is costed this many times at once; the middle one is kept
 
 
 def ai_estimate_for(s):
@@ -1664,12 +1690,24 @@ def ai_estimate_for(s):
         except Exception:                                    # noqa: BLE001
             pass
         return "".join(getattr(x, "text", "") for x in r.content)
-    try:
-        e = ai_estimate.estimate(b, img if img and os.path.exists(img) else None, quotes, ask,
-                                 ballpark._qty(b.get("volume_qty")))
-    except Exception as ex:                                  # noqa: BLE001
-        return None, f"the model didn't answer ({type(ex).__name__})"
-    return (e, "") if e else (None, "the model gave no costed lines")
+    # 24 Nov 2026: three runs at once, the middle one kept - one run alone came back quite differently each time
+    from concurrent.futures import ThreadPoolExecutor
+    qty = ballpark._qty(b.get("volume_qty"))
+    norms = ai_estimate.load_norms()
+    errs = []
+
+    def one(_):
+        try:
+            return ai_estimate.estimate(b, img if img and os.path.exists(img) else None, quotes, ask, qty, norms=norms)
+        except Exception as ex:                              # noqa: BLE001
+            errs.append(type(ex).__name__)
+            return None
+    with ThreadPoolExecutor(max_workers=AI_ESTIMATE_RUNS) as ex:
+        runs = list(ex.map(one, range(AI_ESTIMATE_RUNS)))
+    e = ai_estimate.steady(runs, qty)
+    if e:
+        return e, ""
+    return None, (f"the model didn't answer ({errs[0]})" if errs else "the model gave no costed lines")
 
 
 def ai_estimate_turn(s, ch):
@@ -4878,12 +4916,15 @@ def estimate_detail_for(s, wait_s=75):
         ai = b.get("_ai_estimate") or {}
         auto = AUTO_EST.get(s["id"]) or {}
         auto_ok = auto.get("label") == label and auto.get("status") == "done" and (auto.get("data") or {}).get("prices")
+        ag = auto.get("agreed") if auto_ok else None
+        if auto_ok and auto.get("kind") == "ai":         # 24 Nov 2026: the automatic pair, with the figure agreed from them
+            return {"kind": "ai", "label": label, "data": auto["data"], "check": auto.get("quick"), "agreed": ag}
         if ai.get("label") == label and ai.get("prices"):
             return {"kind": "ai", "label": label, "data": ai,
                     "check": auto.get("quick") if auto.get("label") == label else b.get("_quick_estimate")}
         if auto_ok:
             return {"kind": auto.get("kind") or "quick", "label": label, "data": auto["data"],
-                    "check": auto.get("quick") if auto.get("kind") == "ai" else None}
+                    "check": auto.get("quick") if auto.get("kind") == "ai" else None, "agreed": ag}
         q = b.get("_quick_estimate") or {}
         if q.get("prices"):
             return {"kind": "quick", "label": label, "data": q}

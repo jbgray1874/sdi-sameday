@@ -176,6 +176,28 @@ def estimate(brief, image_path, quotes_today, ask, brief_qty=None, norms=None):
     return work_out(got, brief_qty, quotes_today[0] if quotes_today else None, norms, kind)
 
 
+def steady(runs, qty=None):
+    """24 Nov 2026 (James: "fast and accurate"): the same design costed three times at once often comes back quite
+    differently, mostly in the setup. Keep the middle one by its unit price at the order quantity (its lines still add
+    up), and say how far apart the three were. None when no run gave lines."""
+    runs = [r for r in runs if r and r.get("prices")]
+    if not runs:
+        return None
+    q = int(qty or 10)
+
+    def unit(r):
+        ps = sorted(r["prices"], key=lambda p: p["qty"])
+        return float(next((p["unit_gbp"] for p in ps if p["qty"] == q), ps[-1]["unit_gbp"]))
+    runs.sort(key=unit)
+    mid = dict(runs[len(runs) // 2])
+    vals = [unit(r) for r in runs]
+    mid["runs"] = [round(v, 2) for v in vals]
+    mid["spread_pct"] = round((max(vals) - min(vals)) / min(vals) * 100) if len(vals) > 1 and min(vals) > 0 else 0
+    if len(vals) > 1:
+        mid["confidence"] = mid["confidence"] + f"; {len(vals)} runs within {mid['spread_pct']}% of each other"
+    return mid
+
+
 def say(e):
     at = next((p for p in e["prices"] if p["qty"] == 10), e["prices"][0])
     return (f"AI estimate - internal, not for the client: a cost to make of about £{at['unit_gbp']:,.0f} a unit at {at['qty']} "

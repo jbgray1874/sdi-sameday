@@ -1,4 +1,5 @@
 import os
+from datetime import date
 """
 lite_search.py - "what have we made before that looks like this?"
 
@@ -336,6 +337,40 @@ def estimates_for(job_nos):
     for j, rows in out.items():
         rows.sort(key=whole_unit_key)
     return out
+
+
+def similar_estimates(brief_words, kind, client="", exclude=(), k=4, years=6):
+    """24 Nov 2026 (James: better past-jobs matching): SDI's own whole-unit estimates for the SAME KIND of unit (fsdu,
+    gondola, wall bay... as ai_estimate.kind_of), most alike first - same client, then the most words shared with the
+    brief (materials, lighting, what it holds) - from the last `years` years. Adds to the look-alike jobs, so the
+    past-jobs estimate has jobs of the right kind to start from even when no picture matched."""
+    import ai_estimate
+    path = os.path.join(HERE, "knowledge.db")
+    if not kind or kind == "other" or not os.path.exists(path):
+        return []
+    con = sqlite3.connect(path, timeout=5)
+    since = str(date.today().year - years)
+    try:
+        rows = con.execute("""SELECT job_no, description, qty, unit_cost, material_cost, labour_cost, est_date, prepared_by,
+                              materials, processes, customer FROM estimates
+                              WHERE status='ok' AND unit_cost >= 20 AND est_date >= ?""", (since,)).fetchall()
+    except sqlite3.Error:
+        rows = []
+    con.close()
+    cl = norm(client or "")
+    bw = set(brief_words or ())
+    best = {}
+    for r in rows:
+        e = dict(zip(["job_no", "description", "qty", "unit_cost", "material_cost", "labour_cost", "date", "prepared_by",
+                      "materials", "processes", "customer"], r))
+        if e["job_no"] in exclude or not is_whole_unit(e["description"]) or ai_estimate.kind_of(e["description"]) != kind:
+            continue
+        ew = set(words(f"{e['description']} {e.get('materials') or ''}"))
+        score = (2.0 if cl and cl in norm(e.get("customer") or "") else 0.0) + len(bw & ew) / max(1, len(bw | ew)) \
+            + (0.2 if str(e["date"] or "") >= str(date.today().year - 2) else 0)
+        if e["job_no"] not in best or score > best[e["job_no"]][0]:
+            best[e["job_no"]] = (score, e)
+    return [e for _, e in sorted(best.values(), key=lambda t: -t[0])[:k]]
 
 
 # 2 Nov 2026 (Andy's test): what the transcriber writes for SDI's own words

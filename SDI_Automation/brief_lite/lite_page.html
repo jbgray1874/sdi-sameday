@@ -1304,11 +1304,18 @@ function aiCard(e){if(!e||!e.prices)return null;const gbp=v=>"£"+(+v).toLocaleS
 function autoCard(label){const chat=sid;const el=block(`<div class="mstat"><span class="spin"></span>Working out the estimate for Option ${esc(label||"A")} - the AI estimate, line by line, with SDI's past jobs as a cross-check. About a minute…</div>`);
  let n=0;const tick=async()=>{if(!el.isConnected||sid!==chat)return;
   const j=await fetch("/api/auto-estimate/"+chat).then(r=>r.json()).catch(()=>null);
-  if(j&&j.label===label&&j.status==="done"){el.remove();(j.kind==="ai"?aiCard:qeCard)(j.data);if(j.kind==="ai"&&j.quick)qeCard(j.quick);
-   if(rt)lsTell("[Showroom: the estimate for Option "+label+" is on screen now: "+j.line+" Tell the AM in one or two sentences - internal only, not for the client - and that the AI estimate or Estimate Lite are there if they want more.]");return}
+  if(j&&j.label===label&&j.status==="done"){el.remove();if(j.agreed&&j.agreed.gap_pct!=null)agCard(j.agreed);(j.kind==="ai"?aiCard:qeCard)(j.data);if(j.kind==="ai"&&j.quick)qeCard(j.quick);
+   if(rt)lsTell("[Showroom: the estimate for Option "+label+" is on screen now: "+j.line+" Tell the AM in one or two sentences - internal only, not for the client - the one figure, and if the two estimates are far apart, that it's worth a look before quoting.]");return}
   if(j&&j.label===label&&j.status==="error"){el.innerHTML=`<div class="mstat">${esc(j.line||"No automatic estimate this time.")} Use the buttons under the design to ask for one.</div>`;return}
   if(++n<60)setTimeout(tick,3000)};
  setTimeout(tick,2500);return el}
+// 24 Nov 2026 (James: "a rounded / what we deem accurate number for the client"): the two estimates weighed together -
+// the figure the client pack is built from. Both estimates' cards follow it, with every line.
+function agCard(g){if(!g)return null;const gbp=v=>"£"+Math.round(+v).toLocaleString("en-GB");const conf=String(g.confidence||"").split(" - ");
+ return block(`<div class="card bp qe"><div class="ch"><span class="ico">✅</span><b>Estimate for the client pack - internal, not for the client</b></div>
+  <div class="bpn">${gbp(g.unit)} <span>a unit to make at ${esc(g.qty)}</span><i class="bpc bpc-${esc(conf[0]==="good"?"high":conf[0]==="fair"?"medium":"low")}">${esc(conf[0])}</i></div>
+  <div class="bpw">AI estimate ${gbp(g.ai)} · past jobs ${gbp(g.quick)} - ${esc(conf.slice(1).join(" - "))}.${g.check?" <b>Worth checking both before this goes to the client.</b>":""}</div>
+  <div class="bpf">Cost before margin. The client pack shows this with the margin built in, rounded; the workings stay on SDI's pricing sheet.</div></div>`)}
 function qeCard(q){if(!q||!q.base)return null;const gbp=v=>"£"+Math.round(+v).toLocaleString("en-GB");const sg=v=>(v<0?"−":"+")+gbp(Math.abs(v));
  const conf=String(q.confidence||"").split(" - ")[0],b=q.base;
  return block(`<div class="card bp qe"><div class="ch"><span class="ico">⚡</span><b>Past jobs estimate - internal, not for the client</b></div><div class="bpw"><b>Cost to make per unit, before margin - not a selling price.</b> From the unit cost on SDI's past estimate sheets.</div>

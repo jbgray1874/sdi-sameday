@@ -569,22 +569,40 @@ def estimate_story(est):
     kind, d, lab = est.get("kind"), est.get("data") or {}, est.get("label") or "A"
     gbp = lambda v: f"GBP{float(v):,.2f}"
     names = {"quick": "Past jobs estimate", "ai": "AI estimate", "lite": "Estimate Lite"}
-    story = [_p(f"{names.get(kind, 'Estimate')} - Option {lab}", H2),
+    ag = est.get("agreed") or {}
+    agreed_ = ag.get("prices") and ag.get("gap_pct") is not None
+    story = [_p(f"{'Agreed estimate' if agreed_ else names.get(kind, 'Estimate')} - Option {lab}", H2),
              _p("SDI's COST TO MAKE per unit, before margin. Internal only - not for the client, and not a quotation.", SMALL)]
     prices = (d.get("result") or {}).get("prices") if kind == "lite" else d.get("prices")
+    if agreed_:                         # 24 Nov 2026: the figure the client pack is built from, and how it was reached
+        prices = ag["prices"]
+        w = ag.get("weights") or {}
+        story += [_table(["", "Per unit at " + f"{int(ag['qty']):,}", "Weight"],
+                         [["AI estimate (line by line)", gbp(ag["ai"]), f"{round(100 * w.get('ai', 0))}%"],
+                          ["Past jobs estimate", gbp(ag["quick"]), f"{round(100 * w.get('quick', 0))}%"],
+                          ["Agreed - used for the client pack", gbp(ag["unit"]), ""]], [90, 50, 34]),
+                  _p(f"{ag.get('how', '')} Confidence: {ag.get('confidence', '')}.", SMALL)]
+        if ag.get("check"):
+            story.append(_p("The two estimates are a long way apart - check both before this price goes to the client.", P))
     if prices:
         story.append(_table(["Quantity", "Cost per unit", "Cost for the quantity"],
                             [[f"{int(p['qty']):,}", gbp(p["unit_gbp"]), gbp(float(p["unit_gbp"]) * int(p["qty"]))]
                              for p in prices], [40, 60, 74]))
     if prices and est.get("customer_markup") is not None:
+        import agreed
         k = 1 + float(est["customer_markup"]) / 100.0
+        cp = lambda p: agreed.client_price(float(p["unit_gbp"]) * k)    # exactly the figure on the client pack
         story += [_p("Customer price (SDI's margin applied)", H2),
                   _table(["Quantity", "Price per unit", "Price for the quantity"],
-                         [[f"{int(p['qty']):,}", gbp(float(p["unit_gbp"]) * k), gbp(float(p["unit_gbp"]) * k * int(p["qty"]))]
-                          for p in prices], [40, 60, 74]),
+                         [[f"{int(p['qty']):,}", gbp(cp(p)), gbp(cp(p) * int(p["qty"]))] for p in prices], [40, 60, 74]),
                   _p(f"Cost plus {est['customer_markup']:g}% - the price on the client pack. The client pack never shows the "
                      "margin.", SMALL)]
     conf = str(d.get("confidence") or "")
+    if agreed_:
+        story.append(_p(f"How the AI estimate was worked out (its own figure: {gbp(ag['ai'])} a unit)", H2))
+        if d.get("runs"):
+            story.append(_p("Costed " + str(len(d["runs"])) + " times at once, the middle one kept: "
+                            + ", ".join(gbp(v) for v in d["runs"]) + " a unit.", SMALL))
     if kind == "quick":
         base = d.get("base") or {}
         story += [_p("How it was worked out", H2),
@@ -674,7 +692,7 @@ def price_sheet(session, figures, estimate, markup_pct, out_dir, label="A"):
                 f"+ {markup_pct:g}% markup = customer price", H2),
              _table(["Quantity", "Cost per unit", f"Markup {markup_pct:g}%", "Customer price per unit", "Customer order total"],
                     rows, [24, 34, 32, 44, 40]),
-             _p("The customer price is rounded as on the client pack (to the nearest GBP5 above GBP100). Excludes VAT, "
+             _p("The customer price is rounded as on the client pack (GBP1 under GBP50, GBP5 under GBP200, GBP10 under GBP1,000, GBP25 above). Excludes VAT, "
                 "delivery and installation unless stated.", SMALL)]
     if estimate:
         story += estimate_story(dict(estimate, customer_markup=None))

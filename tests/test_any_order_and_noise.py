@@ -2966,6 +2966,64 @@ class MoreViewsOfTheChosenDesignTests(unittest.TestCase):
         self.assertIn('"Every angle"', src)
 
 
+class OneAgreedFigureForTheClientTests(unittest.TestCase):
+    """24 Nov 2026 (James: "a rounded / what we deem accurate number for the client and the internal workings on the
+    documents only internal see"): the AI and past-jobs estimates weighed into one figure; the AI run three times."""
+
+    AI = {"prices": [{"qty": 1, "unit_gbp": 900}, {"qty": 10, "unit_gbp": 500}, {"qty": 50, "unit_gbp": 440}],
+          "split": {"materials": 300, "labour": 125}, "setup_total": 750, "confidence": "medium"}
+    QUICK = {"prices": [{"qty": 1, "unit_gbp": 520}, {"qty": 10, "unit_gbp": 400}], "confidence": "medium - adjusted"}
+
+    def test_the_two_are_weighed_into_one_figure(self):
+        import agreed
+        g = agreed.agree(self.AI, self.QUICK, 10, {})
+        self.assertEqual(g["unit"], 460)                                     # 60% x 500 + 40% x 400
+        self.assertEqual((g["ai"], g["quick"], g["gap_pct"]), (500, 400, 25))
+        self.assertTrue(g["confidence"].startswith("fair"))
+        self.assertFalse(g["check"])
+        self.assertAlmostEqual(next(p["unit_gbp"] for p in g["prices"] if p["qty"] == 50), 440 * 0.92, delta=0.01)
+        self.assertIn("460", agreed.say(g))
+
+    def test_measured_accuracy_sets_the_weights_and_a_wide_gap_is_flagged(self):
+        import agreed
+        g = agreed.agree(self.AI, self.QUICK, 10, {"accuracy": {"ai": 10, "quick": 40}})
+        self.assertEqual(g["weights"], {"ai": 0.8, "quick": 0.2})
+        far = agreed.agree(self.AI, dict(self.QUICK, prices=[{"qty": 10, "unit_gbp": 200}]), 10, {})
+        self.assertTrue(far["check"])
+        self.assertIn("Worth checking", agreed.say(far))
+        only = agreed.agree(self.AI, None, 10, {})
+        self.assertEqual((only["unit"], only["gap_pct"]), (500, None))
+
+    def test_the_client_figure_is_honestly_rounded(self):
+        import agreed
+        self.assertEqual([agreed.client_price(v) for v in (37.4, 143, 216, 643, 1234)], [37, 145, 220, 640, 1225])
+
+    def test_three_ai_runs_keep_the_middle_one(self):
+        import ai_estimate
+        runs = [{"prices": [{"qty": 10, "unit_gbp": v}], "confidence": "medium"} for v in (700, 400, 520)]
+        e = ai_estimate.steady(runs, 10)
+        self.assertEqual(e["prices"][0]["unit_gbp"], 520)
+        self.assertEqual((e["runs"], e["spread_pct"]), ([400, 520, 700], 75))
+        self.assertEqual(L.AI_ESTIMATE_RUNS, 3)
+
+    def test_the_pack_uses_the_agreed_figure_and_the_sheet_shows_how(self):
+        s = {"id": "agreed-test", "brief": {"volume_qty": "10"}, "visuals": []}
+        import agreed
+        g = agreed.agree(self.AI, self.QUICK, 10, {})
+        L.AUTO_EST["agreed-test"] = {"label": "A", "status": "done", "kind": "ai", "data": self.AI, "quick": self.QUICK,
+                                     "agreed": g}
+        try:
+            got = L.estimate_for_pack(s, "A")
+            self.assertEqual((got["kind"], next(p["unit_gbp"] for p in got["prices"] if p["qty"] == 10)), ("agreed", 460))
+            import pdf_pack
+            text = " ".join(str(getattr(x, "text", "")) for x in pdf_pack.estimate_story(
+                {"kind": "ai", "label": "A", "data": self.AI, "agreed": g}))
+            self.assertIn("Agreed estimate", text)
+        finally:
+            L.AUTO_EST.pop("agreed-test", None)
+        self.assertIn("function agCard", PAGE)
+
+
 class EstimatesUseSDIsOwnFiguresTests(unittest.TestCase):
     """24 Nov 2026 (James: "get the estimating right to start with"): estimate_check.py measures both estimates against
     SDI's real estimate sheets and proposes SDI's figures; once checked they sit in studio_data/estimate_norms.json."""
@@ -3902,7 +3960,7 @@ class TwoDocumentsSDIAndTheClient(unittest.TestCase):
         finally:
             pdf_pack._safe_output = keep
         t = " ".join(subprocess.run(["pdftotext", sdi, "-"], capture_output=True, text=True).stdout.split())
-        for want in ("INTERNAL - FOR SDI ONLY", "Markup 35%", "GBP200.00", "GBP70.00", "GBP270", "GBP160.00", "GBP215"):
+        for want in ("INTERNAL - FOR SDI ONLY", "Markup 35%", "GBP200.00", "GBP70.00", "GBP270", "GBP160.00", "GBP220"):
             self.assertIn(want, t)
         # the client pack, from the same figures: the same customer prices, and no markup anywhere
         r = Path(tempfile.mkdtemp(prefix="pack-")) / "r.png"
@@ -3912,7 +3970,7 @@ class TwoDocumentsSDIAndTheClient(unittest.TestCase):
                                      str(r), est=fig, markup_pct=35)
         c = " ".join(subprocess.run(["pdftotext", path, "-"], capture_output=True, text=True).stdout.split())
         self.assertIn("£270", c)
-        self.assertIn("£215", c)
+        self.assertIn("£220", c)
         for never in ("35%", "markup", "Markup", "£200", "£160"):
             self.assertNotIn(never, c)
 
