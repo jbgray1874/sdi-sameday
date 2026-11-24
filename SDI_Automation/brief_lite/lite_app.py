@@ -3436,6 +3436,16 @@ def handle(number, name, text, image_path=None, voice=False, ch=None, new=False,
     if re.match(r"\s*sdi\b", str(b.get("client") or ""), re.I):
         b.pop("client", None)
     newc, oldc = str(upd.get("client") or "").strip().lower(), str(b.get("client") or "").strip().lower()
+    # 24 Nov 2026 (Muhammad's history: eight one-line chats): spelling the client out ("Aster" -> "A S T D A" -> "ASDA")
+    # counted as a new client each time - and on a call the listener's copy of every line after did too, so each line
+    # started a new chat (and closed the real one). Now: the same client however it's spelt or corrected is the same
+    # brief; a call never starts a new brief on its own; and a typed new client still does.
+    if newc and oldc and (record_only or t_override is not None or same_client(newc, oldc) or CORRECTING.search(text or "")):
+        if not record_only:
+            b["client"] = upd["client"]       # a correction of the spelling: the brief keeps going, the name is fixed
+        upd.pop("client", None)
+        t["updates"] = upd
+        newc = ""
     if newc and oldc and newc not in oldc and oldc not in newc:
         s["state"] = "closed"
         save_session(s)
@@ -5558,6 +5568,21 @@ def _voice_offered_visual(sid):
     return bool(r and OFFERED_VISUAL.search(r["text"] or ""))
 
 
+CORRECTING = re.compile(r"\b(sorry|i mean|i meant|no,? it'?s|actually|correction|spelt|spelled|not \w+,? (it'?s|but))\b", re.I)
+
+
+def same_client(a, b):
+    """The same client however it's written: 'M and S' / 'M&S', 'A S D A' / 'ASDA', a letter misheard ('ASTDA')."""
+    import difflib
+    k = lambda x: re.sub(r"[^a-z0-9]", "", str(x or "").lower().replace("&", "and"))
+    ka, kb = k(a), k(b)
+    if not ka or not kb:
+        return False
+    if ka in kb or kb in ka:
+        return True
+    return difflib.SequenceMatcher(None, ka, kb).ratio() >= 0.75 or _skeleton(ka) == _skeleton(kb)
+
+
 def _last_bot_line(sid):
     con = db()
     r = con.execute("SELECT text FROM messages WHERE session=? AND dir='out' AND text IS NOT NULL ORDER BY at DESC LIMIT 1",
@@ -5703,6 +5728,8 @@ def _answers_not_heard(s, updates):
     heard = _digits(" ".join((r["text"] or "") for r in rows))
     last = (rows[0]["text"] if rows else "") or ""
     words = re.findall(r"[a-z0-9]+", heard)
+    # 24 Nov 2026 (Muhammad spelling the client: "A S D A"): letters said one at a time are the word they spell
+    words += ["".join(m.split()) for m in re.findall(r"\b(?:[a-z] ){2,}[a-z]\b", heard)]
     if not words:
         return {"*": "Nothing clear was heard from the AM. Don't save anything - say you didn't catch it and ask again."}
     like = lambda w: any(w == h or (len(w) > 3 and difflib.SequenceMatcher(None, w, h).ratio() >= 0.8) for h in words)

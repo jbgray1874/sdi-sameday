@@ -3876,3 +3876,31 @@ class ChatsOf23And24Nov(unittest.TestCase):
             self.assertIn("placement", L._answers_not_heard({"id": "x", "brief": {}}, {"placement": "Window"}))
         finally:
             L.db = keep
+
+
+class SpellingTheClientIsNotANewChat(unittest.TestCase):
+    """24 Nov 2026 - Muhammad's history had eight one-line chats: spelling the client ("Aster" -> "A S T D A" ->
+    "ASDA") on a call counted as a new client each time, and every line after started another chat."""
+
+    def test_the_same_client_however_written(self):
+        self.assertTrue(L.same_client("A S T D A", "ASDA"))
+        self.assertTrue(L.same_client("M and S", "M&S"))
+        self.assertFalse(L.same_client("Boots", "Lindt"))
+
+    def test_a_call_never_starts_a_new_brief_by_itself(self):
+        c = L.app.test_client()
+        _, s = say(new_chat(), "Aster want an FSDU", {"client": "Aster", "unit_type": "FSDU"})
+        sid = s["id"]
+        L.log_msg(sid, "in", "A S T D A")
+        c.post("/api/rt/tool", json={"session": sid, "name": "record_answers", "arguments": {"updates": {"client": "ASTDA"}}})
+        L.log_msg(sid, "in", "Sorry, sorry, it's A S D A.")
+        c.post("/api/rt/tool", json={"session": sid, "name": "record_answers", "arguments": {"updates": {"client": "ASDA"}}})
+        s = L._session_by_id(sid)
+        self.assertEqual(s["brief"].get("client"), "ASDA")        # corrected, in the same chat
+        self.assertNotEqual(s.get("state"), "closed")
+
+    def test_typing_a_different_client_still_starts_a_new_brief(self):
+        who = new_chat()
+        _, s1 = say(who, "Boots want a counter unit", {"client": "Boots", "unit_type": "counter unit"})
+        _, s2 = say(who, "now a Lindt brief please", {"client": "Lindt"})
+        self.assertNotEqual(s1["id"], s2["id"])
