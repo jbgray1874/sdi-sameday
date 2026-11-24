@@ -42,9 +42,10 @@ def _f(v, default=None):
         return default
 
 
-def load_rates(path=TEMPLATE):
+def load_rates(path=None):
     """SDI's rates off the blank workbook -> {'ops': {name: {dept, rate, setup}}, 'steel_t', 'wire_t', 'laser': [(gauge,
     mm/s)], 'wire': [(gauge, m per tonne)], 'powder_kg'} or None when the workbook isn't there."""
+    path = path or TEMPLATE
     if not os.path.exists(path):
         return None
     import openpyxl

@@ -58,6 +58,7 @@ SETUP_WORDS = re.compile(r"set ?up|tooling|\btool\b|jig|fixture|programm|first[-
 
 kind_of = ai_estimate.kind_of
 RUNS = 3
+OUT_DIR = None            # this run's folder: the AI's sheet for each job goes in its 'sheets' folder
 SHEET_RATES = None        # SDI's rates from its blank estimate workbook - the AI estimate is then costed SDI's way
 
 
@@ -298,6 +299,23 @@ def check_one(job, whole, spend, ls, norms_in):
     with ThreadPoolExecutor(max_workers=RUNS) as ex_:
         runs = list(ex_.map(one_run, range(RUNS)))
     e = ai_estimate.steady(runs, q)
+    if e and e.get("method") == "sdi" and OUT_DIR:      # the AI's sheet for this job, to open beside SDI's real one
+        try:
+            import sdi_sheet
+            wb_path = os.path.join(OUT_DIR, "sheets", f"{job['job_no']}_AI_estimate.xlsx")
+            os.makedirs(os.path.dirname(wb_path), exist_ok=True)
+            sdi_sheet.fill_workbook(SHEET_RATES, e["plan"], wb_path, {
+                "customer": job.get("customer"), "description": job.get("description"), "quantity": q,
+                "note": f"SDI Live estimate check - the AI's sheet for job {job['job_no']}; SDI's own sheet: "
+                        f"{os.path.basename(job.get('path') or '')}"})
+            row["ai_sheet"] = os.path.basename(wb_path)
+        except Exception as ex:                        # noqa: BLE001
+            row["ai_sheet"] = f"not written ({type(ex).__name__})"
+        row["sdi_sheet"] = job.get("path") or ""
+        row["ai_parts"] = len(e["plan"].get("sheet_parts") or []) + len(e["plan"].get("wire_parts") or []) \
+            + len(e["plan"].get("other_sheet") or [])
+        row["ai_operations"] = len(e["plan"].get("operations") or [])
+        row["ai_material_sdi"], row["ai_labour_sdi"] = e["sdi"]["material"], e["sdi"]["labour"]
     if e:
         row["ai_runs"] = " / ".join(f"{v:,.0f}" for v in e.get("runs") or [])
         row["ai_spread_pct"] = e.get("spread_pct")
@@ -395,7 +413,7 @@ def main():
     ap.add_argument("--use-norms", action="store_true", help="test the AI estimate WITH studio_data\\estimate_norms.json "
                                                              "(after calibrating, to see it got closer)")
     a = ap.parse_args()
-    global RUNS, SHEET_RATES
+    global RUNS, SHEET_RATES, OUT_DIR
     RUNS = max(1, a.runs)
     if not a.old_ai:
         import sdi_sheet
@@ -408,6 +426,7 @@ def main():
     import lite_search as ls
     out = os.path.join(HERE, "out", "estimate_check", datetime.now().strftime("%Y-%m-%d_%H%M"))
     os.makedirs(out, exist_ok=True)
+    OUT_DIR = out
     rows = load_estimates(ls.ESTIMATES_DB)
     print(f"{len(rows)} estimate sheets with a unit cost", flush=True)
 
