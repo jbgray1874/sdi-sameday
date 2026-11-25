@@ -1541,13 +1541,16 @@ async function showBrand(name){name=(name||"").trim();if(brandKey(name)===brandK
  card.innerHTML=`<div class="blogo">${mark}</div><div><small>Client</small><strong>${esc(b.name)}</strong><div class="bsw"><i style="background:${b.c1}"></i><i style="background:${b.c2}"></i></div></div>`;
  // 25 Nov 2026 (Muhammad: "the animated brand banner appears in every reply"): every effect - the card's animation, the
  // big reveal and the "brand loaded" line - plays ONCE per chat and brand; after that only the colours follow quietly
- const k_=(typeof sid!=="undefined"&&sid||"")+"|"+brandKey(b.name),first=!brandShown.has(k_);brandShown.add(k_);
+ // 25 Nov 2026 (still repeating): keyed by brand only - a new chat has no id until its first reply, so the id made the
+ // same brand "new" a second time. brandShown is emptied when a chat is started or opened.
+ const k_=brandKey(b.name),first=!brandShown.has(k_);brandShown.add(k_);
  if(first){card.className="bcard";void card.offsetWidth}card.className="bcard on";
  {const vb=$("#vsbrand");if(vb)vb.innerHTML=`<i>${mark}</i>${esc(b.name)}`;
   const rv=$("#breveal");rv.innerHTML=`<div class="brin"><small>Briefing for</small><div class="brlogo">${mark}</div><strong>${esc(b.name)}</strong></div>`;
   if(first){rv.className="breveal";void rv.offsetWidth;rv.className="breveal on";clearTimeout(rv._t);rv._t=setTimeout(()=>rv.className="breveal",3000)}}
- if(first&&typeof log!=="undefined"&&log&&!log.querySelector(".bmsg[data-k='"+CSS.escape(k_)+"']")){const m=document.createElement("div");m.className="bmsg";m.dataset.k=k_;m.style.cssText=`--b1:${b.c1};--b2:${b.c2}`;m.innerHTML=`<div class="blogo">${mark}</div><span><b>${esc(b.name)}</b> - brand loaded · the concepts will use their logo and colours</span>`;
-  try{log.appendChild(m);scrollEnd()}catch(e){}}}
+ // 25 Nov 2026 (Matt: "defo need to dump this repeated graphic"): no "brand loaded" line in the chat any more -
+ // the client card and the brand colours say it
+}
 function showBrief(b){brief=b||{};sideSpaces(brief._spaces||[]);let have=0;
  $("#ess").innerHTML=NEED.map(([k,l])=>{const v=brief[k];if(v)have++;return `<div class="e ${v?"y":"n"}"><i>${v?"✓":""}</i><div><small>${l}</small><span>${esc(v||"needed")}</span></div></div>`}).join("");
  $("#ringc").style.strokeDashoffset=150.8*(1-have/5);briefHave=have;{const mb=$("#mbrief");if(mb){mb.textContent=`${have}/5`;mb.classList.toggle("full",have>=5)}}$("#ringc").style.stroke=have>=5?"var(--green)":"var(--red)";$("#ringt").textContent=`${have}/5`;
@@ -1602,7 +1605,7 @@ $("#send").onclick=()=>send();
 t.addEventListener("keydown",e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();send()}});
 t.addEventListener("input",()=>{t.style.height="auto";t.style.height=Math.min(180,t.scrollHeight)+"px"});
 function newBrief(){newChat(mine())}
-function newChat(pid){leavePage();if(rt)rtStop();if(pid)setProject(pid);fresh=true;step=0;sid=null;rememberChat();loadFiles();log.innerHTML="";gallery=[];refBox=optBox=null;
+function newChat(pid){leavePage();if(rt)rtStop();brandShown.clear();brandNow="";if(pid)setProject(pid);fresh=true;step=0;sid=null;rememberChat();loadFiles();log.innerHTML="";gallery=[];refBox=optBox=null;
  showBrief({});setStep(0);hero();loadProjects();$("#rail").classList.remove("open");t.focus()}
 $("#newb").onclick=newBrief;$("#newb2").onclick=newBrief;
 $("#fin").onclick=()=>send("Finish - give me the full brief PDF");
@@ -2297,7 +2300,7 @@ $("#hist").addEventListener("click",e=>{const a=e.target.closest(".ci");if(!a)re
 // What went wrong on the page goes to SDI Live's own log, so it can be found afterwards (Check-SameDay-Call.ps1).
 function reportProblem(what){try{fetch("/api/page-problem",{method:"POST",headers:{"Content-Type":"application/json"},
  body:JSON.stringify({what:String(what).slice(0,400),chat:sid||""})}).catch(()=>{})}catch(e){}}
-async function openSession(id){
+async function openSession(id){if(id!==sid&&typeof brandShown!=="undefined"){brandShown.clear();brandNow=""}
  // 9 Nov 2026: a chat that would not open used to do nothing at all. Now it says why, and the reason is logged.
  // The reason is the server's own words where it gives them ("Signed out - ...", "SDI Live isn't answering ...").
  // A restart takes a few seconds, so a busy or restarting answer is tried once more before it is reported.

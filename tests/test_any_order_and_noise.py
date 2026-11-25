@@ -4227,7 +4227,8 @@ console.log(JSON.stringify({r, logs}));"""
     def test_the_client_card_once_per_chat(self):
         page = (WORK / "brief_lite" / "lite_page.html").read_text(encoding="utf-8")
         self.assertIn("first=!brandShown.has(k_)", page)
-        self.assertIn("if(first&&typeof log", page)                       # the "brand loaded" line once too
+        self.assertIn("const k_=brandKey(b.name)", page)                    # not the chat id: a new chat has none yet
+        self.assertNotIn('m.className="bmsg"', page)                     # 25 Nov: the line in the chat is gone
 
 
 class FeedbackOn23Nov(unittest.TestCase):
