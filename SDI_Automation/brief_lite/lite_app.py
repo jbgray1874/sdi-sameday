@@ -7322,9 +7322,10 @@ def with_prefix(text, p):
 
 @app.route("/pwa/<name>")
 def pwa_file(name):
-    if name not in ("manifest.webmanifest", "icon-180.png", "icon-192.png", "icon-512.png", "mark.png", "lockup.png"):
+    if name not in ("manifest.webmanifest", "icon-180.png", "icon-192.png", "icon-512.png", "mark.png", "lockup.png", "offline.html"):
         abort(404)
-    mt = "application/manifest+json" if name.endswith(".webmanifest") else "image/png"
+    mt = ("application/manifest+json" if name.endswith(".webmanifest") else
+          "text/html" if name.endswith(".html") else "image/png")
     p = _prefix()
     if p and name == "manifest.webmanifest":     # installed from the phone: it opens at /sameday/, not the portal's root
         m = json.load(open(os.path.join(HERE, "pwa", name), encoding="utf-8"))

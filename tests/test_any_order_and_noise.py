@@ -405,6 +405,16 @@ class CarriedToThePhoneTests(unittest.TestCase):
         h = self.c.get("/", headers={"X-Forwarded-Prefix": "/x\"><script>"}).get_data(as_text=True)
         self.assertNotIn("SD_BASE", h)
 
+    def test_offline_on_the_phone_it_says_so(self):
+        """25 Nov 2026 (iPhone as an Intune web clip): no signal and nothing saved -> "Can't reach SDI Live"."""
+        r = self.c.get("/pwa/offline.html")
+        self.assertEqual(r.status_code, 200)
+        self.assertIn("text/html", r.headers["Content-Type"])
+        self.assertIn("Can't reach SDI Live", r.get_data(as_text=True))
+        js = self.c.get("/sw.js", headers=self.P).get_data(as_text=True)
+        self.assertEqual(js.count('"/sameday/pwa/offline.html"'), 2)
+        self.assertNotIn('"/pwa/', js)
+
     def test_installed_on_the_phone_it_opens_at_sameday(self):
         m = json.loads(self.c.get("/pwa/manifest.webmanifest", headers=self.P).get_data(as_text=True))
         self.assertEqual((m["start_url"], m["scope"]), ("/sameday/", "/sameday/"))
