@@ -1465,8 +1465,13 @@ def ballpark_for(s):
     import ballpark
     b = s["brief"]
     quotes, seen = [], set()
+    import lite_search as _ls
     for r in s.get("refs") or []:
         e = r.get("estimate") or {}
+        # 25 Nov 2026 (Home Bargains: "from SDI's 9677 (GBP62 a unit)" - its branding block, not a unit - was 1,244% off the
+        # AI estimate): only a whole unit's estimate is a starting point; a part's (a header, a shelf, a logo) never is
+        if e.get("description") and not _ls.is_whole_unit(e.get("description")):
+            continue
         if e.get("unit_cost") and r.get("job_no") not in seen:
             seen.add(r.get("job_no"))
             quotes.append({"job": str(r.get("job_no")), "name": (r.get("name") or "")[:60], "unit_cost": e["unit_cost"],
@@ -2789,11 +2794,17 @@ def finish_pack(s, ch, quiet=False):
     sig = json.dumps({k: v for k, v in b.items() if not k.startswith("_")}, sort_keys=True, default=str) + str(len(s["visuals"]))
     if b.get("_pack_sig") == sig and b.get("_pack_pdf") and os.path.exists(b["_pack_pdf"]):
         return ch, s                                   # nothing changed since the last pack: don't send it again
+    again = bool(b.get("_pack_pdf") and os.path.exists(b["_pack_pdf"]))
     save_session(s)
     pdf = build_pdf(s)
     b["_pack_sig"], b["_pack_pdf"] = sig, pdf
     save_session(s)
     left = left_count(b)
+    if again:    # 25 Nov 2026 (Muhammad: the brief appeared again and again): an update says so, once, in one line
+        ch.document(pdf, f"Brief - {b.get('client', '')} {b.get('unit_type', '')} (updated)".strip(), role="brief")
+        ch.text("I've updated the internal brief with the latest design" + (" and its estimate" if b.get("chosen_option") else "")
+                + " - this one replaces the earlier copy above.")
+        return ch, s
     ch.document(pdf, f"Brief - {b.get('client', '')} {b.get('unit_type', '')}".strip(), role="brief")
     ch.text("That's the full brief as a PDF - past quotes and how long similar jobs took, loading, timings and assumptions. "
             "Internal only; the client sheet is the one to send out."
@@ -3428,9 +3439,13 @@ def ref_lookup(b, text):
         and not re.search(r"\b(refer|reference|based? on|follow|use (it|that|the)|like that|same as)\b", text or "", re.I)
     # 4 Nov 2026: "like the" in its wanting sense ("I'd like the header lit", "they'd like the shelves in oak") set off a
     # past-job search and the voice offered a job nobody asked for - only "like the one we did", "like that", ...
-    if not ref_done and not asking_ and b.get("client") and not convo.pack_from(text or "") and (re.search(
+    # 25 Nov 2026 (Muhammad: "it asked about a past job, I confirmed the job, and it asked the same question again"): the
+    # answer "Standalone, no fixture" to "does it have to fit a fixture?" set off a past-job search - only "the fixture
+    # we did / called ..." points at a past job, and never while the fixture question itself is being answered
+    fixture_q = "fixture_system" in (b.get("_asking") or []) or re.search(r"\bfixture\b", _last_bot_line(b.get("_sid") or "") or "", re.I)
+    if not ref_done and not asking_ and b.get("client") and not convo.pack_from(text or "") and not fixture_q and (re.search(
             r"\b(refer|reference|based? on|(?<!\bi )(?<!'d )(?<!ould )(?<!\bwe )(?<!they )(?<!you )like (the|that|this|our|we)|"
-            r"same as|similar to|called|fixture|follow|"
+            r"same as|similar to|called|(the|that|this) (fixture|unit|job) (we|you|they|called|named|from|for)|follow|"
             r"latest|last (one|year|month)|this (month|year)|we (did|made|drew|just))\b", text or "", re.I)
             or re.search(r"\b(job|drawing|ga|dwg|project)\s*(number|no\.?|#)?\s*\d{3,6}\b", text or "", re.I)):
         # 3 Nov 2026 (demo check): 'just the job sheet for the studio' set off a past-job search
@@ -3533,6 +3548,7 @@ def handle(number, name, text, image_path=None, voice=False, ch=None, new=False,
                                                        "client, products, sizes, colours, materials, quantities, dates, budget, "
                                                        "delivery - then ask the next question.]\n\n" + "\n\n".join(parts))
             file_turn = True
+    b["_sid"] = s["id"]                 # 25 Nov 2026: so ref_lookup can see Sid's last question (the brief alone can't)
     first = not b.get("briefing_date")
     if first:   # Andy: the briefing date fills itself in and is read back to the briefer
         b["briefing_date"] = f"{date.today():%a %d %b %Y}"
@@ -3567,6 +3583,16 @@ def handle(number, name, text, image_path=None, voice=False, ch=None, new=False,
                                                text or "", re.I) and ("account_manager" in (b.get("_asking") or [])
                                                                      or re.search(r"\baccount manager\b", _last_bot_line(s["id"]), re.I)):
         upd["account_manager"] = me_
+        t["updates"] = upd
+    # 25 Nov 2026 (Muhammad: "Matt said he is the account manager, but it still asked for the account manager's name. It
+    # should already know who is chatting"): the person signed in is the account manager unless they say otherwise -
+    # filled in from the start, never asked; "the AM is Matt Evans" still replaces it
+    if me_ and str(b.get("account_manager") or "").strip().lower() in ("", "not known", "unknown", "don't know", "tbc") \
+            and not upd.get("account_manager"):
+        b["account_manager"] = me_
+    if me_ and t_override is None and re.match(r"^\W*(me|myself|it'?s me|that'?s me|i am( the contact)?)\W*$", text or "", re.I) \
+            and ("customer_name" in (b.get("_asking") or []) or re.search(r"\bcustomer contact\b", _last_bot_line(s["id"]), re.I)):
+        upd["customer_name"] = me_
         t["updates"] = upd
     # 28 Oct 2026: "SDI Displays" (a misheard pack answer) was saved as the client - then "Tesco" counted as a new client
     # and split the brief in two. SDI is us, never the client.
@@ -3774,8 +3800,26 @@ def handle(number, name, text, image_path=None, voice=False, ch=None, new=False,
         b["_conflict_ok"] = 1
     if t_override is None and asking == "_confirm" and GO_NOW.search(text or "") and not (t.get("updates") or {}):
         b["_conflict_ok"] = 1          # "just draw it" over the clash check: the AM has heard it and wants it as it is
+    # 25 Nov 2026 (Muhammad): the client pack asked for when only the internal brief was chosen - both packs now; before
+    # any render it starts the render's questions and the drawing, after one it makes the pack (never "added to the brief")
+    cp_ask = t_override is None and client_pack_asked(text)
+    if cp_ask:
+        if convo.pack_of(b) == "internal":
+            b["_pack"] = "both"
+            b.pop("_pack_assumed", None)
+        b.pop("_focus", None)
+        b.pop("_offer_declined", None)
+        if any(v.get("kind") == "render" for v in s["visuals"]):
+            if intent not in ("change_visual", "approve_visual"):
+                intent = "approve_visual"
+                t["change_request"] = t.get("change_request") or text
+        else:
+            b["_render_asked"] = 1
+            if b.get("output") in (None, "", "Brief only"):
+                b["output"] = "3D render and technical GA"
+            STOP_RENDERS.pop(s["id"], None)
     # the last question of the internal pack: "anything else to add?" - kept in the brief, then the PDF
-    if t_override is None and asking == "_extra_info":
+    if t_override is None and asking == "_extra_info" and not cp_ask and not asks_for_visual(text, b):
         b["_extra_asked"] = b["_finish_warned"] = 1
         if text and not re.match(r"\W*(no|nope|nothing|none|that'?s (all|it|everything)|all good|n/?a)\b", text, re.I):
             b["other_notes"] = add_note(b.get("other_notes"), text[:600])
@@ -4410,8 +4454,10 @@ def handle(number, name, text, image_path=None, voice=False, ch=None, new=False,
         ch.document(sheet, f"Option {label} client pack - the concept, specification, views, sizes"
                     + (", indicative budget" if est_ and pack_markup_ is not None else "")
                     + " and next steps - ready to send the client for approval", role="sheet")
-        if est_ and pack_markup_ is not None:
-            # 23 Nov 2026 (James: "two documents - one for SDI and one for the client"): SDI's own pricing, beside the pack
+        if est_ and pack_markup_ is not None and convo.pack_of(b) not in ("both", "internal"):
+            # 23 Nov 2026 (James: "two documents - one for SDI and one for the client"): SDI's own pricing, beside the pack.
+            # 25 Nov 2026 (Muhammad: "the internal pack appears twice"): with the internal brief too, the cost, markup and
+            # customer price are its estimate page - one internal document, not two
             try:
                 det_ = estimate_detail_for(s, wait_s=5)
                 sdi_ = pdf_pack.price_sheet(s, est_, det_, pack_markup_, OUT, label)
@@ -5173,7 +5219,7 @@ def api_rt_tool():
     if not s["brief"].get("_render_asked"):
         heard = _am_lines(s["id"])[:5 if js.get("name") in ("make_concepts", "more_options") else 1]
         # a plain "yes" is an ask only as the newest line, straight after Sid's offer - never an older yes
-        if any(asks_for_visual(x, s["brief"] if i == 0 else None) for i, x in enumerate(heard)) or \
+        if any(asks_for_visual(x, s["brief"] if i == 0 else None) or client_pack_asked(x) for i, x in enumerate(heard)) or \
                 (heard and CONFIRM_YES.search(heard[0]) and not NOT_YET.search(heard[0]) and _voice_offered_visual(s["id"])):
             s["brief"]["_render_asked"] = 1
             save_session(s)
@@ -5674,6 +5720,20 @@ def change_is_clear(line, sid=None):
         con.close()
         return bool(r and READ_BACK_CHANGE.search(r["text"] or ""))
     return False
+
+
+# 25 Nov 2026 (Muhammad: "I made an internal brief pack, then asked for a client pack as well. It didn't do it at first,
+# and only did it after I pushed it a lot"): "I want a client pack now", "let's make the client pack", "give me client pack"
+CLIENT_PACK_ASK = re.compile(r"\b(make|send|do|create|generate|give|build|want|need|get|let'?s|can (i|we|you)|could you|"
+                             r"where'?s|where is|now)\b.{0,30}\bclient (pack|sheet)s?\b|\bclient (pack|sheet)s?\b.{0,15}\b(now|please|next)\b",
+                             re.I)
+NO_CLIENT_PACK = re.compile(r"\b(don'?t|do not|no need for|not|without)\b(\s+\w+){0,3}?\s+(the\s+)?client (pack|sheet)", re.I)
+
+
+def client_pack_asked(text):
+    """Did the AM ask, in these words, for the client pack? ('I don't need the client pack' is not an ask.)"""
+    t = text or ""
+    return bool(CLIENT_PACK_ASK.search(t)) and not NO_CLIENT_PACK.search(t)
 
 
 PACK_FOR = re.compile(r"\b(make|send|do|create|generate|give me|build|want|need)\b.{0,25}\b(client pack|client sheet|the pack|"

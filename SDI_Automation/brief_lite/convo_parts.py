@@ -58,7 +58,21 @@ def pack_label(b):
             if p in PACK_IDS else "not chosen yet")
 # 2 Nov 2026 (Andy: "like ChatGPT - not a fixed list of questions before every render"): only what the picture can't be
 # drawn without. Everything else the AM says is still recorded; what they don't say is assumed sensibly and marked (assumed).
-RENDER_KEYS = {"client", "unit_type", "size", "products_held", "colours_graphics"}   # + 2 that change the picture most (Muhammad: "a few, not many")
+# 25 Nov 2026 (Muhammad: "when I asked for only a client pack, it asked 2-3 questions and skipped important ones, such as
+# the colour and whether there will be lights"): materials, lighting and where it goes change the picture too, so they're
+# always asked before the first render. Andy decides the final list: ai_switch.json "render_questions" replaces it.
+RENDER_KEYS = {"client", "unit_type", "size", "products_held", "colours_graphics", "materials", "lighting", "placement"}
+
+
+def render_keys():
+    """The questions always asked before a first render: ai_switch.json "render_questions" (a list of brief fields), else
+    RENDER_KEYS. The client and the kind of unit are always in it - nothing can be drawn without them."""
+    try:
+        j = json.load(open(os.path.join(BASE, "studio_data", "ai_switch.json"), encoding="utf-8"))
+        got = {str(k) for k in (j.get("render_questions") or []) if str(k) in FIELDS}
+    except Exception:                                          # noqa: BLE001
+        got = set()
+    return (got or set(RENDER_KEYS)) | {"client", "unit_type"}
 FINAL_Q = "Any changes, or shall I finalise this one and make its GA and the client pack?"
 FINAL_OPTS = ["Make changes", "Finalise - GA + client pack"]
 EXTRA_Q = "That's all my questions. Is there anything else you know that should go in the brief - anything at all?"
@@ -120,7 +134,7 @@ def pack_of(b):
 
 def render_plan(b):
     """The questions still open that the render and its GA need - the rest of Andy's template waits for the internal pack."""
-    keys = set(RENDER_KEYS)
+    keys = render_keys()
     # 3 Nov 2026: only what THIS render needs - a sign, header, wrap or jacket holds no products
     if re.search(r"\b(sign|signage|header|wrap|banner|graphic|decal|jacket|workwear|uniform|lightbox|totem|wobbler|poster|"
                  r"frame|screen|hoarding|flag|mural|vinyl|livery|floor graphic)s?\b", str(b.get("unit_type") or ""), re.I) \
@@ -150,8 +164,9 @@ def stage(s):
         # creating a render, without being prompted. It must wait for a prompt"): nothing is drawn until the AM asks.
         # The brief's questions come first, the picture's own when it's the client pack alone; then one offer.
         if not b.get("_render_asked"):
-            if pack == "both" and plan(b) and b.get("_focus") != "render":
-                return "internal_q"
+            # 25 Nov 2026 (Muhammad: "when I pick both packs, it starts with the internal questions. It should ask 4-5
+            # questions and make the client pack first"): the render's questions, then the offer; the internal
+            # questions follow the client pack - or come first only when the AM asks for that (_focus, above)
             if render_plan(b) and not b.get("_render_q_done"):
                 return "render_q"
             if not b.get("_offer_declined"):

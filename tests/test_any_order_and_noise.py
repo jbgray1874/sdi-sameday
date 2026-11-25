@@ -2682,7 +2682,7 @@ class NothingIsDrawnUntilTheAMAsksTests(unittest.TestCase):
     def test_sainsburys_an_fsdu_and_a_size_draws_nothing(self):
         who, out, s = self.matts_opening()
         self.assertEqual(self.drawn, [])
-        self.assertEqual(convo.stage(s), "internal_q")             # the brief's questions, not the render
+        self.assertEqual(convo.stage(s), "render_q")               # the render's questions first (25 Nov), nothing drawn
         self.assertFalse(s["brief"].get("_render_asked"))
         out, s = say(who, "it holds the Taste the Difference range", {"products_held": "Taste the Difference range"})
         self.assertEqual(self.drawn, [])
@@ -2988,6 +2988,105 @@ def _fake_sdi_template(path):
         ws.cell(271 + i, 9, m)
     wb.save(path)
     return path
+
+
+class ClientPackFirstAndOnRequestTests(unittest.TestCase):
+    """25 Nov 2026 (Muhammad): 'both' asks the render's questions and makes the client pack first; the questions before
+    a first render include materials, lighting and placement; 'I want a client pack now' after an internal brief - or
+    before any render - starts it, and is never 'added to the brief'."""
+
+    def setUp(self):
+        self.keep, self.drawn = L.make_visual, []
+        L.make_visual = lambda s_, kind, *a, **k: (self.drawn.append(kind), (None, "stopped (test)"))[1]
+
+    def tearDown(self):
+        L.make_visual = self.keep
+
+    def test_both_starts_with_the_renders_questions(self):
+        who = new_chat()
+        say(who, "hi")
+        out, s = say(who, "both", {}, "answer")
+        s["brief"].update(_pack="both", client="Home Bargains", unit_type="Clothes shelves")
+        L.save_session(s)
+        self.assertEqual(convo.stage(s), "render_q")
+        keys = {k for k, *_ in convo.render_plan(s["brief"])}
+        self.assertTrue({"size", "materials", "lighting", "placement", "colours_graphics", "products_held"} <= keys, keys)
+        self.assertFalse(keys & {"project_name", "account_manager", "food_safe", "customer_name"}, keys)
+
+    def test_the_must_ask_list_is_a_setting(self):
+        import json as _json
+        p = os.path.join(L.BASE, "studio_data", "ai_switch.json")
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        old = open(p, encoding="utf-8").read() if os.path.exists(p) else None
+        try:
+            _json.dump({"render_questions": ["size", "lighting", "not_a_field"]}, open(p, "w", encoding="utf-8"))
+            self.assertEqual(convo.render_keys(), {"client", "unit_type", "size", "lighting"})
+        finally:
+            if old is None:
+                os.remove(p)
+            else:
+                open(p, "w", encoding="utf-8").write(old)
+        self.assertTrue({"materials", "lighting", "placement"} <= convo.render_keys())
+
+    def test_the_words_that_ask_for_the_client_pack(self):
+        for line in ("i want a client pack now", "let make client pack now", "give me client pack", "make the client pack",
+                     "where is my client pack?", "Could you make the client pack for this brief?"):
+            self.assertTrue(L.client_pack_asked(line), line)
+        for line in ("I don't need the client pack", "the client is Dell", "just the internal brief", "no client pack"):
+            self.assertFalse(L.client_pack_asked(line), line)
+
+    def test_a_client_pack_after_the_internal_brief_starts_the_render(self):
+        who = new_chat()
+        say(who, "hi")
+        out, s = say(who, "I want to create an internal brief", {}, "answer")
+        s["brief"].update(_pack="internal", client="Dell", unit_type="FSDU", size="2000 x 1000 x 800 mm",
+                          materials="Oak veneer", placement="Window", products_held="20 laptops",
+                          colours_graphics="Logo on header", lighting="LED header and lit shelves",
+                          _extra_asked=1, _asking="_extra_info")
+        L.save_session(s)
+        out, s = say(who, "i want a client pack now")
+        b = s["brief"]
+        self.assertEqual(convo.pack_of(b), "both")
+        self.assertTrue(b.get("_render_asked"))
+        self.assertNotIn("i want a client pack", str(b.get("other_notes") or ""))
+        self.assertNotIn("Added that to the brief", " ".join(r.get("text") or "" for r in out))
+
+
+class WhoIsChattingAndPastJobsAskedOnceTests(unittest.TestCase):
+    """25 Nov 2026 (Muhammad): the account manager is the person signed in, filled in without asking; and an answer about
+    a fixture ("Standalone, no fixture") never sets off a past-job search, so a confirmed job isn't asked about again."""
+
+    def test_the_signed_in_person_is_the_account_manager(self):
+        who = new_chat()
+        out, s = say(who, "hi")
+        me = L.who_of(s)
+        if not me:
+            s["name"] = me = "Muhammad Yazir"
+            L.save_session(s)
+            out, s = L.handle(who, "Test", "it's for Dell")[0].out, L._session_by_id(s["id"])
+        self.assertEqual(s["brief"].get("account_manager"), me)
+        self.assertNotIn("account_manager", [k for k, *_ in convo.plan(s["brief"])])
+
+    def test_a_named_account_manager_still_wins(self):
+        who = new_chat()
+        out, s = say(who, "hi")
+        out, s = say(who, "the account manager is Matt Evans", {"account_manager": "Matt Evans"})
+        self.assertEqual(s["brief"].get("account_manager"), "Matt Evans")
+
+    def test_standalone_no_fixture_is_not_a_past_job(self):
+        b = {"client": "TTI", "unit_type": "Shelf system", "_asking": ["fixture_system"]}
+        called = []
+        real = L.lite_search_resolve if hasattr(L, "lite_search_resolve") else None
+        import lite_search
+        keep = lite_search.resolve_reference
+        lite_search.resolve_reference = lambda *a, **k: called.append(a) or {"options": [], "kind": "none"}
+        try:
+            REF_LOOKUP(b, "Standalone, no fixture")
+            REF_LOOKUP(dict(b, _asking=[]), "Standalone, no fixture fixing needed")
+        finally:
+            lite_search.resolve_reference = keep
+        self.assertEqual(called, [])
+        self.assertFalse(b.get("_ref_ask") or b.get("_ref_more"))
 
 
 class ADroppedConnectionIsNotAnErrorTests(unittest.TestCase):
