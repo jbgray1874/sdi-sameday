@@ -4639,7 +4639,7 @@ def handle(number, name, text, image_path=None, voice=False, ch=None, new=False,
         try:             # 21 Nov 2026: and its estimate, every time - worked out in the background, shown when ready
             auto_estimate_start(s, label)
             ch.flush()
-            ch.out.append({"type": "text", "role": "auto_estimate", "label": label, "text": ""})
+            ch.out.append({"type": "text", "role": "auto_estimate", "label": label, "text": "", "quiet": True})
         except Exception:                                    # noqa: BLE001
             pass
         if ga_card:      # the GA on its own, after the pack - to look at closely or change its sizes
@@ -5061,8 +5061,11 @@ def asks_for_visual(text, b=None):
     """Did the AM ask, in these words, for something to be drawn? A plain yes counts only straight after the offer."""
     text = text or ""
     asked = RENDER_REQUEST.search(text) and not ABOUT_RENDER.search(text)
+    # 25 Nov 2026 (Matt said "not yet", then "New design" to "a repeat of 11367, or a new design?" - and it drew): "new
+    # design" is an answer to that question, not an ask; a new render is asked for with a verb ("make a new design")
     if asked or GO_VISUAL.search(text) or GO_NOW.search(text) or FOCUS_RENDER.search(text) \
-            or re.search(r"\bnew (render|visual|concept|design)\b", text, re.I):
+            or re.search(r"\b(make|draw|do|give|show|create|generate|want|need|let'?s (see|have|do))\b.{0,15}\bnew "
+                         r"(render|visual|concept|design|option)s?\b", text, re.I):
         return True
     return bool(b and b.get("_offer_asked") and not b.get("_render_asked") and CONFIRM_YES.search(text)
                 and not NOT_YET.search(text))
@@ -5681,7 +5684,12 @@ def api_rt_tool():
         _busy_until_done(s["id"], js.get("name"), jid)
     JOBS[jid]["n_renders"] = sum(1 for v in s["visuals"] if v.get("kind") == "render")   # 29 Oct: was a render really made?
     JOBS[jid]["tool"] = js.get("name")
-    if js.get("name") in rt.SLOW:
+    # 25 Nov 2026 (Daniella: "you can finalise that one" -> "finalising option A now", and no pack came): choosing an
+    # option first asks "customer price or internal price?" - an instant reply, so the voice waits for it and asks it,
+    # instead of being told "working on it" while the pack waits for an answer nobody heard
+    price_q = js.get("name") == "choose_option" and not s["brief"].get("_price_for") \
+        and str(args.get("price_for") or "") not in ("customer", "internal")
+    if js.get("name") in rt.SLOW and not price_q:
         drawing = js.get("name") in ("make_concepts", "change_option", "more_options", "show_views")
         return jsonify({"turn": jid, "slow": True,
                         "output": json.dumps({"started": True, "note": (
@@ -5693,6 +5701,9 @@ def api_rt_tool():
         if JOBS[jid]["done"]:
             break
         time.sleep(0.1)
+    if price_q and not JOBS[jid]["done"]:      # no price question after all: the pack is being made - followed as usual
+        return jsonify({"turn": jid, "slow": True, "output": json.dumps({"started": True, "note": (
+            "Working on it - it appears on screen shortly. Tell the AM in one short line.")})})
     s = _session_by_id(s["id"]) or s
     saved_now = None
     if js.get("name") == "record_answers":

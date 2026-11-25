@@ -3246,6 +3246,22 @@ class PricingOnlyWhenAskedTests(unittest.TestCase):
         self.assertIn(">Show it</button>", PAGE)
 
 
+class MattsNotYetHoldsTests(unittest.TestCase):
+    """25 Nov 2026 (Matt: "still jumps into visual without having all questions answered"): he said "not yet", then
+    "New design" to "a repeat of 11367, or a new design?" - which counted as asking for a render, and it drew."""
+
+    def test_new_design_as_an_answer_is_not_an_ask(self):
+        for line in ("New design", "new design", "a new design please", "it's a new design", "Something new"):
+            self.assertFalse(L.asks_for_visual(line), line)
+        for line in ("make a new design", "draw me a new concept", "can I see a new render", "let's see a new option"):
+            self.assertTrue(L.asks_for_visual(line), line)
+
+    def test_on_a_call_choosing_an_option_asks_the_price_first(self):
+        src = (WORK / "brief_lite" / "lite_app.py").read_text(encoding="utf-8")
+        self.assertIn('price_q = js.get("name") == "choose_option" and not s["brief"].get("_price_for")', src)
+        self.assertIn('if js.get("name") in rt.SLOW and not price_q:', src)
+
+
 class ADroppedConnectionIsNotAnErrorTests(unittest.TestCase):
     """25 Nov 2026 (Muhammad: "Failed to fetch" came up in the chat): a message sent again after a dropped connection
     gets the same turn back - never run twice - and the page never shows the browser's raw error."""
