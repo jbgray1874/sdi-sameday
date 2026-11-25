@@ -1,0 +1,16 @@
+{
+  "name": "sdi-live-app",
+  "version": "1.0.0",
+  "private": true,
+  "description": "SDI Live as an installed app for iPhone and Android - the same SDI Live screens, served by SDI's server.",
+  "scripts": {
+    "sync": "cap sync",
+    "icons": "python3 make_icons.py"
+  },
+  "dependencies": {
+    "@capacitor/android": "^7.6.10",
+    "@capacitor/cli": "^7.6.10",
+    "@capacitor/core": "^7.6.10",
+    "@capacitor/ios": "^7.6.10"
+  }
+}

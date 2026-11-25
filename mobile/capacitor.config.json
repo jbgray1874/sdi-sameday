@@ -1,0 +1,29 @@
+{
+  "appId": "com.wearesdi.sdilive",
+  "appName": "SDI Live",
+  "webDir": "www",
+  "server": {
+    "url": "https://sdiintelligence-sdidisplays.msappproxy.net/sameday/",
+    "allowNavigation": [
+      "sdiintelligence-sdidisplays.msappproxy.net",
+      "login.microsoftonline.com",
+      "login.microsoft.com",
+      "login.live.com",
+      "aadcdn.msauth.net",
+      "aadcdn.msftauth.net",
+      "*.msauth.net",
+      "*.msftauth.net",
+      "*.microsoftonline.com"
+    ],
+    "errorPath": "offline.html"
+  },
+  "ios": {
+    "contentInset": "never",
+    "limitsNavigationsToAppBoundDomains": false,
+    "backgroundColor": "#F7F6F1"
+  },
+  "android": {
+    "backgroundColor": "#F7F6F1",
+    "allowMixedContent": false
+  }
+}
