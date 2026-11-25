@@ -1519,12 +1519,14 @@ async function showBrand(name){name=(name||"").trim();if(brandKey(name)===brandK
  const R=document.documentElement.style;R.setProperty("--b1",b.c1);R.setProperty("--b2",b.c2);document.body.classList.add("branded");
  const mark=b.logo?`<img src="${b.logo}" alt="">`:`<b>${esc(b.mono||"?")}</b>`;
  card.innerHTML=`<div class="blogo">${mark}</div><div><small>Client</small><strong>${esc(b.name)}</strong><div class="bsw"><i style="background:${b.c1}"></i><i style="background:${b.c2}"></i></div></div>`;
- card.className="bcard";void card.offsetWidth;card.className="bcard on";
+ // 25 Nov 2026 (Muhammad: "the animated brand banner appears in every reply"): every effect - the card's animation, the
+ // big reveal and the "brand loaded" line - plays ONCE per chat and brand; after that only the colours follow quietly
+ const k_=(typeof sid!=="undefined"&&sid||"")+"|"+brandKey(b.name),first=!brandShown.has(k_);brandShown.add(k_);
+ if(first){card.className="bcard";void card.offsetWidth}card.className="bcard on";
  {const vb=$("#vsbrand");if(vb)vb.innerHTML=`<i>${mark}</i>${esc(b.name)}`;
   const rv=$("#breveal");rv.innerHTML=`<div class="brin"><small>Briefing for</small><div class="brlogo">${mark}</div><strong>${esc(b.name)}</strong></div>`;
-  const k_=(typeof sid!=="undefined"&&sid||"")+"|"+brandKey(b.name);
-  if(!brandShown.has(k_)){brandShown.add(k_);rv.className="breveal";void rv.offsetWidth;rv.className="breveal on";clearTimeout(rv._t);rv._t=setTimeout(()=>rv.className="breveal",3000)}}
- if(typeof log!=="undefined"&&log){const m=document.createElement("div");m.className="bmsg";m.style.cssText=`--b1:${b.c1};--b2:${b.c2}`;m.innerHTML=`<div class="blogo">${mark}</div><span><b>${esc(b.name)}</b> - brand loaded · the concepts will use their logo and colours</span>`;
+  if(first){rv.className="breveal";void rv.offsetWidth;rv.className="breveal on";clearTimeout(rv._t);rv._t=setTimeout(()=>rv.className="breveal",3000)}}
+ if(first&&typeof log!=="undefined"&&log&&!log.querySelector(".bmsg[data-k='"+CSS.escape(k_)+"']")){const m=document.createElement("div");m.className="bmsg";m.dataset.k=k_;m.style.cssText=`--b1:${b.c1};--b2:${b.c2}`;m.innerHTML=`<div class="blogo">${mark}</div><span><b>${esc(b.name)}</b> - brand loaded · the concepts will use their logo and colours</span>`;
   try{log.appendChild(m);scrollEnd()}catch(e){}}}
 function showBrief(b){brief=b||{};sideSpaces(brief._spaces||[]);let have=0;
  $("#ess").innerHTML=NEED.map(([k,l])=>{const v=brief[k];if(v)have++;return `<div class="e ${v?"y":"n"}"><i>${v?"✓":""}</i><div><small>${l}</small><span>${esc(v||"needed")}</span></div></div>`}).join("");
@@ -1541,7 +1543,10 @@ function showBrief(b){brief=b||{};sideSpaces(brief._spaces||[]);let have=0;
  if(have>=1)setStep(0)}
 // ---------- talking to the server
 async function poll(turn,wait){let seen=0;
- for(;;){if(wait.dataset.stopped){wait.remove();busy=false;$("#send").disabled=false;vnReply=false;vnQueue=[];row("Stopped. Anything already being drawn finishes and appears under Images - nothing new is made.");return}let r;try{r=await fetch("/api/turn/"+turn).then(r=>r.json())}catch(e){await new Promise(z=>setTimeout(z,2000));continue}
+ for(;;){if(wait.dataset.stopped){wait.remove();busy=false;$("#send").disabled=false;vnReply=false;vnQueue=[];row("Stopped. Anything already being drawn finishes and appears under Images - nothing new is made.");return}let r;try{const res=await fetch("/api/turn/"+turn);
+   if(res.status===404){wait.remove();busy=false;$("#send").disabled=false;   // 25 Nov 2026: the server restarted mid-reply
+    row("SDI Live restarted while it was working on that, so the reply was lost. Open this chat again from the list - anything already made is there - and ask again if it isn't.");return}
+   r=await res.json()}catch(e){await new Promise(z=>setTimeout(z,2000));continue}
   for(;seen<r.replies.length;seen++){wait.remove();render(r.replies[seen]);log.appendChild(wait);scrollEnd()}
   if(r.brief&&Object.keys(r.brief).length)showBrief(r.brief);
   if(r.session){sid=r.session;rememberChat()}
@@ -1560,8 +1565,18 @@ async function send(text,shown,vnRow){text=(text??t.value).trim();if(!text||busy
  if(!project){toast("Pick your name first");newBrief();return}
  const hero=$(".hero");if(hero)hero.remove();stopSpeaking();lastAsk="";
  t.value="";t.style.height="";busy=true;$("#send").disabled=true;if(vnRow){const tx=vnRow.querySelector(".vtx");if(tx){tx.textContent="";tx.title=shown||text}}else row(esc(shown||text),true);const w=waiter();
- try{const r=await fetch("/api/chat",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({text,new:!sid,session:sid,project,who,character:CH.key,spaces:!sid&&pendingSpaces?pendingSpaces:undefined})}).then(r=>r.json());fresh=false;await poll(r.turn,w)}
- catch(e){w.querySelector(".lbl").textContent="Sorry - "+e;busy=false;$("#send").disabled=false}}
+ // 25 Nov 2026 ("Failed to fetch" mid-chat): a dropped connection (phone changing network, VPN, the server restarting)
+ // is tried again for up to ~40 s under the same message id - the server never runs one message twice - then the text
+ // goes back in the box with a plain message, never the browser's raw error
+ const cid=Date.now().toString(36)+Math.random().toString(36).slice(2,8);
+ const body=JSON.stringify({text,cid,new:!sid,session:sid,project,who,character:CH.key,spaces:!sid&&pendingSpaces?pendingSpaces:undefined});
+ let r=null;for(let i=0;i<8&&!r;i++){if(w.dataset.stopped)break;
+  try{const res=await fetch("/api/chat",{method:"POST",headers:{"Content-Type":"application/json"},body});if(!res.ok)throw new Error("server "+res.status);r=await res.json()}
+  catch(e){if(i===0)reportProblem("send: "+((e&&e.message)||e));w.querySelector(".lbl").textContent="The connection dropped - trying again…";await new Promise(z=>setTimeout(z,Math.min(8000,1500*(i+1))))}}
+ if(!r||!r.turn){w.querySelector(".lbl").textContent="Couldn't reach SDI Live - check the connection. Your message is back in the box: press Send to try again.";
+  w.querySelector(".sp")?.remove();if(!t.value)t.value=text;busy=false;$("#send").disabled=false;return}
+ try{fresh=false;await poll(r.turn,w)}
+ catch(e){reportProblem("reply: "+((e&&e.message)||e));w.querySelector(".lbl").textContent="Something went wrong showing the reply - open the chat again from the list to see it.";busy=false;$("#send").disabled=false}}
 window.send=send;
 $("#send").onclick=()=>send();
 t.addEventListener("keydown",e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();send()}});
@@ -1579,7 +1594,7 @@ async function upload(list){const fs=[...list];if(!fs.length||busy)return;if(!pr
   if(rt){const fl=await fetch("/api/files?session="+sid).then(r=>r.json()).catch(()=>[]);const names=new Set(fs.map(f=>f.name));
    const got=fl.filter(f=>names.has(f.name)).map(f=>f.name+": "+(f.what||"")).join(" | ").slice(0,1500);
    rtSay({type:"conversation.item.create",item:{type:"message",role:"user",content:[{type:"input_text",text:"[Showroom: the AM just uploaded files and they're saved to the brief - "+got+". Use them from now on; tell the AM in one sentence what you took from them, then carry on.]"}]}});rtSay({type:"response.create"})}}
- catch(e){w.querySelector(".lbl").textContent="Sorry - "+e;busy=false;$("#send").disabled=false}finally{$("#file").value=""}}
+ catch(e){reportProblem("upload: "+((e&&e.message)||e));w.querySelector(".lbl").textContent="Couldn't send the files - the connection dropped. Please add them again.";busy=false;$("#send").disabled=false}finally{$("#file").value=""}}
 $("#file").onchange=()=>upload($("#file").files);
 $("#addf").onclick=()=>$("#file").click();$("#drop").onclick=()=>$("#file").click();
 ["dragover","dragenter"].forEach(ev=>document.addEventListener(ev,e=>{e.preventDefault();$("#drop").classList.add("on")}));
@@ -1966,7 +1981,11 @@ async function rtEvent(ev){const ty=ev.type||"";
  else if(ty==="error"){console.warn("realtime",ev.error);if(ev.error&&/expired|session/i.test(ev.error.message||""))toast(ev.error.message)}}
 async function rtTool(call_id,name,args){
  const LBL={make_concepts:"Making the concepts and checking them…",choose_option:"Drawing the GA and the client sheet…",change_option:"Changing that option…",more_options:"Making more options…",finish_brief:"Building the full brief PDF…",show_past_work:"Looking through SDI's history…",show_views:"Drawing it from other angles…"};
- let j;try{j=await fetch("/api/rt/tool",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({session:sid,name,arguments:args})}).then(r=>r.json())}catch(e){j={output:JSON.stringify({error:String(e)})}}
+ // 25 Nov 2026: a dropped connection is tried once more (a second render is refused as busy, never drawn twice), then
+ // the voice gets plain words to say - never "Failed to fetch"
+ let j;for(let i=0;i<2&&!j;i++){try{j=await fetch("/api/rt/tool",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({session:sid,name,arguments:args})}).then(r=>r.json())}
+  catch(e){if(i===0){reportProblem("rt tool "+name+": "+((e&&e.message)||e));await new Promise(z=>setTimeout(z,1500))}
+   else j={output:JSON.stringify({error:"the connection to SDI Live dropped for a moment - tell the AM in one short sentence and offer to try that again"})}}}
  if(j.transcription&&j.transcription.prompt&&rt){rt.hints=[...(rt.hints||[]),((j.transcription.prompt||"")+" "+(j.transcription.keywords||[]).join(", ")).trim()].slice(-3);rt.tr=j.transcription;   // the brief named more: the transcriber listens for it too
   rtSay({type:"session.update",session:{type:"realtime",audio:{input:{transcription:j.transcription}}}})}
  rtSay({type:"conversation.item.create",item:{type:"function_call_output",call_id,output:j.output||"{}"}});rtContext(600);
@@ -2007,7 +2026,7 @@ async function lateFinish(turn,seen){const sid0=sid,t0=Date.now();
 async function pollQuiet(turn,wait,maxMs){let seen=0;const t0=Date.now();   // like poll(), but the voice does the asking, so question cards stay hidden
  for(;;){if(wait.dataset.stopped){wait.remove();break}   // Stop on a live call: don't sit waiting for the picture
   if(maxMs&&Date.now()-t0>maxMs){wait.dataset.late="1";wait.dataset.seen=seen;wait.remove();break}
-  let r;try{r=await fetch("/api/turn/"+turn).then(r=>r.json())}catch(e){await new Promise(z=>setTimeout(z,2000));continue}
+  let r;try{const res=await fetch("/api/turn/"+turn);if(res.status===404){wait.remove();break}r=await res.json()}catch(e){await new Promise(z=>setTimeout(z,2000));continue}
   for(;seen<r.replies.length;seen++){const x=r.replies[seen];if(["ask","choose_output"].includes(x.role)||(x.type==="text"&&!x.role))continue;wait.remove();render(x);log.appendChild(wait);scrollEnd()}
   if(r.brief&&Object.keys(r.brief).length)showBrief(r.brief);
   if(r.done){wait.remove();break}await new Promise(z=>setTimeout(z,1200))}
@@ -2089,7 +2108,7 @@ async function listen(){if(!talkOn||busy)return;
  r.onstop=async()=>{st.getTracks().forEach(x=>x.stop());ctx.close();vad=null;
   if(!keep||!talkOn){if(talkOn){talkUI(true,"Didn't hear anything - tap 🎧 Talk to start again");talkOn=false;$("#talk").classList.remove("on")}return}
   talkUI(true,"Got it - working it out…");const fd=new FormData();fd.append("audio",new Blob(ch,{type:r.mimeType||"audio/webm"}),"talk.webm");
-  try{const j=await fetch("/api/voice",{method:"POST",body:fd}).then(r=>r.json());if(j.text&&j.text.trim().length>1){voCap(j.text,"you");send(j.text)}else{lastAsk="Sorry, I didn't catch that - say it again?";talkTurn()}}catch(e){toast("Sorry - "+e)}};
+  try{const j=await fetch("/api/voice",{method:"POST",body:fd}).then(r=>r.json());if(j.text&&j.text.trim().length>1){voCap(j.text,"you");send(j.text)}else{lastAsk="Sorry, I didn't catch that - say it again?";talkTurn()}}catch(e){reportProblem("voice: "+((e&&e.message)||e));toast("Couldn't send that - the connection dropped. Say it again in a moment.",6000)}};
  r.start(250);tick()}
 // hold to talk - like a WhatsApp voice note (22 Oct 2026): hold = record, let go = send,
 // slide up = lock (hands-free, then send or bin), slide left = cancel (the mic drops into the bin)
@@ -2124,7 +2143,7 @@ const mic=$("#mic");
     const fd=new FormData();fd.append("audio",blob,"note.webm");if(sid)fd.append("session",sid);
     try{const j=await fetch("/api/voice",{method:"POST",body:fd}).then(r=>r.json());
      if(j.text&&j.text.trim().length>1)window.send(j.text,null,d);else{d.querySelector(".vtx").textContent="Couldn't make that out - try again, a bit closer to the mic"}}
-    catch(err){d.querySelector(".vtx").textContent="Sorry - "+err}
+    catch(err){reportProblem("voice note: "+((err&&err.message)||err));d.querySelector(".vtx").textContent="Couldn't send this voice note - the connection dropped. Record it again in a moment."}
     return}
    if(send){teardown();toast("Hold the mic while you talk");return}
    mic.classList.remove("rec");mic.style.transform="";if(lock){lock.remove();lock=null}

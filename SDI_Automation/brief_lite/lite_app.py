@@ -6033,8 +6033,23 @@ def api_chat():
     if js.get("character"):
         import characters
         PENDING_CHARACTER[who] = characters.key(js["character"])
-    return jsonify({"turn": _start_turn(who, _project_name(project) or "Web", (js.get("text") or "").strip(),
-                                        new=bool(js.get("new")) or not sid, sid=sid, project=project)})
+    # 25 Nov 2026 ("Failed to fetch" mid-chat): the page sends again when the connection drops; the same message id
+    # gets the same turn back, so a message that did arrive is never run twice
+    cid = re.sub(r"[^\w-]", "", str(js.get("cid") or ""))[:64]
+    with _SENT_LOCK:
+        now = time.time()
+        for k in [k for k, (t_, _) in _SENT.items() if now - t_ > 900]:
+            _SENT.pop(k, None)
+        if cid and cid in _SENT:
+            return jsonify({"turn": _SENT[cid][1], "again": True})
+        turn = _start_turn(who, _project_name(project) or "Web", (js.get("text") or "").strip(),
+                           new=bool(js.get("new")) or not sid, sid=sid, project=project)
+        if cid:
+            _SENT[cid] = (now, turn)
+    return jsonify({"turn": turn})
+
+
+_SENT, _SENT_LOCK = {}, threading.Lock()     # message id -> (when, turn): a resend after a dropped connection
 
 
 def _project_id(pid):

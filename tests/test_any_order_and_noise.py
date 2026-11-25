@@ -2990,6 +2990,33 @@ def _fake_sdi_template(path):
     return path
 
 
+class ADroppedConnectionIsNotAnErrorTests(unittest.TestCase):
+    """25 Nov 2026 (Muhammad: "Failed to fetch" came up in the chat): a message sent again after a dropped connection
+    gets the same turn back - never run twice - and the page never shows the browser's raw error."""
+
+    def test_the_same_message_id_gets_the_same_turn(self):
+        c = L.app.test_client()
+        started = []
+        real = L._start_turn
+        L._start_turn = lambda *a, **k: started.append(1) or f"t{len(started)}"
+        try:
+            a = c.post("/api/chat", json={"text": "hello", "cid": "abc123", "new": True}).get_json()
+            b = c.post("/api/chat", json={"text": "hello", "cid": "abc123", "new": True}).get_json()
+            d = c.post("/api/chat", json={"text": "hello", "cid": "other1", "new": True}).get_json()
+        finally:
+            L._start_turn = real
+            L._SENT.clear()
+        self.assertEqual((a["turn"], b["turn"], b.get("again"), d["turn"]), ("t1", "t1", True, "t2"))
+        self.assertEqual(len(started), 2)
+
+    def test_the_page_retries_and_speaks_plainly(self):
+        self.assertIn("The connection dropped - trying again", PAGE)
+        self.assertIn("Your message is back in the box", PAGE)
+        self.assertIn("SDI Live restarted while it was working on that", PAGE)
+        self.assertNotIn('textContent="Sorry - "+e', PAGE)
+        self.assertIn("the connection to SDI Live dropped for a moment", PAGE)
+
+
 class MappedDrivesFallBackToTheirShareTests(unittest.TestCase):
     """24 Nov 2026: the estimate check on the server found 12,079 estimates but opened none - the index says K:\\, and
     a Remote Desktop session there has no K:. A drive that isn't there is read from its UNC share."""
@@ -3955,7 +3982,8 @@ console.log(JSON.stringify({r, logs}));"""
 
     def test_the_client_card_once_per_chat(self):
         page = (WORK / "brief_lite" / "lite_page.html").read_text(encoding="utf-8")
-        self.assertIn("if(!brandShown.has(k_))", page)
+        self.assertIn("first=!brandShown.has(k_)", page)
+        self.assertIn("if(first&&typeof log", page)                       # the "brand loaded" line once too
 
 
 class FeedbackOn23Nov(unittest.TestCase):
