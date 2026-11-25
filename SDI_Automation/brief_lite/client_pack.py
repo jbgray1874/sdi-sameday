@@ -288,8 +288,10 @@ def dark_band(c, y, h, label, text, meta=""):
 
 
 # ── the unit's 3D model, drawn from three sides (when there are no rendered views) ────────────────────────────────
-def model_pictures(model, out_dir, stem):
-    """Three PNGs of the model3d boxes, shaded, from front-left, front-right and straight on. [] without PIL."""
+def model_pictures(model, out_dir, stem, angles=None):
+    """PNGs of the model3d boxes, shaded - by default from front-left, front-right and straight on; `angles` is a list of
+    (name, yaw degrees, pitch degrees): yaw 0 = straight on, -90 = the left side, 180 = the back; pitch 90 = from above.
+    [] without PIL."""
     try:
         from PIL import Image, ImageDraw
     except Exception:                                        # noqa: BLE001
@@ -298,7 +300,7 @@ def model_pictures(model, out_dir, stem):
     if not parts:
         return []
     out = []
-    for name, yaw, pitch in (("left", -35, 22), ("right", 35, 22), ("front", 0, 8)):
+    for name, yaw, pitch in (angles or (("left", -35, 22), ("right", 35, 22), ("front", 0, 8))):
         a, e = math.radians(yaw), math.radians(pitch)
         hgt, wid, dep = model["size"]
 
@@ -336,7 +338,7 @@ def model_pictures(model, out_dir, stem):
             dr.polygon([(ox + px * sc, oy + py * sc) for px, py in pts], fill=col, outline=(60, 60, 58))
         path = os.path.join(out_dir, f"{stem}_model_{name}.png")
         im.save(path)
-        out.append((path, {"left": "From the front left", "right": "From the front right", "front": "Straight on"}[name]))
+        out.append((path, {"left": "From the front left", "right": "From the front right", "front": "Straight on"}.get(name, name)))
     return out
 
 

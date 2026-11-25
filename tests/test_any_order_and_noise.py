@@ -2934,7 +2934,7 @@ class MoreViewsOfTheChosenDesignTests(unittest.TestCase):
     """21 Nov 2026 (James): "a number of renders and views" - the option on screen from other angles, on request."""
 
     def test_which_views_were_asked_for(self):
-        self.assertEqual(L.views_wanted("more views please"), ["front", "side", "three-quarter", "detail"])
+        self.assertEqual(L.views_wanted("more views please"), ["front", "side", "three-quarter", "back"])
         self.assertEqual(L.views_wanted("can I see the side and the back"), ["side", "back"])
         for line in ("show me it from the side", "other angles please", "more views", "a close-up of the header",
                      "what does it look like from the back", "turn it round"):
@@ -3087,6 +3087,83 @@ class WhoIsChattingAndPastJobsAskedOnceTests(unittest.TestCase):
             lite_search.resolve_reference = keep
         self.assertEqual(called, [])
         self.assertFalse(b.get("_ref_ask") or b.get("_ref_more"))
+
+
+class AChangeIsAnEditTests(unittest.TestCase):
+    """25 Nov 2026 (Matt asked to swap the girl for a boy; the fixture changed too): a change edits the picture on screen
+    - only that picture, a short 'change this one thing' instruction, high input fidelity - never the whole brief again."""
+
+    def test_a_change_sends_only_the_picture_and_the_one_change(self):
+        import base64 as _b64
+        import tempfile
+        from PIL import Image
+        d = tempfile.mkdtemp()
+        base = os.path.join(d, "a.png")
+        Image.new("RGB", (64, 48), "white").save(base)
+        sent = {}
+
+        class R:
+            data = [type("D", (), {"b64_json": _b64.b64encode(open(base, "rb").read()).decode()})()]
+            usage = None
+
+        def fake_draw(edit, **kw):
+            sent.update(kw, edit=edit)
+            return R()
+        keep, keep_env = L.draw_image, os.environ.get("OPENAI_API_KEY")
+        L.draw_image, os.environ["OPENAI_API_KEY"] = fake_draw, "test-not-real"
+        try:
+            who = new_chat()
+            out, s = say(who, "hi")
+            s["brief"].update(client="Matt Test Co", unit_type="FSDU", size="1600 x 600 x 400 mm")
+            L.make_visual(s, "render", change="swap the girl for a boy", base_image=base, label="B")
+        finally:
+            L.draw_image = keep
+            if keep_env is None:
+                os.environ.pop("OPENAI_API_KEY", None)
+            else:
+                os.environ["OPENAI_API_KEY"] = keep_env
+        self.assertTrue(sent.get("edit"))
+        self.assertEqual(len(sent["image"]), 1)
+        self.assertTrue(sent["prompt"].startswith("EDIT THIS PHOTO"))
+        self.assertIn("swap the girl for a boy", sent["prompt"])
+        self.assertIn("Make only that change", sent["prompt"])
+        self.assertNotIn("OUTPUT: a stunning", sent["prompt"])          # not the whole design brief again
+        self.assertEqual(sent.get("input_fidelity"), "high")
+
+
+class RealViewsFromOtherAnglesTests(unittest.TestCase):
+    """25 Nov 2026 (Muhammad: "it doesn't create proper separate views. It just zooms into the same single picture"): each
+    view is sent with a block model of the unit from that camera position, and the pack's views are new angles."""
+
+    def test_each_view_gets_its_own_camera_guide(self):
+        import base64 as _b64
+        import tempfile
+        from PIL import Image
+        d = tempfile.mkdtemp()
+        src = os.path.join(d, "a.png")
+        Image.new("RGB", (64, 48), "white").save(src)
+        sent = []
+
+        class R:
+            data = [type("D", (), {"b64_json": _b64.b64encode(open(src, "rb").read()).decode()})()]
+
+        def fake_draw(edit, **kw):
+            sent.append((len(kw["image"]), kw["prompt"]))
+            return R()
+        keep = L.draw_image
+        L.draw_image = fake_draw
+        try:
+            who = new_chat()
+            out, s = say(who, "hi")
+            s["brief"].update(client="Samsung", unit_type="Counter unit", size="500 x 400 x 300 mm")
+            got = L.make_views(s, {"path": src, "label": "A"}, ["side", "back", "instore"])
+        finally:
+            L.draw_image = keep
+        self.assertEqual(len([g for g in got if g[1]]), 3)
+        with_guide = [p for n, p in sent if n == 2]
+        self.assertEqual(len(with_guide), 2)                           # side and back; in-store has no guide
+        self.assertTrue(all("genuinely different viewpoint" in p for p in with_guide))
+        self.assertEqual(L.PACK_VIEWS, ["instore", "front", "side", "back"])
 
 
 class ADroppedConnectionIsNotAnErrorTests(unittest.TestCase):

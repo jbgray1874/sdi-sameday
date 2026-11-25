@@ -1150,6 +1150,18 @@ def visual_prompt(b, kind, change=None, refs=None, said=""):
     return base
 
 
+def edit_prompt(change, logo=False):
+    """A change to the picture on screen, as an edit: this one thing changes, nothing else does (25 Nov 2026, Matt)."""
+    return ("EDIT THIS PHOTO (image 1). The account manager has approved this display design and wants ONE change:\n"
+            f"{change}\n\n"
+            "Make only that change. Everything else stays exactly as it is in image 1: the display unit itself - its shape, "
+            "structure, size, proportions, shelves, header, materials, colours, graphics, logos and lighting - the products "
+            "on it, the people, the camera angle and framing, and the store around it. Do not redesign, restyle, recolour, "
+            "move or tidy anything the change doesn't name. If the change is about one element (a person, a product, a "
+            "colour, a word), change that element and leave the rest of the picture untouched."
+            + ("\nImage 2 is the real logo, for the change that names it." if logo else ""))
+
+
 PENDING_CHARACTER = {}   # who -> the character the page has picked (Sid, Beth, Ray, Isla), put on the chat at its next turn
 STOP_RENDERS = {}   # chat id -> when the AM pressed Stop: no new picture is started for that chat until their next message
 
@@ -1369,8 +1381,31 @@ def make_visual(s, kind="render", change=None, base_image=None, refs=None, label
                               "graphics, products). Do not invent a different design.\n") + prompt
             except Exception as e:
                 print("ref job images:", str(e)[:120], flush=True)
+        if base_image and change and kind == "render":
+            # 25 Nov 2026 (Matt asked to swap the girl for a boy and the fixture changed too): a change is an EDIT of the
+            # picture on screen - only that picture (and the logo when the change is about it), a short instruction to
+            # change that one thing, and high input fidelity - never the whole design brief again, which redesigns it
+            keep_ = files[:1] + (files[1:1 + len(logos)] if re.search(r"\b(logo|brand|branding)\b", change, re.I) else [])
+            for extra in files:
+                if extra not in keep_:
+                    try:
+                        extra.close()
+                    except Exception:                        # noqa: BLE001
+                        pass
+            files, prompt = keep_, edit_prompt(change, logo=len(keep_) > 1)
         files = as_pngs(files)   # 2 Nov 2026: an uploaded file the image model can't read ("unsupported mimetype") failed the render
-        if files:
+        if files and base_image and change and kind == "render":
+            try:
+                r = draw_image(True, model=IMAGE_MODEL, image=files, prompt=prompt, size="1536x1024", quality=quality,
+                               input_fidelity="high")
+            except Exception as e_:                          # noqa: BLE001
+                if "fidelity" not in str(e_).lower():
+                    raise
+                for f_ in files:                             # this model doesn't take it: the same edit without it
+                    if hasattr(f_, "seek"):
+                        f_.seek(0)
+                r = draw_image(True, model=IMAGE_MODEL, image=files, prompt=prompt, size="1536x1024", quality=quality)
+        elif files:
             r = draw_image(True, model=IMAGE_MODEL, image=files, prompt=prompt, size="1536x1024", quality=quality)
         else:
             r = draw_image(False, model=IMAGE_MODEL, prompt=prompt, size="1536x1024", quality=quality)
@@ -1439,13 +1474,18 @@ HD_PROMPT = ("Re-render THIS exact retail display concept at final client-presen
 VIEWS = {
     "front": ("Front view", "a straight-on front elevation at the shopper's eye level, the whole unit square to the camera"),
     "side": ("Side view", "a side view from the left, square on, showing the unit's full depth and its profile"),
-    "three-quarter": ("Three-quarter view", "a three-quarter view from the front right, slightly above eye level"),
+    "three-quarter": ("Three-quarter view", "a three-quarter view from the front left, slightly above eye level"),
     "detail": ("Header close-up", "a close-up of the header and the top shelf, showing the materials, edges and finish"),
     "back": ("Back view", "a view of the back of the unit, square on"),
     "top": ("Top-down view", "a plan view looking straight down from above"),
     # 21 Nov 2026 (James, on the quote portal's hero picture: "it needs to blow your socks off"): the unit in its store
     "instore": ("In store", "in place in the store it's made for"),
 }
+# 25 Nov 2026 (Muhammad: "it doesn't create proper separate views. It just zooms into the same single picture"): each view
+# gets a plain block model of the unit drawn from exactly that camera position (model3d, client_pack.model_pictures) as its
+# guide - yaw 0 straight on, 90 the left side, 180 the back; pitch 90 from above - so the camera really moves
+VIEW_ANGLES = {"front": (0, 6), "side": (90, 6), "three-quarter": (35, 18), "back": (180, 6), "top": (0, 80)}
+PACK_VIEWS = ["instore", "front", "side", "back"]      # the client pack's four: in store, then three angles unlike the render
 VIEWS_ASK = re.compile(r"\b(more|other|different|extra|all( the)?|several|multiple|few)\s+(views?|angles?)\b|"
                        r"\b(from|at) (the|a|another|different|other) (side|back|front|top|angle)\b|"
                        r"\b(side|back|rear|top|front|plan|three[- ]quarter) (view|angle|on)\b|\bturn it (round|around)\b|"
@@ -1883,7 +1923,22 @@ def views_wanted(text):
                              ("detail", r"close[- ]?up|detail|header"), ("back", r"\bback\b|\brear\b"),
                              ("top", r"\btop\b|\bplan\b|above"),
                              ("instore", r"\bin (the |a )?(store|shop)\b|in situ|in place|on the shop floor")) if re.search(w, t)]
-    return picked or ["front", "side", "three-quarter", "detail"]
+    return picked or ["front", "side", "three-quarter", "back"]
+
+
+def view_guides(s, base, which):
+    """{view key: PNG of the unit's block model from that view's camera position} - {} without a size or PIL."""
+    try:
+        import client_pack
+        m = model3d_for(s, base.get("label"))
+        if not m:
+            return {}
+        angles = [(k, *VIEW_ANGLES[k]) for k in which if k in VIEW_ANGLES]
+        got = client_pack.model_pictures(m, OUT, f"{s['id']}_{base.get('label') or 'A'}_guide", angles) if angles else []
+        return {k: path for (path, k) in got}
+    except Exception as e:                                   # noqa: BLE001
+        print("view guides:", str(e)[:160], flush=True)
+        return {}
 
 
 def make_views(s, base, which):
@@ -1891,6 +1946,7 @@ def make_views(s, base, which):
     from concurrent.futures import ThreadPoolExecutor
     b = s["brief"]
     src = base.get("hd_path") if base.get("hd_path") and os.path.exists(base.get("hd_path")) else base.get("path")
+    guides = view_guides(s, base, which)
 
     def one(k):
         if stopped(s["id"]):
@@ -1911,9 +1967,25 @@ def make_views(s, base, which):
                       "A magazine-quality interior photograph: shopper's eye level, three-quarter angle, the unit the clear "
                       "hero in sharp focus, the store softly out of focus behind it, natural store lighting, no people's "
                       "faces. Change nothing about the unit itself. Landscape, photo-real.")
+        guide = guides.get(k)
+        if guide:
+            prompt = (f"Image 1 is a retail display unit SDI Displays has designed for {b.get('client') or 'the client'}. "
+                      f"Take a NEW photograph of THIS EXACT unit from a different camera position: {VIEWS[k][1]}. Image 2 is "
+                      "a plain grey block model of the same unit seen from exactly that position - use it ONLY for the camera "
+                      "angle and how much of each face shows; never copy its grey boxes or flat shading. This must be a "
+                      "genuinely different viewpoint, not a crop, zoom or mirror of image 1: faces hidden in image 1 come "
+                      "into view and faces seen in image 1 turn away, just as in image 2. Keep the unit itself identical - "
+                      f"design, proportions ({b.get('size') or 'as shown'}), materials, colours, graphics, logos and "
+                      "products. The whole unit in frame with space around it, the same store lighting and the same "
+                      "photo-real quality as image 1.")
         try:
             with open(src, "rb") as fh:
-                r = draw_image(True, model=IMAGE_MODEL, image=[fh], prompt=prompt, size="1536x1024", quality=CHANGE_QUALITY)
+                ims = [fh] + ([open(guide, "rb")] if guide else [])
+                try:
+                    r = draw_image(True, model=IMAGE_MODEL, image=ims, prompt=prompt, size="1536x1024", quality=CHANGE_QUALITY)
+                finally:
+                    for x in ims[1:]:
+                        x.close()
             data = base64.b64decode(r.data[0].b64_json)
         except Exception as e:
             return k, None, str(e)[:160]
@@ -4392,7 +4464,7 @@ def handle(number, name, text, image_path=None, voice=False, ch=None, new=False,
         views_out, tv = {}, None
         if pack_cfg["views"] and chosen.get("kind") == "render" and len(have_views) < 2 and not stopped(s["id"]):
             tv = threading.Thread(target=lambda: views_out.update(
-                r=make_views(s, chosen, ["instore", "front", "three-quarter", "detail"])), daemon=True)
+                r=make_views(s, chosen, PACK_VIEWS)), daemon=True)
             tv.start()
         if need_hd or need_ga or tv:  # 28 Oct 2026: the HD and the GA are drawn at the same time (they were one after the other)
             ch.text(f"Good - Option {label}. Making the client pack now: the render, " + ("the unit in store and three more "
