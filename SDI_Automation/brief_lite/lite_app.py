@@ -1905,14 +1905,106 @@ def model3d_for(s, label=None):
     return model3d.model(b, look[0] if look else "#F6D946", make_up=(ga or {}).get("make_up"))
 
 
+REAL3D = {}          # chat id -> {label, status: running|done|error, glb, thumb, error, progress} (meshy3d.py)
+
+
+def real3d_on():
+    """The real 3D model: on when MESHY_API_KEY is set, unless ai_switch.json "model3d_service" is "off"."""
+    import meshy3d
+    try:
+        j = json.load(open(os.path.join(BASE, "studio_data", "ai_switch.json"), encoding="utf-8"))
+    except Exception:                                        # noqa: BLE001
+        j = {}
+    return bool(meshy3d.key()) and str(j.get("model3d_service", "meshy")).lower() != "off"
+
+
+def real3d_cost():
+    try:
+        return float(json.load(open(os.path.join(BASE, "studio_data", "ai_switch.json"), encoding="utf-8"))
+                     .get("model3d_cost_usd", 0.5))
+    except Exception:                                        # noqa: BLE001
+        return 0.5
+
+
+def real3d_for(s, label):
+    """The finished real 3D model of this option, from the chat's visuals: {'glb', 'thumb'} or None."""
+    v = next((v for v in reversed(s.get("visuals") or []) if v.get("kind") == "model3d" and v.get("from_option") == label
+              and os.path.exists(v.get("path", ""))), None)
+    return {"glb": v["path"], "thumb": v.get("thumb")} if v else None
+
+
+def real3d_start(s, label, render_path):
+    """25 Nov 2026 (James: "use the 3D service for now"): the chosen design made into a real textured 3D model by Meshy,
+    in the background (a couple of minutes). The block model shows meanwhile; the page swaps this in when it's done."""
+    sid = s["id"]
+    had = REAL3D.get(sid) or {}
+    if had.get("label") == label and had.get("status") in ("running", "done"):
+        return had
+    if not real3d_on() or not render_path or not os.path.exists(render_path) or stopped(sid):
+        return None
+    if real3d_for(s, label):
+        rec = {"label": label, "status": "done"}
+        REAL3D[sid] = rec
+        return rec
+    cost = real3d_cost()
+    if spent_today() + cost > daily_cap():
+        return None
+    rec = {"label": label, "status": "running", "progress": 0}
+    REAL3D[sid] = rec
+
+    def go():
+        import meshy3d
+        t0 = time.time()
+        try:
+            tid = meshy3d.start(render_path)
+            rec["task"] = tid
+            st = {}
+            while time.time() - t0 < 600:
+                time.sleep(8)
+                st = meshy3d.status(tid)
+                rec["progress"] = st.get("progress")
+                if st["status"] in meshy3d.DONE or st["status"] in meshy3d.FAILED:
+                    break
+            if st.get("status") not in meshy3d.DONE or not st.get("glb"):
+                raise RuntimeError(st.get("error") or f"not finished ({st.get('status') or 'no answer'}) after "
+                                                       f"{time.time() - t0:.0f}s")
+            glb = meshy3d.fetch(st["glb"], os.path.join(OUT, f"{sid}_{label}_3d_{int(time.time())}.glb"))
+            thumb = None
+            if st.get("thumb"):
+                try:
+                    thumb = meshy3d.fetch(st["thumb"], glb[:-4] + "_thumb.png")
+                except Exception:                            # noqa: BLE001
+                    thumb = None
+            log_cost(sid, "model3d", cost)
+            with chat_lock(sid):
+                s2 = _session_by_id(sid) or s
+                s2["visuals"].append({"path": glb, "kind": "model3d", "from_option": label, "thumb": thumb,
+                                      "at": datetime.now().isoformat(timespec="seconds")})
+                save_session(s2)
+            rec.update(status="done", glb=glb, thumb=thumb)
+            print(f"3d model {sid} option {label}: done in {time.time() - t0:.0f}s - {glb}", flush=True)
+        except Exception as e:                               # noqa: BLE001
+            rec.update(status="error", error=str(e)[:300])
+            print(f"3d model {sid} option {label}: FAILED - {str(e)[:300]}", flush=True)
+    threading.Thread(target=go, daemon=True).start()
+    return rec
+
+
 def model3d_turn(s, ch):
     m = model3d_for(s)
     if not m:
         ch.text("I need the unit's height, width and depth before I can build it in 3D - what size is it?")
         return ch, s
     h, w, d = (int(x) for x in m["size"])
-    ch.model3d(m, f"3D model - {h} high x {w} wide x {d} deep mm. Drag it to turn it; it shows the shape and sizes, "
-                  "the renders show the look.")
+    renders = [v for v in s["visuals"] if v.get("kind") == "render"]
+    base = pick_visual(s, "") if renders else None
+    lab = (base or {}).get("label") or "A"
+    rec = real3d_start(s, lab, (base or {}).get("path")) if base and base.get("kind") == "render" else None
+    real = "done" if real3d_for(s, lab) else (rec or {}).get("status")
+    ch.model3d(m, f"3D model - {h} high x {w} wide x {d} deep mm. Drag it to turn it." + (
+        " The real 3D model of the design is being made from the render - it appears here in a couple of minutes."
+        if real == "running" else " This is the real 3D model of the design." if real == "done" else
+        " It shows the shape and sizes; the renders show the look."), label=lab)
     return ch, s
 
 
@@ -2713,10 +2805,11 @@ class Channel:
         if self.number:
             wa_post({"type": "text", "text": {"body": line}}, self.number)
 
-    def model3d(self, model, caption=""):
-        """A 3D model the page draws and the AM can turn (model3d.py). WhatsApp gets the caption only."""
+    def model3d(self, model, caption="", label=None):
+        """A 3D model the page draws and the AM can turn (model3d.py) - and, once Meshy has made it, the real one
+        (meshy3d.py): the page asks /api/real3d for it. WhatsApp gets the caption only."""
         self.flush()
-        self.out.append({"type": "text", "role": "model3d", "text": caption, "model": model})
+        self.out.append({"type": "text", "role": "model3d", "text": caption, "model": model, "label": label})
         log_msg(self.sid, "out", caption or None)
         if self.number:
             wa_post({"type": "text", "text": {"body": caption + " (open SDI Live to turn it)"}}, self.number)
@@ -4461,6 +4554,9 @@ def handle(number, name, text, image_path=None, voice=False, ch=None, new=False,
         est_rec = auto_estimate_start(s, label) if chosen.get("kind") == "render" else None
         have_views = [v for v in s["visuals"] if v.get("kind") == "view" and v.get("from_option") == label
                       and os.path.exists(v.get("path", ""))]
+        if chosen.get("kind") == "render":       # 25 Nov 2026: the real 3D model, made from the render, in the background
+            real3d_start(s, label, chosen.get("hd_path") if chosen.get("hd_path") and os.path.exists(chosen["hd_path"])
+                         else chosen.get("path"))
         views_out, tv = {}, None
         if pack_cfg["views"] and chosen.get("kind") == "render" and len(have_views) < 2 and not stopped(s["id"]):
             tv = threading.Thread(target=lambda: views_out.update(
@@ -4552,7 +4648,10 @@ def handle(number, name, text, image_path=None, voice=False, ch=None, new=False,
             try:         # 21 Nov 2026: and the same sizes in 3D, to turn round - free, made from the brief
                 m3 = model3d_for(s, label)
                 if m3:
-                    ch.model3d(m3, f"Option {label} in 3D at {b.get('size')} - drag it to turn it.")
+                    r3 = (REAL3D.get(s["id"]) or {}) if (REAL3D.get(s["id"]) or {}).get("label") == label else {}
+                    ch.model3d(m3, f"Option {label} in 3D at {b.get('size')} - drag it to turn it." + (
+                        " The real 3D model of the design appears here in a couple of minutes." if r3.get("status") == "running"
+                        else ""), label=label)
             except Exception as e:
                 print("! 3D model failed:", str(e)[:160], flush=True)
         if b.get("_flow"):           # the client pack is done; "both" goes straight on to the internal pack
@@ -5348,8 +5447,15 @@ def api_rt_tool():
             return jsonify({"slow": False, "output": _said(json.dumps({"error": (
                 "No 3D model yet: the brief has no height x width x depth. Ask for the size, record it, then show_3d.")}))})
         log_msg(s["id"], "out", "3D model shown - drag it to turn it.")
-        return jsonify({"slow": False, "model3d": m, "output": _said(json.dumps({"shown": True, "note": (
-            "The 3D model is on screen now - say in one line they can drag it to turn it, then carry on.")}))})
+        renders_ = [v for v in s["visuals"] if v.get("kind") == "render"]
+        base_ = pick_visual(s, "") if renders_ else None
+        lab_ = (base_ or {}).get("label") or "A"
+        rec_ = real3d_start(s, lab_, (base_ or {}).get("path")) if base_ and base_.get("kind") == "render" else None
+        making = (rec_ or {}).get("status") == "running" and not real3d_for(s, lab_)
+        return jsonify({"slow": False, "model3d": m, "label": lab_, "output": _said(json.dumps({"shown": True, "note": (
+            "The 3D model is on screen now - say in one line they can drag it to turn it"
+            + (", and that the real 3D model of the design appears there in a couple of minutes" if making else "")
+            + ", then carry on.")}))})
     if js.get("name") == "change_option":
         last_ = _last_am_line(s["id"])
         # 20 Nov 2026: a size that reads wrong for the unit is said back once before it's redrawn (typed chat does the same)
@@ -6359,6 +6465,22 @@ def api_page_problem():
     who = signed_in_user() or "not signed in"
     print(f"[page] {datetime.now():%H:%M:%S} {who} chat={chat or '-'} {what}", flush=True)
     return jsonify({"ok": True})
+
+
+@app.route("/api/real3d/<sid>")
+def api_real3d(sid):
+    """The real 3D model of an option (meshy3d.py): {status: running|done|error|none, url, thumb, progress}."""
+    if not re.fullmatch(r"[A-Za-z0-9_-]{4,64}", sid or ""):
+        abort(404)
+    label = (request.args.get("label") or "A")[:3]
+    rec = REAL3D.get(sid) or {}
+    s = _session_by_id(sid)
+    got = real3d_for(s, label) if s else None
+    if got:
+        return jsonify({"status": "done", "url": _url(got["glb"]), "thumb": _url(got.get("thumb"))})
+    if rec.get("label") == label:
+        return jsonify({"status": rec.get("status"), "progress": rec.get("progress"), "error": rec.get("error", "")})
+    return jsonify({"status": "none"})
 
 
 @app.route("/api/sdi-workbook/<sid>")

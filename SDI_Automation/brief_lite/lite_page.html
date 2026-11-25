@@ -1333,9 +1333,29 @@ function bpCard(bp){if(!bp)return null;const gbp=v=>"£"+Math.round(+v).toLocale
   <div class="bpn">${gbp(bp.low)} - ${gbp(bp.high)} <span>a unit${bp.qty?" at "+esc(bp.qty)+" units":""}</span><i class="bpc bpc-${esc(conf)}">${esc(conf)} confidence</i></div>
   <div class="bpw">Worked out from:<ul>${rows}</ul>${esc(bp.method||"")}${bp.director?`<br>The design director's reading for this design: ${esc(bp.director)}`:""}</div>
   <div class="bpf">A guide from SDI's past prices, not an estimate. For a priced breakdown of this design, ask for <b>Estimate Lite</b>.</div></div>`)}
-function m3dCard(m,cap){if(!m||!m.parts)return null;const id="m3d"+Math.random().toString(36).slice(2,8);
+function m3dCard(m,cap,label){if(!m||!m.parts)return null;const id="m3d"+Math.random().toString(36).slice(2,8);
  const el=block(`<div class="card m3d"><div class="ch"><span class="ico">🧊</span>${md(cap||"3D model")}</div><canvas id="${id}" width="720" height="540" aria-label="3D model of the unit - drag to turn it"></canvas><div class="m3dh">Drag to turn it &middot; double-tap to reset</div></div>`);
- setTimeout(()=>m3dRun(document.getElementById(id),m),0);return el}
+ setTimeout(()=>m3dRun(document.getElementById(id),m),0);if(label)real3d(el,label);return el}
+// 25 Nov 2026 (James: "use the 3D service for now"): the real, textured 3D model of the design, made from its render by
+// Meshy on the server, swapped in for the block model when it's ready - turned by mouse or finger with Google's
+// <model-viewer>. Nothing changes when the service is off or fails: the block model stays.
+let mvLoad=null;
+function mvReady(){if(!mvLoad)mvLoad=new Promise((ok,no)=>{const sc=document.createElement("script");sc.type="module";
+ sc.src="https://cdn.jsdelivr.net/npm/@google/model-viewer@3.5.0/dist/model-viewer.min.js";sc.onload=ok;sc.onerror=no;document.head.appendChild(sc)});return mvLoad}
+function real3d(el,label){const chat=sid;let n=0;
+ const tick=async()=>{if(!el.isConnected||sid!==chat||++n>90)return;
+  const j=await fetch(`/api/real3d/${chat}?label=${encodeURIComponent(label)}`).then(r=>r.json()).catch(()=>null);
+  if(!j||j.status==="none"||j.status==="error")return;
+  if(j.status==="done"&&j.url){try{await mvReady()}catch(e){return}
+   const cv=el.querySelector("canvas"),h=el.querySelector(".m3dh");if(!cv)return;
+   const mv=document.createElement("model-viewer");mv.setAttribute("src",j.url);if(j.thumb)mv.setAttribute("poster",j.thumb);
+   ["camera-controls","auto-rotate","touch-action"].forEach(a=>mv.setAttribute(a,a==="touch-action"?"pan-y":""));
+   mv.setAttribute("shadow-intensity","1");mv.setAttribute("exposure","1.1");mv.setAttribute("alt","The design in 3D - drag to turn it");
+   mv.style.cssText="width:100%;height:440px;background:#F4F4F0;border-radius:12px";cv.replaceWith(mv);
+   if(h)h.innerHTML="The real 3D model of the design, made from its render &middot; drag to turn it, pinch or scroll to zoom";return}
+  const h=el.querySelector(".m3dh");if(h&&j.status==="running")h.innerHTML=`Drag to turn it &middot; the real 3D model of the design is being made${j.progress?` (${j.progress}%)`:""}…`;
+  setTimeout(tick,8000)};
+ setTimeout(tick,1500)}
 function m3dFaces(m){const [H,W,D]=m.size,out=[];
  for(const p of m.parts){const x0=p.x-W/2,x1=x0+p.w,y0=p.y-H/2,y1=y0+p.h,z0=p.z-D/2,z1=z0+p.d;
   const v=[[x0,y0,z0],[x1,y0,z0],[x1,y1,z0],[x0,y1,z0],[x0,y0,z1],[x1,y0,z1],[x1,y1,z1],[x0,y1,z1]];
@@ -1408,7 +1428,7 @@ function render(x){
  try{lsSaw(x)}catch(e){}
  if(x.type==="text"){
   if(x.role==="history")return historyCard(x.text);
-  if(x.role==="model3d")return m3dCard(x.model,x.text);
+  if(x.role==="model3d")return m3dCard(x.model,x.text,x.label);
   if(x.role==="ballpark")return bpCard(x.ballpark);
   if(x.role==="auto_estimate")return autoCard(x.label);
   if(x.role==="quick_estimate")return qeCard(x.quick);
@@ -1992,7 +2012,7 @@ async function rtTool(call_id,name,args){
  // 27 Oct 2026: the voice asked "which pack?" and called a tool in the same breath, then asked it AGAIN when the tool
  // answered. If that reply already said something, the tool's answer is noted silently - no second reply.
  if(rt.inResp)rt.pendingCreate=true;else if(!rt.spoke)rtSay({type:"response.create"});
- if(j.model3d)m3dCard(j.model3d,"3D model - drag it to turn it.");
+ if(j.model3d)m3dCard(j.model3d,"3D model - drag it to turn it.",j.label);
  if(j.ballpark)bpCard(j.ballpark);
  if(j.quick_estimate)qeCard(j.quick_estimate);
  if(j.ai_estimate)aiCard(j.ai_estimate);

@@ -3166,6 +3166,74 @@ class RealViewsFromOtherAnglesTests(unittest.TestCase):
         self.assertEqual(L.PACK_VIEWS, ["instore", "front", "side", "back"])
 
 
+class TheReal3DModelTests(unittest.TestCase):
+    """25 Nov 2026 (James: "use the 3D service for now"): the chosen design made into a real 3D model by Meshy from its
+    render, in the background; the page swaps it in for the block model. Off without MESHY_API_KEY."""
+
+    def _render(self):
+        import tempfile
+        from PIL import Image
+        p = os.path.join(tempfile.mkdtemp(), "r.png")
+        Image.new("RGB", (64, 48), "white").save(p)
+        return p
+
+    def test_off_without_a_key(self):
+        os.environ.pop("MESHY_API_KEY", None)
+        who = new_chat()
+        out, s = say(who, "hi")
+        self.assertFalse(L.real3d_on())
+        self.assertIsNone(L.real3d_start(s, "A", self._render()))
+
+    def test_made_saved_and_served(self):
+        import meshy3d
+        keep = (meshy3d.start, meshy3d.status, meshy3d.fetch, L.time.sleep)
+        os.environ["MESHY_API_KEY"] = "test-not-real"
+        meshy3d.start = lambda path, **k: "task1"
+        meshy3d.status = lambda tid, **k: {"status": "SUCCEEDED", "progress": 100, "glb": "https://x/m.glb", "thumb": None,
+                                           "error": ""}
+        meshy3d.fetch = lambda url, path, **k: (open(path, "wb").write(b"glTF"), path)[1]
+        L.time.sleep = lambda n: None
+        try:
+            who = new_chat()
+            out, s = say(who, "hi")
+            rec = L.real3d_start(s, "A", self._render())
+            for _ in range(200):
+                if rec.get("status") != "running":
+                    break
+                keep[3](0.02)
+            self.assertEqual(rec.get("status"), "done", rec)
+            got = L.app.test_client().get(f"/api/real3d/{s['id']}?label=A").get_json()
+            self.assertEqual(got["status"], "done")
+            self.assertTrue(got["url"].startswith("/file?p="))
+            self.assertTrue(any(v.get("kind") == "model3d" for v in L._session_by_id(s["id"])["visuals"]))
+        finally:
+            meshy3d.start, meshy3d.status, meshy3d.fetch, L.time.sleep = keep
+            os.environ.pop("MESHY_API_KEY", None)
+        self.assertIn("function real3d", PAGE)
+
+    def test_a_failure_leaves_the_block_model(self):
+        import meshy3d
+        keep = meshy3d.start
+        os.environ["MESHY_API_KEY"] = "test-not-real"
+        meshy3d.start = lambda path, **k: (_ for _ in ()).throw(RuntimeError("Meshy refused the job (402): no credits"))
+        try:
+            who = new_chat()
+            out, s = say(who, "hi")
+            rec = L.real3d_start(s, "B", self._render())
+            for _ in range(200):
+                if rec.get("status") != "running":
+                    break
+                import time as _t
+                _t.sleep(0.02)
+            self.assertEqual(rec["status"], "error")
+            self.assertIn("no credits", rec["error"])
+            got = L.app.test_client().get(f"/api/real3d/{s['id']}?label=B").get_json()
+            self.assertEqual(got["status"], "error")
+        finally:
+            meshy3d.start = keep
+            os.environ.pop("MESHY_API_KEY", None)
+
+
 class ADroppedConnectionIsNotAnErrorTests(unittest.TestCase):
     """25 Nov 2026 (Muhammad: "Failed to fetch" came up in the chat): a message sent again after a dropped connection
     gets the same turn back - never run twice - and the page never shows the browser's raw error."""
