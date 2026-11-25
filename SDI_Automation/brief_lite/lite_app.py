@@ -4866,7 +4866,9 @@ def handle(number, name, text, image_path=None, voice=False, ch=None, new=False,
         try:
             auto_estimate_start(s, made[0]["label"])
             ch.flush()
-            ch.out.append({"type": "text", "role": "auto_estimate", "label": made[0]["label"], "text": ""})
+            # 25 Nov 2026 (Matt: "it's jumped straight into pricing without me asking"): worked out now, but only a
+            # one-line "ready - show it" until it's asked for or the client pack is made, and Sid doesn't announce it
+            ch.out.append({"type": "text", "role": "auto_estimate", "label": made[0]["label"], "text": "", "quiet": True})
         except Exception:                                    # noqa: BLE001
             pass
         if len(made) > 1:

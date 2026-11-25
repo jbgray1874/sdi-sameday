@@ -3234,6 +3234,18 @@ class TheReal3DModelTests(unittest.TestCase):
             os.environ.pop("MESHY_API_KEY", None)
 
 
+class PricingOnlyWhenAskedTests(unittest.TestCase):
+    """25 Nov 2026 (Matt: "it's jumped straight into pricing without me asking"): the estimate is worked out as soon as
+    the options appear, but shown as one quiet line until it's tapped or the client pack is made."""
+
+    def test_the_estimate_with_the_options_is_quiet(self):
+        src = (WORK / "brief_lite" / "lite_app.py").read_text(encoding="utf-8")
+        self.assertIn('"role": "auto_estimate", "label": made[0]["label"], "text": "", "quiet": True', src)
+        self.assertIn("autoCard(x.label,x.quiet)", PAGE)
+        self.assertIn("estimate is ready", PAGE)
+        self.assertIn(">Show it</button>", PAGE)
+
+
 class ADroppedConnectionIsNotAnErrorTests(unittest.TestCase):
     """25 Nov 2026 (Muhammad: "Failed to fetch" came up in the chat): a message sent again after a dropped connection
     gets the same turn back - never run twice - and the page never shows the browser's raw error."""

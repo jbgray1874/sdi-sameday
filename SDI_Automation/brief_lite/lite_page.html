@@ -1302,12 +1302,21 @@ function aiCard(e){if(!e||!e.prices)return null;const gbp=v=>"£"+(+v).toLocaleS
 // 21 Nov 2026 (James: "an estimate needs to be produced. every time"): when a design is chosen the server works out its
 // estimate straight away - past jobs first, the AI estimate when there's no close past job. This holds its place, then
 // becomes that estimate's own card; in a call Sid says it in a sentence.
-function autoCard(label){const chat=sid;const el=block(`<div class="mstat"><span class="spin"></span>Working out the estimate for Option ${esc(label||"A")} - the AI estimate, line by line, with SDI's past jobs as a cross-check. About a minute…</div>`);
+// 25 Nov 2026 (Matt: "it's jumped straight into pricing without me asking"): quiet = shown when the options appear - worked
+// out in the background, but only a one-line "ready - show it" (and Sid says nothing) until it's tapped; the full cards
+// come straight away only with the client pack, which is when pricing is asked for
+function estCards(j,label){if(j.agreed&&j.agreed.gap_pct!=null)agCard(j.agreed);(j.kind==="ai"?aiCard:qeCard)(j.data);if(j.kind==="ai"&&j.quick)qeCard(j.quick)}
+function autoCard(label,quiet){const chat=sid;const el=block(quiet?`<div class="mstat" style="opacity:.75">Option ${esc(label||"A")}'s estimate is being worked out in the background (internal)…</div>`:
+  `<div class="mstat"><span class="spin"></span>Working out the estimate for Option ${esc(label||"A")} - the AI estimate, line by line, with SDI's past jobs as a cross-check. About a minute…</div>`);
  let n=0;const tick=async()=>{if(!el.isConnected||sid!==chat)return;
   const j=await fetch("/api/auto-estimate/"+chat).then(r=>r.json()).catch(()=>null);
-  if(j&&j.label===label&&j.status==="done"){el.remove();if(j.agreed&&j.agreed.gap_pct!=null)agCard(j.agreed);(j.kind==="ai"?aiCard:qeCard)(j.data);if(j.kind==="ai"&&j.quick)qeCard(j.quick);
+  if(j&&j.label===label&&j.status==="done"){
+   if(quiet){const gbp=v=>"£"+Math.round(+v).toLocaleString("en-GB"),fig=j.agreed&&j.agreed.unit?` - about ${gbp(j.agreed.unit)} a unit to make`:"";
+    el.innerHTML=`<div class="mstat">💷 Option ${esc(label)}'s estimate is ready${fig} (internal, not for the client). <button class="vo-link" type="button">Show it</button></div>`;
+    el.querySelector("button").onclick=()=>{el.remove();estCards(j,label)};return}
+   el.remove();estCards(j,label);
    if(rt)lsTell("[Showroom: the estimate for Option "+label+" is on screen now: "+j.line+" Tell the AM in one or two sentences - internal only, not for the client - the one figure, and if the two estimates are far apart, that it's worth a look before quoting.]");return}
-  if(j&&j.label===label&&j.status==="error"){el.innerHTML=`<div class="mstat">${esc(j.line||"No automatic estimate this time.")} Use the buttons under the design to ask for one.</div>`;return}
+  if(j&&j.label===label&&j.status==="error"){if(quiet){el.remove();return}el.innerHTML=`<div class="mstat">${esc(j.line||"No automatic estimate this time.")} Use the buttons under the design to ask for one.</div>`;return}
   if(++n<60)setTimeout(tick,3000)};
  setTimeout(tick,2500);return el}
 // 24 Nov 2026 (James: "a rounded / what we deem accurate number for the client"): the two estimates weighed together -
@@ -1430,7 +1439,7 @@ function render(x){
   if(x.role==="history")return historyCard(x.text);
   if(x.role==="model3d")return m3dCard(x.model,x.text,x.label);
   if(x.role==="ballpark")return bpCard(x.ballpark);
-  if(x.role==="auto_estimate")return autoCard(x.label);
+  if(x.role==="auto_estimate")return autoCard(x.label,x.quiet);
   if(x.role==="quick_estimate")return qeCard(x.quick);
   if(x.role==="ai_estimate")return aiCard(x.ai_estimate);
   if(x.role==="estimate_lite")return elCard(x.estimate_lite);
