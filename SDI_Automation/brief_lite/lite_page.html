@@ -1534,11 +1534,15 @@ function questionsCard(x){refBox=optBox=null;
 // ---------- brief panel
 // ---------- the client's brand (29 Oct 2026, Andy): logo + colours as soon as the client is said
 let brandNow="";const brandShown=new Set();
+// 25 Nov 2026 (James: "the flashing up Tesco"): reopening a chat - and the phone reloading the page, which reopens the
+// last chat - played the "Briefing for" reveal again. The reveal is only for the moment the client is first named in a
+// live chat; a chat that is opened shows its client quietly.
+let brandQuiet=false;
 // 23 Nov 2026 (Muhammad: the "Briefing for Sainsbury's" card "is coming on screen on every question and answer"): the
 // name came back spelt two ways ("Sainsbury's" / "Sainsburys"), so every turn was a "new" client. Compared without
 // spelling, and the big card shows once per chat and client.
 const brandKey=n=>(n||"").toLowerCase().replace(/&/g,"and").replace(/[^a-z0-9]/g,"");
-async function showBrand(name){name=(name||"").trim();if(brandKey(name)===brandKey(brandNow)&&(name||!brandNow))return;
+async function showBrand(name){const quiet=brandQuiet;name=(name||"").trim();if(brandKey(name)===brandKey(brandNow)&&(name||!brandNow))return;
  // a brief that came back without its client (a part-saved turn) is not a new chat: the client stays
  if(!name&&brandNow&&typeof brief!=="undefined"&&Object.keys(brief||{}).some(k=>!k.startsWith("_")&&brief[k]))return;
  brandNow=name;
@@ -1552,7 +1556,7 @@ async function showBrand(name){name=(name||"").trim();if(brandKey(name)===brandK
  // big reveal and the "brand loaded" line - plays ONCE per chat and brand; after that only the colours follow quietly
  // 25 Nov 2026 (still repeating): keyed by brand only - a new chat has no id until its first reply, so the id made the
  // same brand "new" a second time. brandShown is emptied when a chat is started or opened.
- const k_=brandKey(b.name),first=!brandShown.has(k_);brandShown.add(k_);
+ const k_=brandKey(b.name),first=!quiet&&!brandShown.has(k_);brandShown.add(k_);
  if(first){card.className="bcard";void card.offsetWidth}card.className="bcard on";
  {const vb=$("#vsbrand");if(vb)vb.innerHTML=`<i>${mark}</i>${esc(b.name)}`;
   const rv=$("#breveal");rv.innerHTML=`<div class="brin"><small>Briefing for</small><div class="brlogo">${mark}</div><strong>${esc(b.name)}</strong></div>`;
@@ -2325,7 +2329,7 @@ async function openSession(id){if(id!==sid&&typeof brandShown!=="undefined"){bra
  catch(e){toast("Part of that chat couldn't be shown. It's been noted.");reportProblem("show chat "+id+": "+(e&&e.stack||e))}}
 async function showSession(id,r){leavePage();if(rt)rtStop();sid=id;rememberChat();fresh=false;
  if(r.session.project&&r.session.project!==project)setProject(r.session.project);loadFiles();loadProjects();
- log.innerHTML="";gallery=[];refBox=optBox=null;step=0;showBrief(r.session.brief);
+ log.innerHTML="";gallery=[];refBox=optBox=null;step=0;brandQuiet=true;try{showBrief(r.session.brief)}finally{brandQuiet=false}
  for(const m of r.messages){if(m.dir==="in"){if(m.text)row(esc(m.text),true);continue}
   if(m.url&&/\.(png|jpe?g|webp)$/i.test(m.media||"")){const isGA=/_GA_/.test(m.media),isOpt=/_render_/.test(m.media);
    render({type:"image",url:m.url,caption:m.text||"",role:isGA||isOpt?"option":"ref",kind:isGA?"technical":"render",label:(m.text||"").match(/Option ([AB])/)?.[1]||"",title:(m.text||"").replace(/^\d+\.\s*\d+\s*-\s*/,"").split(" - ")[0],facts:(m.text||"").split(" - ").slice(2)})}

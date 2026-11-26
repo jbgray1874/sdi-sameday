@@ -4126,7 +4126,15 @@ def handle(number, name, text, image_path=None, voice=False, ch=None, new=False,
             set_pack(b, "both")
         elif pk0 is None:              # 4 Nov 2026: a render asked for before any pack - never "which pack?" first
             set_pack(b, "both", assumed=True)
-        if convo.pack_of(b):
+        # 25 Nov 2026 (Daniella, Tesco: "Shall I make the visual now?" "Yes, please" after three answers - drawn with no
+        # colours, graphics or lighting; Matt: "still jumps into visual without having all questions answered"): asked
+        # for the picture, the essential picture questions still come first, once. "Just make it" / "make it now", or
+        # asking a second time, draws straight away and fills the gaps (assumed).
+        go_now = bool(t.get("go") or GO_NOW.search(text or "") or ASSUME.search(text or "") or b.get("_rq_held")
+                      or b.get("_offered_assume") or int(b.get("_pic_asked", 0)) >= 3)
+        if convo.pack_of(b) and not go_now and convo.render_plan(b):
+            b["_rq_held"] = b["_rq_hold_note"] = 1
+        elif convo.pack_of(b):
             b["_render_q_done"], b["_assume"] = 1, True
             if t.get("go") or GO_NOW.search(text or ""):
                 b["design_route"] = (b.get("design_route") or (t.get("updates") or {}).get("design_route")
@@ -4711,6 +4719,9 @@ def handle(number, name, text, image_path=None, voice=False, ch=None, new=False,
         if t.get("no_auto") and st in ("render", "ga", "review"):
             save_session(s)
             return ch, s                     # live voice: the voice model asks, and calls the tools itself
+        if b.pop("_rq_hold_note", None) and st == "render_q":
+            ack = (ack.strip() + " Happy to - a few quick questions first so it's right first time. Say \"just make it\" "
+                   "any time and I'll fill the gaps myself.").strip()
         if st not in ("render", "ga"):
             return convo.ask_next(s, ch, t, ack=ack)
     # "what do you need today" is asked ONCE (its buttons stay on screen) - Andy's test had it on every single turn

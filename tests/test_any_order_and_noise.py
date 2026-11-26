@@ -87,7 +87,10 @@ class PackIsAskedOnceNeverAGateTests(unittest.TestCase):
         self.assertEqual(b.get("_pack"), "both")
         self.assertTrue(b.get("_pack_assumed"))
         self.assertNotIn("Which pack", asked(out))
-        self.assertTrue(b.get("_render_q_done"))
+        # 25 Nov 2026 (Matt, Daniella): the essential picture questions come first, once...
+        self.assertFalse(b.get("_render_q_done"))
+        self.assertIn("a few quick questions first", json.dumps(out))
+        self.assertTrue(b.get("_rq_held"))       # ...and asking again, or "just make it", draws with the gaps filled
 
     def test_a_named_pack_is_still_the_ams_choice(self):
         who = new_chat()
@@ -4264,7 +4267,10 @@ console.log(JSON.stringify({r, logs}));"""
 
     def test_the_client_card_once_per_chat(self):
         page = (WORK / "brief_lite" / "lite_page.html").read_text(encoding="utf-8")
-        self.assertIn("first=!brandShown.has(k_)", page)
+        self.assertIn("first=!quiet&&!brandShown.has(k_)", page)
+        # 25 Nov (James: "the flashing up Tesco"): an opened or reloaded chat shows its client quietly
+        self.assertIn("brandQuiet=true;try{showBrief(r.session.brief)}finally{brandQuiet=false}", page)
+        self.assertIn("const quiet=brandQuiet;", page)
         self.assertIn("const k_=brandKey(b.name)", page)                    # not the chat id: a new chat has none yet
         self.assertNotIn('m.className="bmsg"', page)                     # 25 Nov: the line in the chat is gone
 
