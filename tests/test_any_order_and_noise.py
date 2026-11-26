@@ -4516,3 +4516,39 @@ class SpellingTheClientIsNotANewChat(unittest.TestCase):
         _, s1 = say(who, "Boots want a counter unit", {"client": "Boots", "unit_type": "counter unit"})
         _, s2 = say(who, "now a Lindt brief please", {"client": "Lindt"})
         self.assertNotEqual(s1["id"], s2["id"])
+
+
+class FeetAndInchesTests(unittest.TestCase):
+    """26 Nov 2026 (Daniella: "SID won't work in ft, only in m, cm, mm. M&S typically work in ft"): feet and inches are
+    read and turned into mm by SDI Live itself - the AM never converts."""
+
+    def test_the_ways_people_say_feet_and_inches(self):
+        import pdf_pack as P
+        for said, hwd in (("6ft x 4ft x 2ft", (1829, 1219, 610)),
+                          ("6 ft high, 4 ft wide, 2 ft deep", (1829, 1219, 610)),
+                          ("6'3\" x 4' x 18\"", (1905, 1219, 457)),
+                          ("6 foot 3 high 4 foot wide 18 inches deep", (1905, 1219, 457)),
+                          ("7 feet tall, 4 feet wide, 18 inches deep", (2134, 1219, 457)),
+                          ("2'6 x 2' x 1'6", (762, 610, 457)),
+                          ("6ft by 4ft by 2ft", (1829, 1219, 610)),
+                          ("height 6ft width 3ft depth 2ft", (1829, 914, 610)),
+                          ('72" x 48" x 24"', (1829, 1219, 610)),
+                          ("it's about 6ft tall, 3 foot wide and 2ft deep", (1829, 914, 610))):
+            with self.subTest(said=said):
+                self.assertEqual(P.parse_size(said), tuple(float(v) for v in hwd))
+
+    def test_metric_and_ordinary_words_are_untouched(self):
+        import pdf_pack as P
+        self.assertEqual(P.parse_size("1800 x 600 x 400"), (1800.0, 600.0, 400.0))
+        self.assertEqual(P.parse_size("1.8m x 600mm x 400mm"), (1800.0, 600.0, 400.0))
+        for words in ("3 in a row", "Tesco's unit", "M&S's new range", "fits 2 in the window"):
+            with self.subTest(words=words):
+                self.assertEqual(P.imperial_to_mm(words), words)
+                self.assertFalse(P.has_imperial(words))
+
+    def test_a_feet_size_in_the_chat_is_kept_in_mm_and_said_back(self):
+        who = new_chat()
+        say(who, "M&S want an FSDU", {"client": "M&S", "unit_type": "FSDU"})
+        out, s = say(who, "6ft high, 3ft wide, 18 inches deep", {"size": "6ft x 3ft x 18in"})
+        self.assertEqual(s["brief"]["size"], "1829 x 914 x 457 mm")
+        self.assertIn("converted from your feet and inches", json.dumps(out))

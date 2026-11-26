@@ -124,7 +124,7 @@ TOOLS = [
          "updates": {"type": "object", "description": "Field id -> value, only what the AM actually said. Several at once is fine. "
                      "Anything about the job that no field covers (a feature, a second visual, a constraint, how it's used) "
                      "goes in other_notes, in their words - it's added to the notes, never replaces them. Never drop it. "
-                     "size is ALWAYS 'HEIGHT x WIDTH x DEPTH mm', height first: '1800 wide, 1200 high, 700 deep' -> '1200 x 1800 x 700 mm'."},
+                     "size is ALWAYS 'HEIGHT x WIDTH x DEPTH mm', height first: '1800 wide, 1200 high, 700 deep' -> '1200 x 1800 x 700 mm'. Feet and inches are fine (M&S work in feet) - convert them yourself, never ask the AM to: 1 ft = 304.8 mm, 1 in = 25.4 mm, so '6 ft high, 4 ft wide, 18 inches deep' -> '1829 x 1219 x 457 mm'."},
          "not_known": {"type": "array", "items": {"type": "string"}, "description": "Field ids the AM doesn't know (after you offered options)."}},
          "required": ["updates"]}},
     {"type": "function", "name": "estimate_lite",

@@ -99,6 +99,32 @@ def _missing(value):
         "", "unknown", "not known", "don't know", "dont know", "not sure", "skip", "tbc", "tbd"}
 
 
+# 26 Nov 2026 (Daniella: "SID won't work in ft, only in m, cm, mm. M&S typically work in ft"): feet and inches are
+# turned into millimetres before anything reads the size - 6ft, 6 ft, 6', 6 feet/foot, 6ft 3in, 6'3", 6 foot 3, 2'6,
+# 30", 30 in, 30 inches. Rounded to the nearest mm (1 in = 25.4 mm). "in" only counts as inches where a size goes on
+# (x, by, high, wide, deep, a comma or the end) - "3 in a row" is not 76 mm.
+_FT = r"(?:feet|foot|ft\.?|'|\u2019|\u2032)"
+_IN = r"(?:inches|inch|ins\b|in\b\.?|\"|\u201d|\u2033)"
+_NUM = r"(\d+(?:\.\d+)?)"
+_SIZE_GOES_ON = r"(?=\s*(?:x|\u00d7|by\b|high|tall|wide|deep|h\b|w\b|d\b|height|width|depth|,|;|\.(?!\d)|\)|and\b|$))"
+_FT_IN = re.compile(_NUM + r"\s*" + _FT + r"\s*(?:(\d+(?:\.\d+)?)\s*(?:" + _IN + r")?(?!\s*(?:mm|cm|m\b|" + _FT + r")))?", re.I)
+_IN_ONLY = re.compile(_NUM + r"\s*" + _IN + _SIZE_GOES_ON, re.I)
+
+
+def has_imperial(text):
+    return bool(text) and bool(_FT_IN.search(str(text)) or _IN_ONLY.search(str(text)))
+
+
+def imperial_to_mm(text):
+    """The same words with every feet/inches measurement written in mm ("6ft x 4ft x 2ft" -> "1829 mm x 1219 mm x 610 mm")."""
+    if not text:
+        return text
+    t = str(text)
+    t = _FT_IN.sub(lambda m: f"{round(float(m[1]) * 304.8 + float(m[2] or 0) * 25.4)} mm ", t)
+    t = _IN_ONLY.sub(lambda m: f"{round(float(m[1]) * 25.4)} mm ", t)
+    return re.sub(r"mm  +", "mm ", t).replace("mm ,", "mm,").strip() if t != str(text) else t
+
+
 def parse_size(text):
     """Parse only complete H/W/D values; bare values use the template's mm unit.
 
@@ -107,7 +133,8 @@ def parse_size(text):
     """
     if not text:
         return None
-    t = str(text).lower().replace("\u00d7", "x").replace(",", " ")
+    t = imperial_to_mm(str(text)).lower().replace("\u00d7", "x").replace(",", " ")
+    t = re.sub(r"(\d)\s*(mm|cm|m)?\s+by\s+(?=\d)", r"\1\2 x ", t)     # "6 ft by 4 ft by 2 ft"
     t = re.sub(r"\bmillimet(?:er|re)s?\b", "mm", t)
     t = re.sub(r"\bcentimet(?:er|re)s?\b", "cm", t)
     t = re.sub(r"\bmet(?:er|re)s?\b", "m", t)

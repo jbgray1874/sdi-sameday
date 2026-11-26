@@ -23,6 +23,42 @@ Same Day is SDI's tool for the account manager (AM). During or straight after a 
 
 It serves a single page (`lite_page.html`) at `/`. Everything else is under `/api/...`.
 
+## Releasing a change
+
+SDI Live runs on the server **10.0.0.5** as the `SDISameDay` service. A change reaches everyone in two steps:
+
+1. **The change is pushed to GitHub** on the working branch (`claude/inspiring-planck-8juriz`). Note the commit it
+   ends on (for example `8c8859b`).
+2. **Deploy that exact commit** from the laptop, in PowerShell:
+
+   ```powershell
+   & "$env:TEMP\sdilive-21nov\Update-SameDay.ps1" -Branch claude/inspiring-planck-8juriz -Commit <commit>
+   ```
+
+   `-Commit` deploys exactly the commit named, or stops before copying anything. The script (`Update-SameDay.ps1`) is
+   kept with the SDI Intelligence portal deploy tools.
+
+Before deploying:
+
+- **This is the production server.** Don't deploy while an estimate is running. The service restarts, and anything in
+  progress is lost.
+- Anyone with SDI Live open should close and reopen it after the deploy.
+
+### The phone apps update themselves
+
+Neither phone version contains SDI Live's screens or logic. Both load SDI Live from the server
+(`https://sdiintelligence-sdidisplays.msappproxy.net/sameday/`) every time, so **every deploy reaches every phone with
+nothing to install**.
+
+| Phone | How it is installed | Needs updating when |
+|---|---|---|
+| **iPhone** | Safari → Share → Add to Home Screen, or the Intune web clip "SDI Live" (assigned to *SDI Live Users*) | Never |
+| **Android** | The installed SDI Live app: `https://github.com/jbgray1874/sdi-sameday/releases/download/sdi-live-android-test/SDI-Live.apk` | Only when `mobile/` changes (its icon, name or phone permissions) |
+
+When `mobile/` changes, GitHub Actions (`.github/workflows/sdi-live-app.yml`) rebuilds the Android app and replaces the
+APK at the same link. Android users then reinstall from that link. The same workflow checks that the iPhone project
+still builds.
+
 ## Configuration (`.env` in the repo root, never committed)
 
 | Variable | What it does |

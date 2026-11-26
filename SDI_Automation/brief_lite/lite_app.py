@@ -4199,12 +4199,14 @@ def handle(number, name, text, image_path=None, voice=False, ch=None, new=False,
         b["size"] = " x ".join(str(int(v)) for v in said) + " mm"
         b.pop("_size_partial", None)
         named = "{} high x {} wide x {} deep mm".format(*(int(v) for v in said))
+        if pdf_pack.has_imperial(text):      # 26 Nov 2026 (Daniella, M&S work in feet): said back in mm, converted for them
+            named += " (converted from your feet and inches)"
         t["reply"] = re.sub(r"\d{2,5}\s*(mm)?\s*[x×]\s*\d{2,5}\s*(mm)?\s*[x×]\s*\d{2,5}\s*(mm)?", named, t.get("reply") or "")
         if not re.search(r"\d{3}", t["reply"]):
             t["reply"] = f"Got it - {named}. " + t["reply"]
         ack = prefix + t["reply"]
     elif not convo.real(b.get("size")) or b.get("_size_partial"):
-        bits = re.findall(r"\d+(?:\.\d+)?\s*(?:mm|cm|m)?\s*(?:high|tall|wide|deep)\b", text or "", re.I)
+        bits = re.findall(r"\d+(?:\.\d+)?\s*(?:mm|cm|m)?\s*(?:high|tall|wide|deep)\b", pdf_pack.imperial_to_mm(text or ""), re.I)
         if bits:   # "600mm wide": half a size - kept, and only the rest is asked for (below)
             b["size"] = " ".join(bits)
     # A size that isn't a unit ("20m x 30m", only two numbers) is not a size: say so and ask, don't draw it
